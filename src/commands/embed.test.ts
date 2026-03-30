@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { embedCommand, EMBED_MODAL_ZGLOSZENIA } from './embed.js';
+import { ADMIN_ROLE_ID } from '../utils/role-access.js';
 
 describe('embedCommand', () => {
     it('powinien otworzyć modal zgłoszeń po wyborze opcji zgloszenia', async () => {
@@ -11,8 +12,8 @@ describe('embedCommand', () => {
         };
 
         const interaction = {
-            memberPermissions: {
-                has: vi.fn().mockReturnValue(true),
+            member: {
+                roles: [ADMIN_ROLE_ID],
             },
             reply: vi.fn().mockResolvedValue({
                 resource: {

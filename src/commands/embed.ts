@@ -4,7 +4,6 @@ import {
     ActionRowBuilder,
     StringSelectMenuBuilder,
     StringSelectMenuInteraction,
-    PermissionFlagsBits,
     ComponentType,
     MessageFlags,
 } from 'discord.js';
@@ -15,6 +14,7 @@ import { buildGiveawayModal, EMBED_MODAL_GIVEAWAY }         from '../embeds/give
 import { buildWelcomeModal, EMBED_MODAL_WELCOME }           from '../embeds/welcome.js';
 import { buildRulebookModal, EMBED_MODAL_RULEBOOK }         from '../embeds/rulebook.js';
 import { buildZgloszeniaModal, EMBED_MODAL_ZGLOSZENIA }     from '../embeds/zgloszenia.js';
+import { ensureSupportRole } from '../utils/role-access.js';
 
 export const EMBED_TYPE_SELECT = 'husaria_embed_type_select';
 
@@ -32,14 +32,10 @@ export const embedCommand = {
     data: new SlashCommandBuilder()
         .setName('embed')
         .setDescription('📝 Stwórz embedded wiadomość')
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+        .setDefaultMemberPermissions(null),
 
     async execute(interaction: ChatInputCommandInteraction) {
-        if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
-            await interaction.reply({
-                content: '🚫 Nie masz uprawnień. Wymagane: **Zarządzanie wiadomościami**.',
-                flags: MessageFlags.Ephemeral,
-            });
+        if (!(await ensureSupportRole(interaction))) {
             return;
         }
 

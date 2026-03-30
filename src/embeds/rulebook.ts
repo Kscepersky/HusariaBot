@@ -11,6 +11,7 @@ import {
 } from 'discord.js';
 import { buildRulebookEmbed } from '../utils/embed-builder.js';
 import { getGuildEmoji } from '../utils/guild-emojis.js';
+import { ensureSupportRole } from '../utils/role-access.js';
 
 export const EMBED_MODAL_RULEBOOK = 'husaria_embed_modal_rulebook';
 const PUBLISH_BTN_ID              = 'husaria_rulebook_publish';
@@ -45,6 +46,10 @@ function resolveRulebookEmoji(guild: ModalSubmitInteraction['guild']): string {
 }
 
 export async function handleRulebookModalSubmit(interaction: ModalSubmitInteraction) {
+    if (!(await ensureSupportRole(interaction))) {
+        return;
+    }
+
     const message = interaction.fields.getTextInputValue(FIELD_MESSAGE).trim();
     const rulesEmoji = resolveRulebookEmoji(interaction.guild);
 

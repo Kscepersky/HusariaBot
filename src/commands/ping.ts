@@ -1,12 +1,18 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
+import { ensureSupportRole } from '../utils/role-access.js';
 
 export const pingCommand = {
     data: new SlashCommandBuilder()
         .setName('ping')
-        .setDescription('🏓 Sprawdź czy bot żyje i jaką ma latencję'),
+        .setDescription('🏓 Sprawdź czy bot żyje i jaką ma latencję')
+        .setDefaultMemberPermissions(null),
 
     async execute(interaction: ChatInputCommandInteraction) {
+        if (!(await ensureSupportRole(interaction))) {
+            return;
+        }
+
         const response = await interaction.reply({
             content: '🏓 Pinguję...',
             withResponse: true,

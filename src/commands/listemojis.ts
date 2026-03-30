@@ -4,13 +4,19 @@ import {
     AttachmentBuilder,
     MessageFlags,
 } from 'discord.js';
+import { ensureSupportRole } from '../utils/role-access.js';
 
 export const listEmojisCommand = {
     data: new SlashCommandBuilder()
         .setName('listemojis')
-        .setDescription('📋 Wypisz wszystkie emotki z serwera'),
+        .setDescription('📋 Wypisz wszystkie emotki z serwera')
+        .setDefaultMemberPermissions(null),
 
     async execute(interaction: ChatInputCommandInteraction) {
+        if (!(await ensureSupportRole(interaction))) {
+            return;
+        }
+
         if (!interaction.inGuild() || !interaction.guild) {
             await interaction.reply({
                 content: '❌ Ta komenda działa tylko na serwerze Discord.',

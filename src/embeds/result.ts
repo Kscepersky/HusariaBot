@@ -14,6 +14,7 @@ import {
 } from 'discord.js';
 import { buildResultEmbed } from '../utils/embed-builder.js';
 import { getGuildEmoji, resolveEmojiForComponent } from '../utils/guild-emojis.js';
+import { ensureSupportRole } from '../utils/role-access.js';
 
 export const EMBED_MODAL_RESULT = 'husaria_embed_modal_wynik';
 const OUTCOME_SELECT_ID         = 'husaria_result_outcome';
@@ -70,6 +71,10 @@ export function buildResultModal(): ModalBuilder {
 }
 
 export async function handleResultModalSubmit(interaction: ModalSubmitInteraction) {
+    if (!(await ensureSupportRole(interaction))) {
+        return;
+    }
+
     const rival       = interaction.fields.getTextInputValue(FIELD_RIVAL).trim();
     const score       = interaction.fields.getTextInputValue(FIELD_SCORE).trim();
     const competition = interaction.fields.getTextInputValue(FIELD_COMPETITION).trim();

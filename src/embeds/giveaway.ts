@@ -11,6 +11,7 @@ import {
     GuildTextBasedChannel,
 } from 'discord.js';
 import { buildGiveawayEmbed } from '../utils/embed-builder.js';
+import { ensureSupportRole } from '../utils/role-access.js';
 
 export const EMBED_MODAL_GIVEAWAY = 'husaria_embed_modal_giveaway';
 const PUBLISH_BTN_ID              = 'husaria_giveaway_publish';
@@ -56,6 +57,10 @@ export function buildGiveawayModal(): ModalBuilder {
 }
 
 export async function handleGiveawayModalSubmit(interaction: ModalSubmitInteraction) {
+    if (!(await ensureSupportRole(interaction))) {
+        return;
+    }
+
     const prize        = interaction.fields.getTextInputValue(FIELD_PRIZE).trim();
     const requirements = interaction.fields.getTextInputValue(FIELD_REQUIREMENTS).trim();
     const endsAt       = parseInt(interaction.fields.getTextInputValue(FIELD_ENDS_AT).trim(), 10);

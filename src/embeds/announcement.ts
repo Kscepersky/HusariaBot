@@ -13,6 +13,7 @@ import {
     GuildTextBasedChannel,
 } from 'discord.js';
 import { buildHusariaEmbed, parseEmbedOptions } from '../utils/embed-builder.js';
+import { ensureSupportRole } from '../utils/role-access.js';
 
 export const EMBED_MODAL_ANNOUNCEMENT = 'husaria_embed_modal_ogloszenie';
 const COLOR_SELECT_ID                 = 'husaria_announcement_color';
@@ -49,6 +50,10 @@ export function buildAnnouncementModal(): ModalBuilder {
 }
 
 export async function handleAnnouncementModalSubmit(interaction: ModalSubmitInteraction) {
+    if (!(await ensureSupportRole(interaction))) {
+        return;
+    }
+
     const title       = interaction.fields.getTextInputValue(FIELD_TITLE).trim();
     const description = interaction.fields.getTextInputValue(FIELD_DESC).trim();
 

@@ -13,6 +13,7 @@ import {
 import { join } from 'node:path';
 import { buildWelcomeEmbed } from '../utils/embed-builder.js';
 import { getGuildEmoji } from '../utils/guild-emojis.js';
+import { ensureSupportRole } from '../utils/role-access.js';
 
 export const EMBED_MODAL_WELCOME = 'husaria_embed_modal_welcome';
 const PUBLISH_BTN_ID             = 'husaria_welcome_publish';
@@ -46,6 +47,10 @@ function buildWelcomeFiles(): AttachmentBuilder[] {
 }
 
 export async function handleWelcomeModalSubmit(interaction: ModalSubmitInteraction) {
+    if (!(await ensureSupportRole(interaction))) {
+        return;
+    }
+
     const message = interaction.fields.getTextInputValue(FIELD_MESSAGE).trim() || 'Wiadmość powitalna';
     const g2Emoji = getGuildEmoji(interaction.guild, 'G2Hussars')
         || getGuildEmoji(interaction.guild, 'g2hussars')

@@ -10,15 +10,77 @@ A Discord bot built with TypeScript and discord.js for server automation, styled
 - Server emoji export command.
 - Image sender command that reads files from the local img folder.
 - Type-safe codebase with TypeScript and Vitest test coverage for embed builders.
+- Ticket system with configurable panel, per-user ticket channels, and persistent ticket numbering.
+- Role-based access control for command execution and modal actions.
 
 ## Available Commands
 
 | Command | Description | Notes |
 | --- | --- | --- |
 | /ping | Checks bot latency and gateway ping. | Basic health check. |
-| /embed | Opens an interactive embed builder. | Requires Manage Messages permission. |
+| /embed | Opens an interactive embed builder. | Executable only by Zarząd and Moderator roles. |
 | /listemojis | Exports all custom server emojis to a text file. | Output format: NAME: '<:name:ID>' (or animated variant). |
-| /sendimg | Sends an image selected from the img folder. | Requires Manage Messages permission. |
+| /sendimg | Sends an image selected from the img folder. | Executable only by Zarząd and Moderator roles. |
+| /ticketyconfig | Publishes the ticket panel in the current channel. | Executable only by Zarząd and Moderator roles. |
+
+## Ticket System
+
+### Configuration flow
+
+1. Run /ticketyconfig.
+2. Fill the modal with the ticket system description.
+3. Bot publishes the ticket panel embed with:
+   - H1 heading in embed body.
+   - Real server emoji (G2Hussars variants with fallback).
+   - Green Otwórz ticket button.
+
+### Ticket creation flow
+
+- Ticket channels are created in category ID 1488290456973606934.
+- Channel naming format:
+  - zgloszenie-username-ticketNumber
+- Ticket numbers are persistent and stored in:
+  - data/ticket-counter.json
+- Access to each ticket channel:
+  - ticket author
+  - Zarząd role (ID: 1240021516196778007)
+  - Moderator role (ID: 1240021807730524242)
+  - bot account
+
+### First ticket message
+
+- Red embed.
+- Greeting text for the ticket author.
+- Mention of Zarząd and Moderator roles inside embed content.
+- In-channel close controls:
+  - only Zamknij Ticket (Administracja), red button.
+
+### User close flow
+
+- User receives a private ephemeral close button after ticket creation.
+- User confirms close in private interaction flow.
+- Bot sends DM to the user with:
+  - server emoji instead of :G2Hussars: text
+  - lowercase word ticket
+  - bold ticket channel name
+  - final period
+- Ticket channel is deleted.
+
+### Admin close flow
+
+- Admin clicks red Zamknij Ticket (Administracja).
+- Admin confirms and submits required close reason in modal.
+- Bot sends DM to ticket author with:
+  - server emoji
+  - bold ticket name
+  - bold close reason
+  - info about which admin closed the ticket
+- Ticket channel is deleted.
+
+### Interaction reliability
+
+- Open-ticket button handling uses deferred interaction reply to avoid timeout issues.
+- Duplicate ticket checks fetch channels from API to reduce cache-only race problems.
 
 ## Embed Templates
 
@@ -46,10 +108,12 @@ The /embed command currently supports:
 src/
   commands/        # Slash commands
   embeds/          # Modal handlers and embed publishing flows
+  tickets/         # Ticket lifecycle, constants, and counter storage
   utils/           # Embed builders, theme, emoji helpers
   index.ts         # Bot runtime entry point
   deploy-commands.ts
 img/               # Static images used by commands/embeds
+data/              # Persistent runtime data (ticket counter)
 ```
 
 ## Setup
@@ -111,6 +175,7 @@ npm start
 - Do not commit your .env file.
 - Do not share your DISCORD_TOKEN.
 - Regenerate token immediately if it is ever exposed.
+- Runtime role checks are enforced in commands, modal handlers, and ticket admin actions.
 
 ## License
 

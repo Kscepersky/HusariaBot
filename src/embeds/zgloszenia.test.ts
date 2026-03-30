@@ -4,6 +4,7 @@ import {
     EMBED_MODAL_ZGLOSZENIA,
     handleZgloszeniaModalSubmit,
 } from './zgloszenia.js';
+import { ADMIN_ROLE_ID } from '../utils/role-access.js';
 
 describe('buildZgloszeniaModal', () => {
     it('powinien ustawić poprawny customId i pole wiadomości', () => {
@@ -31,6 +32,9 @@ describe('handleZgloszeniaModalSubmit', () => {
         };
 
         const interaction = {
+            member: {
+                roles: [ADMIN_ROLE_ID],
+            },
             fields: {
                 getTextInputValue: vi.fn().mockReturnValue('  Treść zgłoszenia  '),
             },
@@ -67,6 +71,9 @@ describe('handleZgloszeniaModalSubmit', () => {
         };
 
         const interaction = {
+            member: {
+                roles: [ADMIN_ROLE_ID],
+            },
             fields: {
                 getTextInputValue: vi.fn().mockReturnValue('Treść zgłoszenia'),
             },
@@ -100,6 +107,9 @@ describe('handleZgloszeniaModalSubmit', () => {
         };
 
         const interaction = {
+            member: {
+                roles: [ADMIN_ROLE_ID],
+            },
             fields: {
                 getTextInputValue: vi.fn().mockReturnValue('Treść zgłoszenia'),
             },
@@ -136,6 +146,9 @@ describe('handleZgloszeniaModalSubmit', () => {
         };
 
         const interaction = {
+            member: {
+                roles: [ADMIN_ROLE_ID],
+            },
             fields: {
                 getTextInputValue: vi.fn().mockReturnValue('Treść zgłoszenia'),
             },
@@ -167,6 +180,9 @@ describe('handleZgloszeniaModalSubmit', () => {
         const editReply = vi.fn().mockResolvedValue(undefined);
 
         const interaction = {
+            member: {
+                roles: [ADMIN_ROLE_ID],
+            },
             fields: {
                 getTextInputValue: vi.fn().mockReturnValue('Treść zgłoszenia'),
             },

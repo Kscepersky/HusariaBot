@@ -4,6 +4,7 @@ import { pingCommand } from './commands/ping.js';
 import { embedCommand } from './commands/embed.js';
 import { listEmojisCommand } from './commands/listemojis.js';
 import { sendImgCommand } from './commands/sendimg.js';
+import { ticketyConfigCommand } from './commands/ticketyconfig.js';
 
 config();
 
@@ -17,6 +18,7 @@ const commands = [
     listEmojisCommand.data.toJSON(),
     sendImgCommand.data.toJSON(),
     embedCommand.data.toJSON(),
+    ticketyConfigCommand.data.toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(token);

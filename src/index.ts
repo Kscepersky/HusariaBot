@@ -3,6 +3,7 @@ import { config } from 'dotenv';
 import { pingCommand } from './commands/ping.js';
 import { listEmojisCommand } from './commands/listemojis.js';
 import { sendImgCommand } from './commands/sendimg.js';
+import { ticketyConfigCommand } from './commands/ticketyconfig.js';
 import {
     embedCommand,
     EMBED_MODAL_MATCH,
@@ -20,6 +21,34 @@ import { handleGiveawayModalSubmit }     from './embeds/giveaway.js';
 import { handleWelcomeModalSubmit }      from './embeds/welcome.js';
 import { handleRulebookModalSubmit }     from './embeds/rulebook.js';
 import { handleZgloszeniaModalSubmit }   from './embeds/zgloszenia.js';
+import {
+    handleAdminCloseReasonModalSubmit,
+    handleAdminCloseTicketButton,
+    handleAdminCloseTicketCancel,
+    handleAdminCloseTicketConfirm,
+    handleOpenTicketButton,
+    handleTicketsConfigModalSubmit,
+    handleUserCloseTicketButton,
+    handleUserCloseTicketDmButton,
+    handleUserCloseTicketDmCancel,
+    handleUserCloseTicketDmConfirm,
+    handleUserCloseTicketCancel,
+    handleUserCloseTicketConfirm,
+} from './tickets/flow.js';
+import {
+    TICKET_CLOSE_ADMIN_BUTTON_ID,
+    TICKET_CLOSE_ADMIN_CANCEL_ID,
+    TICKET_CLOSE_ADMIN_CONFIRM_ID,
+    TICKET_CLOSE_ADMIN_REASON_MODAL_ID,
+    TICKET_CLOSE_USER_BUTTON_ID,
+    TICKET_CLOSE_USER_CANCEL_ID,
+    TICKET_CLOSE_USER_CONFIRM_ID,
+    TICKET_CLOSE_USER_DM_BUTTON_PREFIX,
+    TICKET_CLOSE_USER_DM_CANCEL_PREFIX,
+    TICKET_CLOSE_USER_DM_CONFIRM_PREFIX,
+    TICKETS_CONFIG_MODAL_ID,
+    TICKETS_OPEN_BUTTON_ID,
+} from './tickets/constants.js';
 
 // Załaduj zmienne środowiskowe z .env
 config();
@@ -42,6 +71,7 @@ client.commands.set(pingCommand.data.name, pingCommand);
 client.commands.set(listEmojisCommand.data.name, listEmojisCommand);
 client.commands.set(sendImgCommand.data.name, sendImgCommand);
 client.commands.set(embedCommand.data.name, embedCommand);
+client.commands.set(ticketyConfigCommand.data.name, ticketyConfigCommand);
 
 // Event: Bot jest gotowy
 client.on('clientReady', () => {
@@ -50,6 +80,28 @@ client.on('clientReady', () => {
     console.log(`📡  Serwery: ${client.guilds.cache.size}`);
     console.log('──────────────────────────────────────');
 });
+
+async function safelyReplyInteractionError<T extends {
+    replied: boolean;
+    deferred: boolean;
+    reply: (options: any) => Promise<unknown>;
+    followUp: (options: any) => Promise<unknown>;
+}>(interaction: T, content: string): Promise<void> {
+    const payload = { content, flags: 64 };
+
+    try {
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp(payload);
+        } else {
+            await interaction.reply(payload);
+        }
+    } catch (err) {
+        const errorCode = (err as { code?: number })?.code;
+        if (errorCode !== 10062) {
+            console.error('❌  Nie udało się wysłać odpowiedzi błędu interakcji:', err);
+        }
+    }
+}
 
 // Event: Obsługa interakcji
 client.on('interactionCreate', async (interaction) => {
@@ -94,9 +146,44 @@ client.on('interactionCreate', async (interaction) => {
                 await handleRulebookModalSubmit(interaction);
             } else if (interaction.customId === EMBED_MODAL_ZGLOSZENIA) {
                 await handleZgloszeniaModalSubmit(interaction);
+            } else if (interaction.customId === TICKETS_CONFIG_MODAL_ID) {
+                await handleTicketsConfigModalSubmit(interaction);
+            } else if (interaction.customId === TICKET_CLOSE_ADMIN_REASON_MODAL_ID) {
+                await handleAdminCloseReasonModalSubmit(interaction);
             }
         } catch (error) {
             console.error('❌  Błąd w modal submit:', error);
+            await safelyReplyInteractionError(interaction, '❌ Wystąpił błąd podczas obsługi formularza.');
+        }
+        return;
+    }
+
+    if (interaction.isButton()) {
+        try {
+            if (interaction.customId === TICKETS_OPEN_BUTTON_ID) {
+                await handleOpenTicketButton(interaction);
+            } else if (interaction.customId.startsWith(`${TICKET_CLOSE_USER_DM_BUTTON_PREFIX}:`)) {
+                await handleUserCloseTicketDmButton(interaction);
+            } else if (interaction.customId.startsWith(`${TICKET_CLOSE_USER_DM_CONFIRM_PREFIX}:`)) {
+                await handleUserCloseTicketDmConfirm(interaction);
+            } else if (interaction.customId.startsWith(`${TICKET_CLOSE_USER_DM_CANCEL_PREFIX}:`)) {
+                await handleUserCloseTicketDmCancel(interaction);
+            } else if (interaction.customId === TICKET_CLOSE_USER_BUTTON_ID) {
+                await handleUserCloseTicketButton(interaction);
+            } else if (interaction.customId === TICKET_CLOSE_USER_CONFIRM_ID) {
+                await handleUserCloseTicketConfirm(interaction);
+            } else if (interaction.customId === TICKET_CLOSE_USER_CANCEL_ID) {
+                await handleUserCloseTicketCancel(interaction);
+            } else if (interaction.customId === TICKET_CLOSE_ADMIN_BUTTON_ID) {
+                await handleAdminCloseTicketButton(interaction);
+            } else if (interaction.customId === TICKET_CLOSE_ADMIN_CONFIRM_ID) {
+                await handleAdminCloseTicketConfirm(interaction);
+            } else if (interaction.customId === TICKET_CLOSE_ADMIN_CANCEL_ID) {
+                await handleAdminCloseTicketCancel(interaction);
+            }
+        } catch (error) {
+            console.error('❌  Błąd w obsłudze przycisku:', error);
+            await safelyReplyInteractionError(interaction, '❌ Wystąpił błąd podczas obsługi przycisku.');
         }
         return;
     }

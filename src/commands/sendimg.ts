@@ -3,10 +3,10 @@ import {
     ChatInputCommandInteraction,
     AttachmentBuilder,
     MessageFlags,
-    PermissionFlagsBits,
 } from 'discord.js';
 import { readdirSync, existsSync } from 'node:fs';
 import { extname, join, basename } from 'node:path';
+import { ensureSupportRole } from '../utils/role-access.js';
 
 const IMG_DIR = join(__dirname, '..', '..', 'img');
 const SUPPORTED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
@@ -26,7 +26,7 @@ const imageFileNames = getImageFileNames();
 const builder = new SlashCommandBuilder()
     .setName('sendimg')
     .setDescription('🖼️ Wyślij wybrany obraz z folderu img na kanał')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+    .setDefaultMemberPermissions(null)
     .addStringOption((option) => {
         option
             .setName('plik')
@@ -44,11 +44,7 @@ export const sendImgCommand = {
     data: builder,
 
     async execute(interaction: ChatInputCommandInteraction) {
-        if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
-            await interaction.reply({
-                content: '🚫 Nie masz uprawnień. Wymagane: **Zarządzanie wiadomościami**.',
-                flags: MessageFlags.Ephemeral,
-            });
+        if (!(await ensureSupportRole(interaction))) {
             return;
         }
 

@@ -14,6 +14,7 @@ import {
 } from 'discord.js';
 import { buildMatchEmbed } from '../utils/embed-builder.js';
 import { getGuildEmoji, resolveEmojiForComponent } from '../utils/guild-emojis.js';
+import { ensureSupportRole } from '../utils/role-access.js';
 
 
 export const EMBED_MODAL_MATCH  = 'husaria_embed_modal_mecz';
@@ -71,6 +72,10 @@ export function buildMatchModal(): ModalBuilder {
 }
 
 export async function handleMatchModalSubmit(interaction: ModalSubmitInteraction) {
+    if (!(await ensureSupportRole(interaction))) {
+        return;
+    }
+
     const rival       = interaction.fields.getTextInputValue(FIELD_RIVAL).trim();
     const competition = interaction.fields.getTextInputValue(FIELD_COMPETITION).trim();
     const timestamp   = parseInt(interaction.fields.getTextInputValue(FIELD_DATE).trim(), 10);
