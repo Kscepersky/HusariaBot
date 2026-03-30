@@ -36,15 +36,15 @@ A Discord bot built with TypeScript and discord.js for server automation, styled
 
 ### Ticket creation flow
 
-- Ticket channels are created in category ID 1488290456973606934.
+- Ticket channels are created in category.
 - Channel naming format:
   - zgloszenie-username-ticketNumber
 - Ticket numbers are persistent and stored in:
   - data/ticket-counter.json
 - Access to each ticket channel:
   - ticket author
-  - Zarząd role (ID: 1240021516196778007)
-  - Moderator role (ID: 1240021807730524242)
+  - Zarząd role
+  - Moderator role
   - bot account
 
 ### First ticket message
