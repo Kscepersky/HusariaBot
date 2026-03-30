@@ -14,6 +14,7 @@ import { buildAnnouncementModal, EMBED_MODAL_ANNOUNCEMENT } from '../embeds/anno
 import { buildGiveawayModal, EMBED_MODAL_GIVEAWAY }         from '../embeds/giveaway.js';
 import { buildWelcomeModal, EMBED_MODAL_WELCOME }           from '../embeds/welcome.js';
 import { buildRulebookModal, EMBED_MODAL_RULEBOOK }         from '../embeds/rulebook.js';
+import { buildZgloszeniaModal, EMBED_MODAL_ZGLOSZENIA }     from '../embeds/zgloszenia.js';
 
 export const EMBED_TYPE_SELECT = 'husaria_embed_type_select';
 
@@ -24,6 +25,7 @@ export {
     EMBED_MODAL_GIVEAWAY,
     EMBED_MODAL_WELCOME,
     EMBED_MODAL_RULEBOOK,
+    EMBED_MODAL_ZGLOSZENIA,
 };
 
 export const embedCommand = {
@@ -51,6 +53,7 @@ export const embedCommand = {
                 { label: '🎁 Giveaway',    value: 'giveaway',    description: 'Konkurs z nagrodami' },
                 { label: '👋 Powitanie',   value: 'welcome',     description: 'Powitanie nowych Husarzy' },
                 { label: '📜 Regulamin',   value: 'regulamin',   description: 'Regulamin serwera (PL/EN)' },
+                { label: '📋 Zgłoszenia',  value: 'zgloszenia',  description: 'System zgłoszeń i raportów' },
             );
 
         const reply = await interaction.reply({
@@ -78,6 +81,8 @@ export const embedCommand = {
                 await typeInteraction.showModal(buildWelcomeModal());
             } else if (type === 'regulamin') {
                 await typeInteraction.showModal(buildRulebookModal());
+            } else if (type === 'zgloszenia') {
+                await typeInteraction.showModal(buildZgloszeniaModal());
             } else {
                 await typeInteraction.showModal(buildAnnouncementModal());
             }

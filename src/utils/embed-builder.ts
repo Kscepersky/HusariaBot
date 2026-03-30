@@ -165,3 +165,20 @@ export function buildRulebookEmbed(data: RulebookEmbedData): EmbedBuilder {
         .setColor(HusariaColors.RED)
         .setDescription(`# **${titleLine}**\n${data.message}`);
 }
+
+// ─── Zgloszenia ─────────────────────────────────────────────────────────────
+
+export interface ZgloszeniaEmbedData {
+    reportsEmoji: string;
+    message: string;
+}
+
+export function buildZgloszeniaEmbed(data: ZgloszeniaEmbedData): EmbedBuilder {
+    const titleLine = [data.reportsEmoji, 'Zgłoszenia']
+        .filter(Boolean)
+        .join(' ');
+
+    return new EmbedBuilder()
+        .setColor(HusariaColors.RED)
+        .setDescription(`# **${titleLine}**\n${data.message}`);
+}

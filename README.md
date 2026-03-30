@@ -30,6 +30,7 @@ The /embed command currently supports:
 - Giveaway
 - Welcome message
 - Server rulebook
+- Zgłoszenia
 
 ## Tech Stack
 

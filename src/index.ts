@@ -11,6 +11,7 @@ import {
     EMBED_MODAL_GIVEAWAY,
     EMBED_MODAL_WELCOME,
     EMBED_MODAL_RULEBOOK,
+    EMBED_MODAL_ZGLOSZENIA,
 } from './commands/embed.js';
 import { handleMatchModalSubmit }        from './embeds/match.js';
 import { handleResultModalSubmit }       from './embeds/result.js';
@@ -18,6 +19,7 @@ import { handleAnnouncementModalSubmit } from './embeds/announcement.js';
 import { handleGiveawayModalSubmit }     from './embeds/giveaway.js';
 import { handleWelcomeModalSubmit }      from './embeds/welcome.js';
 import { handleRulebookModalSubmit }     from './embeds/rulebook.js';
+import { handleZgloszeniaModalSubmit }   from './embeds/zgloszenia.js';
 
 // Załaduj zmienne środowiskowe z .env
 config();
@@ -90,6 +92,8 @@ client.on('interactionCreate', async (interaction) => {
                 await handleWelcomeModalSubmit(interaction);
             } else if (interaction.customId === EMBED_MODAL_RULEBOOK) {
                 await handleRulebookModalSubmit(interaction);
+            } else if (interaction.customId === EMBED_MODAL_ZGLOSZENIA) {
+                await handleZgloszeniaModalSubmit(interaction);
             }
         } catch (error) {
             console.error('❌  Błąd w modal submit:', error);

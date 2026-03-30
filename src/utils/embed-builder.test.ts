@@ -7,6 +7,7 @@ import {
     buildMatchEmbed,
     buildResultEmbed,
     buildRulebookEmbed,
+    buildZgloszeniaEmbed,
     EmbedOptions,
 } from './embed-builder.js';
 import { HusariaColors } from './husaria-theme.js';
@@ -260,7 +261,7 @@ describe('buildRulebookEmbed', () => {
         });
         const json = embed.toJSON();
 
-        expect(json.description).toContain('📜 Regulamin Serwera G2 Hussars');
+        expect(json.description).toContain('📜 Regulamin serwera G2 Hussars');
     });
 
     it('powinien zawierać treść regulaminu', () => {
@@ -288,6 +289,39 @@ describe('buildRulebookEmbed', () => {
     it('nie powinien mieć stopki ani timestamp', () => {
         const embed = buildRulebookEmbed({
             rulesEmoji: '📜',
+            message: 'Treść',
+        });
+        const json = embed.toJSON();
+
+        expect(json.footer).toBeUndefined();
+        expect(json.timestamp).toBeUndefined();
+    });
+});
+
+describe('buildZgloszeniaEmbed', () => {
+    it('powinien zawierać tytuł zgłoszeń z emoji', () => {
+        const embed = buildZgloszeniaEmbed({
+            reportsEmoji: '📋',
+            message: 'Wypełnij formularz i opisz zgłoszenie',
+        });
+        const json = embed.toJSON();
+
+        expect(json.description).toContain('📋 Zgłoszenia');
+    });
+
+    it('powinien zawierać treść zgłoszenia', () => {
+        const embed = buildZgloszeniaEmbed({
+            reportsEmoji: '📋',
+            message: 'Wypełnij formularz i opisz zgłoszenie',
+        });
+        const json = embed.toJSON();
+
+        expect(json.description).toContain('Wypełnij formularz i opisz zgłoszenie');
+    });
+
+    it('nie powinien mieć stopki ani timestamp', () => {
+        const embed = buildZgloszeniaEmbed({
+            reportsEmoji: '📋',
             message: 'Treść',
         });
         const json = embed.toJSON();
