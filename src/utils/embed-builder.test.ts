@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { buildHusariaEmbed, parseEmbedOptions, buildGiveawayEmbed, EmbedOptions } from './embed-builder.js';
+import {
+    buildHusariaEmbed,
+    parseEmbedOptions,
+    buildGiveawayEmbed,
+    buildWelcomeEmbed,
+    buildMatchEmbed,
+    buildResultEmbed,
+    buildRulebookEmbed,
+    EmbedOptions,
+} from './embed-builder.js';
 import { HusariaColors } from './husaria-theme.js';
 
 describe('parseEmbedOptions', () => {
@@ -100,7 +109,7 @@ describe('buildHusariaEmbed', () => {
         expect(json.color).toBe(HusariaColors.GOLD);
     });
 
-    it('powinien mieć footer "G2 Hussars"', () => {
+    it('nie powinien mieć stopki', () => {
         const options: EmbedOptions = {
             title: 'Test',
             description: 'Opis',
@@ -110,10 +119,10 @@ describe('buildHusariaEmbed', () => {
         const embed = buildHusariaEmbed(options);
         const json = embed.toJSON();
 
-        expect(json.footer?.text).toBe('G2 Hussars');
+        expect(json.footer).toBeUndefined();
     });
 
-    it('powinien mieć ustawiony timestamp', () => {
+    it('nie powinien mieć timestamp', () => {
         const options: EmbedOptions = {
             title: 'Test',
             description: 'Opis',
@@ -123,7 +132,7 @@ describe('buildHusariaEmbed', () => {
         const embed = buildHusariaEmbed(options);
         const json = embed.toJSON();
 
-        expect(json.timestamp).toBeDefined();
+        expect(json.timestamp).toBeUndefined();
     });
 });
 
@@ -151,11 +160,139 @@ describe('buildGiveawayEmbed', () => {
         expect(field?.value).toContain('<t:1743861600:R>');
     });
 
-    it('powinien mieć kolor GOLD i footer G2 Hussars', () => {
+    it('powinien mieć kolor GOLD i brak stopki', () => {
         const embed = buildGiveawayEmbed({ prize: 'Nagroda', requirements: 'Wymagania', endsAt: 1743861600 });
         const json  = embed.toJSON();
 
         expect(json.color).toBe(HusariaColors.GOLD);
-        expect(json.footer?.text).toBe('G2 Hussars');
+        expect(json.footer).toBeUndefined();
+        expect(json.timestamp).toBeUndefined();
+    });
+});
+
+describe('buildMatchEmbed', () => {
+    it('nie powinien mieć stopki ani timestamp', () => {
+        const embed = buildMatchEmbed({
+            g2Emoji: '<:g2:123>',
+            gameEmoji: '<:lol:321>',
+            gameName: 'League of Legends',
+            rival: 'T1',
+            competition: 'MSI',
+            timestamp: 1743861600,
+        });
+        const json = embed.toJSON();
+
+        expect(json.footer).toBeUndefined();
+        expect(json.timestamp).toBeUndefined();
+    });
+});
+
+describe('buildResultEmbed', () => {
+    it('nie powinien mieć stopki ani timestamp', () => {
+        const embed = buildResultEmbed({
+            gameEmoji: '<:lol:321>',
+            gameName: 'League of Legends',
+            rival: 'T1',
+            score: '2:1',
+            competition: 'MSI',
+            isWin: true,
+        });
+        const json = embed.toJSON();
+
+        expect(json.footer).toBeUndefined();
+        expect(json.timestamp).toBeUndefined();
+    });
+});
+
+describe('buildWelcomeEmbed', () => {
+    it('powinien zawierać tytuł powitalny z emoji', () => {
+        const embed = buildWelcomeEmbed({
+            g2Emoji: '<:g2:1234567890>',
+            message: 'Wiadmość powitalna',
+            memberCount: 321,
+        });
+        const json = embed.toJSON();
+
+        expect(json.description).toContain('# **<:g2:1234567890> Witaj na Husarii!**');
+    });
+
+    it('powinien zawierać treść wiadomości powitalnej', () => {
+        const embed = buildWelcomeEmbed({
+            g2Emoji: '',
+            message: 'Wiadmość powitalna',
+            memberCount: 321,
+        });
+        const json = embed.toJSON();
+
+        expect(json.description).toContain('Wiadmość powitalna');
+    });
+
+    it('powinien mieć pole Liczba Husarzy', () => {
+        const embed = buildWelcomeEmbed({
+            g2Emoji: '',
+            message: 'Wiadmość powitalna',
+            memberCount: 321,
+        });
+        const json = embed.toJSON();
+
+        const field = json.fields?.find(f => f.name === 'Liczba Husarzy');
+        expect(field?.value).toContain('321');
+    });
+
+    it('powinien ustawić tylko banner jako attachment://', () => {
+        const embed = buildWelcomeEmbed({
+            g2Emoji: '',
+            message: 'Wiadmość powitalna',
+            memberCount: 321,
+        });
+        const json = embed.toJSON();
+
+        expect(json.thumbnail).toBeUndefined();
+        expect(json.image?.url).toBe('attachment://hussars_banner.png');
+    });
+});
+
+describe('buildRulebookEmbed', () => {
+    it('powinien zawierać tytuł regulaminu z emoji', () => {
+        const embed = buildRulebookEmbed({
+            rulesEmoji: '📜',
+            message: '1. Szanuj innych\n2. No toxicity',
+        });
+        const json = embed.toJSON();
+
+        expect(json.description).toContain('📜 Regulamin Serwera G2 Hussars');
+    });
+
+    it('powinien zawierać treść regulaminu', () => {
+        const embed = buildRulebookEmbed({
+            rulesEmoji: '📜',
+            message: '1. Szanuj innych\n2. No toxicity',
+        });
+        const json = embed.toJSON();
+
+        expect(json.description).toContain('1. Szanuj innych');
+        expect(json.description).toContain('2. No toxicity');
+    });
+
+    it('nie powinien mieć żadnych grafik', () => {
+        const embed = buildRulebookEmbed({
+            rulesEmoji: '📜',
+            message: 'Treść',
+        });
+        const json = embed.toJSON();
+
+        expect(json.thumbnail).toBeUndefined();
+        expect(json.image).toBeUndefined();
+    });
+
+    it('nie powinien mieć stopki ani timestamp', () => {
+        const embed = buildRulebookEmbed({
+            rulesEmoji: '📜',
+            message: 'Treść',
+        });
+        const json = embed.toJSON();
+
+        expect(json.footer).toBeUndefined();
+        expect(json.timestamp).toBeUndefined();
     });
 });

@@ -22,9 +22,7 @@ export const pingCommand = {
             .addFields(
                 { name: '⏱️ Round-trip', value: `\`${roundtrip}ms\``, inline: true },
                 { name: '💓 WebSocket', value: `\`${wsLatency}ms\``, inline: true },
-            )
-            .setFooter({ text: 'HusariaBot' })
-            .setTimestamp();
+            );
 
         await interaction.editReply({ content: '', embeds: [embed] });
     },

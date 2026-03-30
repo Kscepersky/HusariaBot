@@ -1,11 +1,23 @@
 import { Client, GatewayIntentBits, Collection } from 'discord.js';
 import { config } from 'dotenv';
 import { pingCommand } from './commands/ping.js';
-import { embedCommand, EMBED_MODAL_MATCH, EMBED_MODAL_RESULT, EMBED_MODAL_ANNOUNCEMENT, EMBED_MODAL_GIVEAWAY } from './commands/embed.js';
+import { listEmojisCommand } from './commands/listemojis.js';
+import { sendImgCommand } from './commands/sendimg.js';
+import {
+    embedCommand,
+    EMBED_MODAL_MATCH,
+    EMBED_MODAL_RESULT,
+    EMBED_MODAL_ANNOUNCEMENT,
+    EMBED_MODAL_GIVEAWAY,
+    EMBED_MODAL_WELCOME,
+    EMBED_MODAL_RULEBOOK,
+} from './commands/embed.js';
 import { handleMatchModalSubmit }        from './embeds/match.js';
 import { handleResultModalSubmit }       from './embeds/result.js';
 import { handleAnnouncementModalSubmit } from './embeds/announcement.js';
 import { handleGiveawayModalSubmit }     from './embeds/giveaway.js';
+import { handleWelcomeModalSubmit }      from './embeds/welcome.js';
+import { handleRulebookModalSubmit }     from './embeds/rulebook.js';
 
 // Załaduj zmienne środowiskowe z .env
 config();
@@ -25,6 +37,8 @@ const client = new Client({
 // Zarejestruj komendy w kolekcji
 client.commands = new Collection();
 client.commands.set(pingCommand.data.name, pingCommand);
+client.commands.set(listEmojisCommand.data.name, listEmojisCommand);
+client.commands.set(sendImgCommand.data.name, sendImgCommand);
 client.commands.set(embedCommand.data.name, embedCommand);
 
 // Event: Bot jest gotowy
@@ -72,6 +86,10 @@ client.on('interactionCreate', async (interaction) => {
                 await handleAnnouncementModalSubmit(interaction);
             } else if (interaction.customId === EMBED_MODAL_GIVEAWAY) {
                 await handleGiveawayModalSubmit(interaction);
+            } else if (interaction.customId === EMBED_MODAL_WELCOME) {
+                await handleWelcomeModalSubmit(interaction);
+            } else if (interaction.customId === EMBED_MODAL_RULEBOOK) {
+                await handleRulebookModalSubmit(interaction);
             }
         } catch (error) {
             console.error('❌  Błąd w modal submit:', error);

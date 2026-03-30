@@ -44,9 +44,7 @@ export function buildHusariaEmbed(options: EmbedOptions): EmbedBuilder {
 
     return new EmbedBuilder()
         .setColor(options.color)
-        .setDescription(fullDescription)
-        .setFooter({ text: 'G2 Hussars' })
-        .setTimestamp();
+    .setDescription(fullDescription);
 }
 
 // ─── Match (Mecz) ────────────────────────────────────────────────────────────
@@ -72,9 +70,7 @@ export function buildMatchEmbed(data: MatchEmbedData): EmbedBuilder {
             { name: '🏆 Rozgrywki', value: data.competition,                              inline: true  },
             { name: '🎮 Gra',       value: gameValue,                                     inline: true  },
             { name: '📅 Kiedy',     value: `<t:${data.timestamp}:F> (<t:${data.timestamp}:R>)`, inline: false },
-        )
-        .setFooter({ text: 'G2 Hussars' })
-        .setTimestamp();
+        );
 
     if (data.stream) {
         embed.addFields({ name: '📺 Oglądaj live', value: data.stream, inline: false });
@@ -108,9 +104,7 @@ export function buildResultEmbed(data: ResultEmbedData): EmbedBuilder {
             { name: '📊 Wynik',     value: data.score,       inline: true },
             { name: '🏆 Rozgrywki', value: data.competition, inline: true },
             { name: '🎮 Gra',       value: gameValue,        inline: true },
-        )
-        .setFooter({ text: 'G2 Hussars' })
-        .setTimestamp();
+        );
 
     if (data.comment) {
         embed.addFields({ name: '💬 Komentarz', value: data.comment, inline: false });
@@ -134,7 +128,40 @@ export function buildGiveawayEmbed(data: GiveawayEmbedData): EmbedBuilder {
         .addFields(
             { name: '📋 Wymagania', value: data.requirements,                                        inline: false },
             { name: '⏰ Koniec',    value: `<t:${data.endsAt}:F> (<t:${data.endsAt}:R>)`, inline: false },
-        )
-        .setFooter({ text: 'G2 Hussars' })
-        .setTimestamp();
+        );
+}
+
+// ─── Welcome ──────────────────────────────────────────────────────────────────
+
+export interface WelcomeEmbedData {
+    g2Emoji: string;
+    message: string;
+    memberCount: number;
+}
+
+export function buildWelcomeEmbed(data: WelcomeEmbedData): EmbedBuilder {
+    const titleLine = [data.g2Emoji, 'Witaj na Husarii!'].filter(Boolean).join(' ');
+
+    return new EmbedBuilder()
+        .setColor(HusariaColors.RED)
+        .setDescription(`# **${titleLine}**\n${data.message}`)
+        .addFields({ name: 'Liczba Husarzy', value: `**${data.memberCount}**`, inline: false })
+        .setImage('attachment://hussars_banner.png');
+}
+
+// ─── Rulebook (Regulamin) ───────────────────────────────────────────────────
+
+export interface RulebookEmbedData {
+    rulesEmoji: string;
+    message: string;
+}
+
+export function buildRulebookEmbed(data: RulebookEmbedData): EmbedBuilder {
+    const titleLine = [data.rulesEmoji, 'Regulamin serwera G2 Hussars']
+        .filter(Boolean)
+        .join(' ');
+
+    return new EmbedBuilder()
+        .setColor(HusariaColors.RED)
+        .setDescription(`# **${titleLine}**\n${data.message}`);
 }
