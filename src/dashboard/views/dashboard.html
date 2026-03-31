@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HusariaBot Dashboard</title>
+  <link rel="stylesheet" href="/public/css/style.css">
+</head>
+<body>
+
+<!-- ── NAVBAR ─────────────────────────────────────────────────────────── -->
+<nav class="navbar">
+  <div class="navbar-brand">
+    <img src="/img/hussars_logo_80x80.png" class="navbar-logo" alt="HusariaBot">
+    <span class="navbar-title">HusariaBot</span>
+    <span class="navbar-subtitle">Dashboard</span>
+  </div>
+  <div class="navbar-user" id="navbar-user">
+    <div class="user-skeleton"></div>
+  </div>
+</nav>
+
+<!-- ── MAIN ───────────────────────────────────────────────────────────── -->
+<main class="main">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <nav class="sidebar-nav">
+      <a href="#" class="sidebar-item active" data-section="embed-creator">
+        <span class="sidebar-icon">🎨</span>
+        <span>Kreator Embeda</span>
+      </a>
+      <a href="#" class="sidebar-item" data-section="image-sender">
+        <span class="sidebar-icon">🖼️</span>
+        <span>Wyślij obraz</span>
+      </a>
+      <a href="#" class="sidebar-item disabled" title="Wkrótce">
+        <span class="sidebar-icon">🎟️</span>
+        <span>Tickety</span>
+        <span class="badge-soon">wkrótce</span>
+      </a>
+      <a href="#" class="sidebar-item disabled" title="Wkrótce">
+        <span class="sidebar-icon">📊</span>
+        <span>Statystyki</span>
+        <span class="badge-soon">wkrótce</span>
+      </a>
+    </nav>
+  </aside>
+
+  <!-- Content -->
+  <section class="content">
+
+    <!-- ── EMBED CREATOR ──────────────────────────────────────────────── -->
+    <div id="section-embed-creator" class="section-panel">
+
+      <div class="section-header">
+        <h2>🎨 Kreator Embeda</h2>
+        <p>Stwórz i wyślij embed bezpośrednio na wybrany kanał Discord. Obsługuje formatowanie Markdown.</p>
+      </div>
+
+      <div class="creator-grid">
+
+        <!-- LEFT: Form -->
+        <div class="creator-form-card">
+
+          <!-- Type Selector -->
+          <div class="form-group">
+            <label class="form-label">Typ embeda</label>
+            <div class="type-tabs" id="type-tabs"></div>
+          </div>
+
+          <!-- Dynamic Fields -->
+          <div id="dynamic-fields"></div>
+
+          <!-- Channel Selector -->
+          <div class="form-group">
+            <label class="form-label" for="channel-select">📡 Kanał docelowy</label>
+            <div class="select-wrapper">
+              <select id="channel-select" class="form-select">
+                <option value="">Ładowanie kanałów...</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Submit -->
+          <button id="send-btn" class="btn-primary" disabled>
+            <span class="btn-icon">📤</span>
+            <span id="send-btn-text">Wyślij embed</span>
+          </button>
+
+        </div>
+
+        <!-- RIGHT: Preview -->
+        <div class="creator-preview-card">
+          <div class="preview-header">
+            <span>👁️ Podgląd</span>
+            <span class="preview-note">wygląd przybliżony</span>
+          </div>
+          <div class="discord-mockup">
+            <div class="discord-message">
+              <div class="discord-avatar"><img src="/img/hussars_logo_80x80.png" alt="HusariaBot"></div>
+              <div class="discord-msg-content">
+                <span class="discord-bot-name">HusariaBot <span class="bot-badge">BOT</span></span>
+                <div class="discord-embed" id="embed-preview">
+                  <div class="embed-color-bar" id="embed-color-bar"></div>
+                  <div class="embed-body">
+                    <div class="embed-description" id="preview-description">
+                      Wypełnij formularz, aby zobaczyć podgląd embeda.
+                    </div>
+                    <div class="embed-fields" id="preview-fields"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /.creator-grid -->
+    </div><!-- /#section-embed-creator -->
+
+    <!-- ── IMAGE SENDER ───────────────────────────────────────────────── -->
+    <div id="section-image-sender" class="section-panel" style="display:none">
+
+      <div class="section-header">
+        <h2>🖼️ Wyślij obraz</h2>
+        <p>Wybierz obraz z biblioteki i wyślij go na wybrany kanał Discord.</p>
+      </div>
+
+      <div class="img-sender-grid">
+
+        <!-- Image grid -->
+        <div class="creator-form-card">
+          <div class="form-group">
+            <label class="form-label">Dostępne obrazy</label>
+            <div id="image-grid" class="image-grid"></div>
+          </div>
+
+          <!-- Channel Selector -->
+          <div class="form-group">
+            <label class="form-label" for="img-channel-select">📡 Kanał docelowy</label>
+            <div class="select-wrapper">
+              <select id="img-channel-select" class="form-select">
+                <option value="">Ładowanie kanałów...</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Submit -->
+          <button id="img-send-btn" class="btn-primary" disabled>
+            <span class="btn-icon">📤</span>
+            <span id="img-send-btn-text">Wyślij obraz</span>
+          </button>
+        </div>
+
+      </div>
+    </div><!-- /#section-image-sender -->
+
+  </section><!-- /.content -->
+
+</main>
+
+<!-- ── TOAST ──────────────────────────────────────────────────────────── -->
+<div id="toast-container"></div>
+
+<script src="/public/js/app.js"></script>
+</body>
+</html>

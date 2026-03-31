@@ -1,4 +1,16 @@
-export const SUPPORT_CATEGORY_ID = '1488290456973606934';
+import { config } from 'dotenv';
+
+config();
+
+function requireEnv(name: string): string {
+    const value = process.env[name];
+    if (!value) {
+        throw new Error(`Brakująca zmienna środowiskowa: ${name}`);
+    }
+    return value;
+}
+
+export const SUPPORT_CATEGORY_ID = requireEnv('SUPPORT_CATEGORY_ID');
 
 export const TICKETS_CONFIG_MODAL_ID = 'husaria_tickets_config_modal';
 export const TICKETS_CONFIG_DESCRIPTION_FIELD = 'tickets_config_description';

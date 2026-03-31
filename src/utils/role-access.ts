@@ -1,3 +1,4 @@
+import { config } from 'dotenv';
 import {
     BaseInteraction,
     ButtonInteraction,
@@ -6,8 +7,18 @@ import {
     ModalSubmitInteraction,
 } from 'discord.js';
 
-export const ADMIN_ROLE_ID = '1240021516196778007';
-export const MODERATOR_ROLE_ID = '1240021807730524242';
+config();
+
+function requireEnv(name: string): string {
+    const value = process.env[name];
+    if (!value) {
+        throw new Error(`Brakująca zmienna środowiskowa: ${name}`);
+    }
+    return value;
+}
+
+export const ADMIN_ROLE_ID = requireEnv('ADMIN_ROLE_ID');
+export const MODERATOR_ROLE_ID = requireEnv('MODERATOR_ROLE_ID');
 export const SUPPORT_ROLE_IDS = [ADMIN_ROLE_ID, MODERATOR_ROLE_ID] as const;
 
 export const SUPPORT_ACCESS_DENIED_MESSAGE =

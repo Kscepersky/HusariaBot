@@ -6,18 +6,12 @@ import { sendImgCommand } from './commands/sendimg.js';
 import { ticketyConfigCommand } from './commands/ticketyconfig.js';
 import {
     embedCommand,
-    EMBED_MODAL_MATCH,
-    EMBED_MODAL_RESULT,
     EMBED_MODAL_ANNOUNCEMENT,
-    EMBED_MODAL_GIVEAWAY,
     EMBED_MODAL_WELCOME,
     EMBED_MODAL_RULEBOOK,
     EMBED_MODAL_ZGLOSZENIA,
 } from './commands/embed.js';
-import { handleMatchModalSubmit }        from './embeds/match.js';
-import { handleResultModalSubmit }       from './embeds/result.js';
 import { handleAnnouncementModalSubmit } from './embeds/announcement.js';
-import { handleGiveawayModalSubmit }     from './embeds/giveaway.js';
 import { handleWelcomeModalSubmit }      from './embeds/welcome.js';
 import { handleRulebookModalSubmit }     from './embeds/rulebook.js';
 import { handleZgloszeniaModalSubmit }   from './embeds/zgloszenia.js';
@@ -49,7 +43,6 @@ import {
     TICKETS_CONFIG_MODAL_ID,
     TICKETS_OPEN_BUTTON_ID,
 } from './tickets/constants.js';
-
 // Załaduj zmienne środowiskowe z .env
 config();
 
@@ -62,7 +55,9 @@ declare module 'discord.js' {
 
 // Stwórz klienta Discord
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds],
+    intents: [
+        GatewayIntentBits.Guilds,
+    ],
 });
 
 // Zarejestruj komendy w kolekcji
@@ -132,14 +127,8 @@ client.on('interactionCreate', async (interaction) => {
     // Obsługa modal submit (formularze)
     if (interaction.isModalSubmit()) {
         try {
-            if (interaction.customId === EMBED_MODAL_MATCH) {
-                await handleMatchModalSubmit(interaction);
-            } else if (interaction.customId === EMBED_MODAL_RESULT) {
-                await handleResultModalSubmit(interaction);
-            } else if (interaction.customId === EMBED_MODAL_ANNOUNCEMENT) {
+            if (interaction.customId === EMBED_MODAL_ANNOUNCEMENT) {
                 await handleAnnouncementModalSubmit(interaction);
-            } else if (interaction.customId === EMBED_MODAL_GIVEAWAY) {
-                await handleGiveawayModalSubmit(interaction);
             } else if (interaction.customId === EMBED_MODAL_WELCOME) {
                 await handleWelcomeModalSubmit(interaction);
             } else if (interaction.customId === EMBED_MODAL_RULEBOOK) {

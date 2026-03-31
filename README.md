@@ -1,181 +1,200 @@
 ﻿# HusariaBot
 
-A Discord bot built with TypeScript and discord.js for server automation, styled embeds, and utility commands.
+HusariaBot is a TypeScript Discord bot for moderation workflows, ticket management, rich embeds, and an optional web dashboard for admins.
+
+## Table of Contents
+
+1. Overview
+2. Features
+3. Requirements
+4. Quick Start
+5. Environment Variables
+6. Commands
+7. Dashboard
+8. Ticket System
+9. Development
+10. Security
+11. Troubleshooting
+12. License
+
+## Overview
+
+The project contains two main runtime parts:
+
+1. Discord bot process (slash commands, tickets, embeds)
+2. Admin dashboard (Discord OAuth login + embed/image publishing)
 
 ## Features
 
-- Slash command architecture with modular command files.
-- Interactive embed creator with preview and publish flow.
-- Multiple embed templates for community use-cases.
-- Server emoji export command.
-- Image sender command that reads files from the local img folder.
-- Type-safe codebase with TypeScript and Vitest test coverage for embed builders.
-- Ticket system with configurable panel, per-user ticket channels, and persistent ticket numbering.
-- Role-based access control for command execution and modal actions.
+- Modular slash command architecture
+- Role-based access control (`ADMIN_ROLE_ID`, `MODERATOR_ROLE_ID`)
+- Embed publishing flow with multiple templates
+- Image sender from local `img/` assets
+- Ticket panel and per-user ticket channels with persistent counters
+- Admin dashboard with Discord OAuth2 authentication
+- Vitest-based automated tests
 
-## Available Commands
+## Requirements
 
-| Command | Description | Notes |
-| --- | --- | --- |
-| /ping | Checks bot latency and gateway ping. | Basic health check. |
-| /embed | Opens an interactive embed builder. | Executable only by Zarząd and Moderator roles. |
-| /listemojis | Exports all custom server emojis to a text file. | Output format: NAME: '<:name:ID>' (or animated variant). |
-| /sendimg | Sends an image selected from the img folder. | Executable only by Zarząd and Moderator roles. |
-| /ticketyconfig | Publishes the ticket panel in the current channel. | Executable only by Zarząd and Moderator roles. |
+- Node.js 18+
+- npm 9+
+- Discord application and bot token
 
-## Ticket System
+## Quick Start
 
-### Configuration flow
-
-1. Run /ticketyconfig.
-2. Fill the modal with the ticket system description.
-3. Bot publishes the ticket panel embed with:
-   - H1 heading in embed body.
-   - Real server emoji (G2Hussars variants with fallback).
-   - Green Otwórz ticket button.
-
-### Ticket creation flow
-
-- Ticket channels are created in category.
-- Channel naming format:
-  - zgloszenie-username-ticketNumber
-- Ticket numbers are persistent and stored in:
-  - data/ticket-counter.json
-- Access to each ticket channel:
-  - ticket author
-  - Zarząd role
-  - Moderator role
-  - bot account
-
-### First ticket message
-
-- Red embed.
-- Greeting text for the ticket author.
-- Mention of Zarząd and Moderator roles inside embed content.
-- In-channel close controls:
-  - only Zamknij Ticket (Administracja), red button.
-
-### User close flow
-
-- User receives a private ephemeral close button after ticket creation.
-- User confirms close in private interaction flow.
-- Bot sends DM to the user with:
-  - server emoji instead of :G2Hussars: text
-  - lowercase word ticket
-  - bold ticket channel name
-  - final period
-- Ticket channel is deleted.
-
-### Admin close flow
-
-- Admin clicks red Zamknij Ticket (Administracja).
-- Admin confirms and submits required close reason in modal.
-- Bot sends DM to ticket author with:
-  - server emoji
-  - bold ticket name
-  - bold close reason
-  - info about which admin closed the ticket
-- Ticket channel is deleted.
-
-### Interaction reliability
-
-- Open-ticket button handling uses deferred interaction reply to avoid timeout issues.
-- Duplicate ticket checks fetch channels from API to reduce cache-only race problems.
-
-## Embed Templates
-
-The /embed command currently supports:
-
-- Match announcement
-- Match result
-- Free-form announcement
-- Giveaway
-- Welcome message
-- Server rulebook
-- Zgłoszenia
-
-## Tech Stack
-
-- Node.js
-- TypeScript
-- discord.js v14
-- dotenv
-- Vitest
-
-## Project Structure
-
-```text
-src/
-  commands/        # Slash commands
-  embeds/          # Modal handlers and embed publishing flows
-  tickets/         # Ticket lifecycle, constants, and counter storage
-  utils/           # Embed builders, theme, emoji helpers
-  index.ts         # Bot runtime entry point
-  deploy-commands.ts
-img/               # Static images used by commands/embeds
-data/              # Persistent runtime data (ticket counter)
-```
-
-## Setup
-
-### 1) Install dependencies
+1. Install dependencies:
 
 ```bash
 npm install
 ```
 
-### 2) Create environment variables
+2. Copy `.env.example` to `.env` and fill required values.
 
-Create a .env file in the project root:
-
-```env
-DISCORD_TOKEN=your_bot_token_here
-CLIENT_ID=your_application_client_id_here
-GUILD_ID=your_guild_id_here
-```
-
-Notes:
-
-- GUILD_ID is optional. If provided, commands are registered as guild commands (instant updates).
-- Without GUILD_ID, commands are registered globally (can take up to 1 hour to propagate).
-
-### 3) Deploy slash commands
+3. Register slash commands:
 
 ```bash
 npm run deploy
 ```
 
-### 4) Start the bot
-
-Development mode:
+4. Start the bot:
 
 ```bash
 npm run dev
 ```
 
-Production mode:
+5. (Optional) Start dashboard:
 
 ```bash
-npm run build
-npm start
+npm run dashboard
 ```
 
-## Scripts
+## Environment Variables
 
-- npm run dev - Run bot with tsx
-- npm run build - Compile TypeScript
-- npm start - Run compiled bot from dist
-- npm run deploy - Register slash commands
-- npm run clear-global - Clear global slash commands
-- npm test - Run tests once
-- npm run test:watch - Run tests in watch mode
+Use `.env.example` as the source of truth. Key variables:
+
+- `DISCORD_TOKEN`
+- `CLIENT_ID`
+- `GUILD_ID`
+- `ADMIN_ROLE_ID`
+- `MODERATOR_ROLE_ID`
+- `SUPPORT_CATEGORY_ID`
+- `DISCORD_CLIENT_SECRET`
+- `DISCORD_REDIRECT_URI`
+- `DASHBOARD_SESSION_SECRET`
+- `DASHBOARD_PORT` (optional, default `3000`)
+
+Notes:
+
+- `GUILD_ID` enables instant guild command updates.
+- Without `GUILD_ID`, global command propagation may take up to about 1 hour.
+
+## Commands
+
+| Command | Description | Access |
+| --- | --- | --- |
+| `/ping` | Health check and gateway latency | Admin/Moderator |
+| `/embed` | Opens embed publish flow | Admin/Moderator |
+| `/listemojis` | Exports server emoji definitions | Admin/Moderator |
+| `/sendimg` | Sends selected image from `img/` | Admin/Moderator |
+| `/ticketyconfig` | Publishes ticket panel | Admin/Moderator |
+
+## Dashboard
+
+The dashboard is available at `http://localhost:3000` by default.
+
+### Run
+
+```bash
+npm run dashboard
+```
+
+### API endpoints used by UI
+
+- `GET /api/me`
+- `GET /api/channels`
+- `GET /api/images`
+- `POST /api/send-image`
+- `POST /api/embed`
+
+### Dashboard scripts
+
+- `npm run dashboard` - start once
+- `npm run dashboard:dev` - watch mode via `tsx`
+
+## Ticket System
+
+### Ticket setup
+
+1. Run `/ticketyconfig`
+2. Fill in panel modal
+3. Bot publishes ticket panel with open button
+
+### Behavior
+
+- Ticket channel naming: `zgloszenie-username-ticketNumber`
+- Counter persistence file: `data/ticket-counter.json`
+- Access includes ticket author, staff roles, and bot account
+- Admin close flow requires reason submission
+
+## Development
+
+### Core scripts
+
+- `npm run dev`
+- `npm run build`
+- `npm start`
+- `npm run deploy`
+- `npm run clear-global`
+- `npm test`
+- `npm run test:watch`
+
+### Project structure
+
+```text
+src/
+  commands/
+  embeds/
+  tickets/
+  utils/
+  dashboard/
+img/
+data/
+```
 
 ## Security
 
-- Do not commit your .env file.
-- Do not share your DISCORD_TOKEN.
-- Regenerate token immediately if it is ever exposed.
-- Runtime role checks are enforced in commands, modal handlers, and ticket admin actions.
+- Never commit `.env` files with real credentials
+- Rotate `DISCORD_TOKEN` and `DISCORD_CLIENT_SECRET` immediately if exposed
+- Keep `DASHBOARD_SESSION_SECRET` strong and unique per environment
+- Staff-only operations are guarded by role checks
+- Dashboard now validates incoming payload sizes and welcome-image URL format
+
+## Troubleshooting
+
+### Commands not visible
+
+1. Ensure `CLIENT_ID` is valid
+2. Run `npm run deploy`
+3. If using global commands, wait for propagation
+
+### Dashboard login fails
+
+1. Verify `DISCORD_REDIRECT_URI` matches Discord Developer Portal exactly
+2. Verify `DISCORD_CLIENT_SECRET`
+3. Ensure user has required staff role in target guild
+
+### Image send fails from dashboard
+
+1. Ensure files exist in `img/`
+2. Confirm channel was selected
+3. Verify bot permissions in target channel (`Send Messages`, `Attach Files`)
+
+### Build or runtime errors
+
+```bash
+npm run build
+npm test
+```
 
 ## License
 
