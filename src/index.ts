@@ -35,6 +35,28 @@ import {
 // Załaduj zmienne środowiskowe z .env
 config();
 
+const BOT_HEARTBEAT_INTERVAL_MS = 60_000;
+
+function isBotDevLogsEnabled(): boolean {
+    const forceDisabled = process.env.BOT_DEV_LOGS === '0';
+    return process.env.NODE_ENV !== 'production' && !forceDisabled;
+}
+
+function formatWebSocketState(state: number): string {
+    switch (state) {
+        case 0:
+            return 'CONNECTING';
+        case 1:
+            return 'OPEN';
+        case 2:
+            return 'CLOSING';
+        case 3:
+            return 'CLOSED';
+        default:
+            return `UNKNOWN(${state})`;
+    }
+}
+
 // Rozszerzenie typów Client o kolekcję komend
 declare module 'discord.js' {
     interface Client {
@@ -61,7 +83,25 @@ client.on('clientReady', () => {
     console.log('──────────────────────────────────────');
     console.log(`✅  Bot zalogowany jako ${client.user?.tag}`);
     console.log(`📡  Serwery: ${client.guilds.cache.size}`);
+    if (isBotDevLogsEnabled()) {
+        console.log(`🧪  [DEV][BOT] WS=${formatWebSocketState(client.ws.status)} | ping=${client.ws.ping}ms`);
+
+        setInterval(() => {
+            const uptimeSec = Math.floor(process.uptime());
+            console.log(`💓  [DEV][BOT] active=true | ws=${formatWebSocketState(client.ws.status)} | ping=${client.ws.ping}ms | guilds=${client.guilds.cache.size} | uptime=${uptimeSec}s`);
+        }, BOT_HEARTBEAT_INTERVAL_MS).unref();
+    }
     console.log('──────────────────────────────────────');
+});
+
+client.on('warn', (warning) => {
+    if (isBotDevLogsEnabled()) {
+        console.warn(`⚠️  [DEV][BOT][WARN] ${warning}`);
+    }
+});
+
+client.on('error', (error) => {
+    console.error('❌  [BOT] Client error:', error);
 });
 
 async function safelyReplyInteractionError<T extends {
@@ -159,4 +199,23 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // Zaloguj bota
-client.login(process.env.DISCORD_TOKEN);
+const discordToken = process.env.DISCORD_TOKEN?.trim();
+
+if (!discordToken) {
+    console.error('❌  Brakuje DISCORD_TOKEN. Bot nie może wystartować.');
+    process.exit(1);
+}
+
+if (isBotDevLogsEnabled()) {
+    console.log('🧪  [DEV][BOT] Start inicjalizacji...');
+    console.log(`🧪  [DEV][BOT] DISCORD_TOKEN=${discordToken ? 'OK' : 'MISSING'} | commands=${client.commands.size}`);
+}
+
+void client.login(discordToken).then(() => {
+    if (isBotDevLogsEnabled()) {
+        console.log('✅  [DEV][BOT] Login request accepted by Discord Gateway. Czekam na clientReady...');
+    }
+}).catch((error) => {
+    console.error('❌  [BOT] Nie udało się zalogować do Discorda:', error);
+    process.exit(1);
+});

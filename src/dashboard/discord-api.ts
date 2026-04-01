@@ -5,6 +5,8 @@ import { join, extname } from 'path';
 config();
 
 const DISCORD_API = 'https://discord.com/api/v10';
+const MANAGE_EVENTS_PERMISSION = 1n << 33n;
+const ADMINISTRATOR_PERMISSION = 1n << 3n;
 
 function requireEnv(name: string): string {
     const value = process.env[name];
@@ -42,6 +44,26 @@ export interface DiscordRole {
     name: string;
     position: number;
     managed: boolean;
+    permissions: string;
+}
+
+interface DiscordBotUser {
+    id: string;
+    username: string;
+}
+
+export interface DiscordBotApiProbeResult {
+    botId: string;
+    username: string;
+    inGuild: boolean;
+}
+
+export interface CreateExternalScheduledEventInput {
+    name: string;
+    description?: string;
+    scheduledStartTimeIso: string;
+    scheduledEndTimeIso?: string;
+    location: string;
 }
 
 export interface DiscordEmoji {
@@ -132,6 +154,118 @@ export async function getGuildRoles(guildId: string): Promise<DiscordRole[]> {
     return roles
         .filter((role) => role.name !== '@everyone')
         .sort((a, b) => b.position - a.position);
+}
+
+async function getGuildRolesRaw(guildId: string): Promise<DiscordRole[]> {
+    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/roles`, {
+        headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+    });
+
+    if (!resp.ok) throw new Error(`Failed to fetch roles: ${resp.status}`);
+    return resp.json() as Promise<DiscordRole[]>;
+}
+
+async function getBotUser(): Promise<DiscordBotUser> {
+    const resp = await fetch(`${DISCORD_API}/users/@me`, {
+        headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+    });
+
+    if (!resp.ok) {
+        throw new Error(`Failed to fetch bot user: ${resp.status}`);
+    }
+
+    return resp.json() as Promise<DiscordBotUser>;
+}
+
+export async function probeDiscordBotApi(guildId: string): Promise<DiscordBotApiProbeResult> {
+    const botUser = await getBotUser();
+    const member = await getGuildMember(botUser.id, guildId);
+
+    return {
+        botId: botUser.id,
+        username: botUser.username,
+        inGuild: Boolean(member),
+    };
+}
+
+function safeBigInt(value: string | undefined): bigint {
+    try {
+        return BigInt(value ?? '0');
+    } catch {
+        return 0n;
+    }
+}
+
+export async function hasBotManageEventsPermission(guildId: string): Promise<boolean> {
+    const [botUser, roles] = await Promise.all([
+        getBotUser(),
+        getGuildRolesRaw(guildId),
+    ]);
+
+    const member = await getGuildMember(botUser.id, guildId);
+    if (!member) {
+        return false;
+    }
+
+    const rolePermissionsMap = new Map<string, bigint>();
+    for (const role of roles) {
+        rolePermissionsMap.set(role.id, safeBigInt(role.permissions));
+    }
+
+    const everyonePermissions = rolePermissionsMap.get(guildId) ?? 0n;
+    const accumulatedPermissions = member.roles.reduce((result, roleId) => {
+        return result | (rolePermissionsMap.get(roleId) ?? 0n);
+    }, everyonePermissions);
+
+    const hasAdministrator = (accumulatedPermissions & ADMINISTRATOR_PERMISSION) === ADMINISTRATOR_PERMISSION;
+    if (hasAdministrator) {
+        return true;
+    }
+
+    return (accumulatedPermissions & MANAGE_EVENTS_PERMISSION) === MANAGE_EVENTS_PERMISSION;
+}
+
+export async function createExternalGuildScheduledEvent(
+    guildId: string,
+    input: CreateExternalScheduledEventInput,
+): Promise<string> {
+    const eventName = input.name.trim();
+    const eventDescription = input.description?.trim() ?? '';
+    const eventLocation = input.location.trim();
+
+    if (!eventName) {
+        throw new Error('Nazwa wydarzenia Discord jest wymagana.');
+    }
+
+    const body = {
+        name: eventName,
+        ...(eventDescription ? { description: eventDescription } : {}),
+        scheduled_start_time: input.scheduledStartTimeIso,
+        scheduled_end_time: input.scheduledEndTimeIso,
+        privacy_level: 2,
+        entity_type: 3,
+        channel_id: null,
+        entity_metadata: {
+            location: eventLocation || 'Online',
+        },
+    };
+
+    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/scheduled-events`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+        const errPayload = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to create Discord event: ${resp.status} — ${JSON.stringify(errPayload)}`);
+    }
+
+    const created = await resp.json() as { id: string };
+    return created.id;
 }
 
 export async function searchGuildMembers(guildId: string, query: string, limit = 8): Promise<DiscordMentionUser[]> {

@@ -30,6 +30,18 @@
         <span class="sidebar-icon">🗓️</span>
         <span>Zaplanowane posty</span>
       </a>
+      <a href="#" class="sidebar-item" data-section="g2-matches">
+        <span class="sidebar-icon">🏟️</span>
+        <span>Baza meczów G2</span>
+      </a>
+      <a href="#" class="sidebar-item" data-section="match-announcement-creator">
+        <span class="sidebar-icon">📣</span>
+        <span>Kreator publikacji meczów</span>
+      </a>
+      <a href="#" class="sidebar-item" data-section="match-announcements">
+        <span class="sidebar-icon">📅</span>
+        <span>Zaplanowane ogłoszenia meczów</span>
+      </a>
     </nav>
   </aside>
 
@@ -227,11 +239,253 @@
         <div id="scheduled-list" class="scheduled-list"></div>
       </div>
     </div>
+
+    <div id="section-g2-matches" class="section-panel">
+      <div class="section-header">
+        <h2>🏟️ Baza meczów G2 Esports</h2>
+        <p>Ręcznie odświeżaj i przeglądaj nadchodzące mecze G2 z PandaScore (horyzont 90 dni, strefa Europe/Warsaw).</p>
+      </div>
+
+      <div class="creator-form-card">
+        <div class="scheduled-toolbar">
+          <button id="g2-refresh-btn" class="btn-secondary" type="button">Odśwież mecze z PandaScore</button>
+          <span class="preview-note" id="g2-sync-meta">Brak synchronizacji.</span>
+        </div>
+
+        <div class="match-filters">
+          <select id="g2-filter-game" class="form-select">
+            <option value="">Wszystkie gry</option>
+          </select>
+          <select id="g2-filter-g2-team" class="form-select">
+            <option value="">Wszystkie drużyny G2</option>
+          </select>
+          <select id="g2-filter-tournament" class="form-select">
+            <option value="">Wszystkie turnieje</option>
+          </select>
+          <select id="g2-filter-status" class="form-select">
+            <option value="">Wszystkie statusy</option>
+          </select>
+          <input id="g2-filter-opponent" type="text" class="form-input" placeholder="Szukaj po rywalu...">
+        </div>
+
+        <div class="scheduled-toolbar">
+          <span class="preview-note" id="g2-count-label">Ładowanie...</span>
+        </div>
+
+        <div id="g2-matches-list" class="scheduled-list"></div>
+      </div>
+    </div>
+
+    <div id="section-match-announcement-creator" class="section-panel">
+      <div class="section-header">
+        <h2>📣 Kreator publikacji meczów</h2>
+        <p>Wybierz mecz z bazy G2 i publikuj tak samo jak w zwykłym kreatorze (Embedded/Wiadomość), z rozszerzonym szablonem meczowym.</p>
+      </div>
+
+      <div class="creator-grid">
+        <div class="creator-form-card">
+          <div class="form-group">
+            <label class="form-label">Tryb publikacji</label>
+            <div class="mode-tabs" id="match-mode-tabs">
+              <button type="button" class="mode-tab match-mode-tab active" data-mode="embedded">Embedded</button>
+              <button type="button" class="mode-tab match-mode-tab" data-mode="message">Wiadomość</button>
+            </div>
+          </div>
+
+          <details class="form-group form-disclosure editor-suite" open>
+            <summary class="disclosure-summary">Narzędzia edytora</summary>
+            <div class="disclosure-content">
+              <div class="format-toolbar" id="match-format-toolbar">
+                <button type="button" class="toolbar-btn" data-wrap="**" title="Pogrubienie">B</button>
+                <button type="button" class="toolbar-btn" data-wrap="*" title="Kursywa">I</button>
+                <button type="button" class="toolbar-btn" data-wrap="__" title="Podkreślenie">U</button>
+                <button type="button" class="toolbar-btn" data-wrap="~~" title="Przekreślenie">S</button>
+                <button type="button" class="toolbar-btn" data-prefix="# " title="Nagłówek H1">H1</button>
+                <button type="button" class="toolbar-btn" data-prefix="## " title="Nagłówek H2">H2</button>
+                <button type="button" class="toolbar-btn" data-prefix="### " title="Nagłówek H3">H3</button>
+                <button type="button" class="toolbar-btn" data-prefix="> " title="Cytat">❝</button>
+                <button type="button" class="toolbar-btn" data-wrap="`" title="Kod inline">&lt;/&gt;</button>
+              </div>
+
+              <div class="editor-popovers">
+                <div class="editor-popover" id="match-emoji-popover" hidden>
+                  <div class="popover-header">
+                    <span>Wstaw emotkę</span>
+                    <input type="text" id="match-emoji-search-input" class="popover-search" placeholder="Szukaj emotki...">
+                  </div>
+                  <div class="emoji-list" id="match-emoji-list"></div>
+                </div>
+
+                <div class="editor-popover" id="match-mention-popover" hidden>
+                  <div class="popover-header">
+                    <span>Wstaw wzmiankę</span>
+                  </div>
+
+                  <div class="mention-section">
+                    <span class="mention-label">Szybkie skróty</span>
+                    <div class="mention-list mention-list-inline" id="match-mention-quick-list">
+                      <button type="button" class="mention-chip mention-broadcast" data-token="@everyone">@everyone</button>
+                      <button type="button" class="mention-chip mention-broadcast" data-token="@here">@here</button>
+                    </div>
+                  </div>
+
+                  <div class="mention-section">
+                    <span class="mention-label">Kanały</span>
+                    <input type="text" id="match-mention-channel-search" class="popover-search" placeholder="Szukaj kanału...">
+                    <div class="mention-list" id="match-mention-channel-results"></div>
+                  </div>
+
+                  <div class="mention-section">
+                    <span class="mention-label">Role</span>
+                    <input type="text" id="match-mention-role-search" class="popover-search" placeholder="Szukaj roli...">
+                    <div class="mention-list" id="match-mention-role-results"></div>
+                  </div>
+
+                  <div class="mention-section">
+                    <span class="mention-label">Użytkownicy</span>
+                    <input type="text" id="match-mention-user-search" class="popover-search" placeholder="Szukaj użytkownika...">
+                    <div class="mention-user-results" id="match-mention-user-results"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <div class="form-group">
+            <label class="form-label" for="match-search-input">Wyszukaj mecz</label>
+            <input id="match-search-input" type="text" class="form-input" placeholder="np. Fnatic, LEC, Valorant">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="match-select">Wybierz mecz z bazy</label>
+            <select id="match-select" class="form-select">
+              <option value="">Najpierw odśwież bazę meczów...</option>
+            </select>
+          </div>
+
+          <div class="form-group" id="match-title-group">
+            <label class="form-label" for="match-title">Tytuł embeda</label>
+            <input id="match-title" type="text" class="form-input" placeholder="G2 Team vs Rywal | Turniej | BOx">
+          </div>
+
+          <div class="form-group" id="match-color-group">
+            <label class="form-label">Kolor embeda</label>
+            <div class="color-swatches" id="match-color-swatches">
+              <div class="color-swatch active" data-color="czerwony" title="Czerwony"></div>
+              <div class="color-swatch" data-color="biały" title="Biały"></div>
+              <div class="color-swatch" data-color="szary" title="Szary"></div>
+              <div class="color-swatch" data-color="złoty" title="Złoty"></div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="match-description">Treść</label>
+            <textarea id="match-description" class="form-textarea" rows="5" placeholder="Wpisz treść publikacji meczowej..."></textarea>
+          </div>
+
+          <details class="form-group form-disclosure" id="match-ping-group">
+            <summary class="disclosure-summary">Ping roli przy publikacji</summary>
+            <div class="disclosure-content">
+              <label class="form-checkbox">
+                <input type="checkbox" id="match-ping-enabled">
+                <span>Wyślij osobną wiadomość z wybranym pingiem przed publikacją.</span>
+              </label>
+              <select id="match-ping-select" class="form-select" disabled>
+                <option value="">Wybierz ping (@everyone, @here lub rolę)</option>
+              </select>
+            </div>
+          </details>
+
+          <details class="form-group form-disclosure" id="match-image-group">
+            <summary class="disclosure-summary">Wstaw grafikę (opcjonalnie, poza embedem)</summary>
+            <div class="disclosure-content">
+              <p class="form-help">Obsługiwane formaty: JPEG, PNG, GIF.</p>
+              <select id="match-image-mode" class="form-select">
+                <option value="none">Nie dodawaj grafiki</option>
+                <option value="library">Wybierz z biblioteki /img</option>
+                <option value="upload">Wgraj plik z komputera</option>
+              </select>
+
+              <div id="match-image-library-panel" class="image-option-panel" hidden>
+                <div class="image-grid" id="match-image-grid"></div>
+              </div>
+
+              <div id="match-image-upload-panel" class="image-option-panel" hidden>
+                <input type="file" id="match-image-upload-input" class="form-input" accept="image/png,image/jpeg,image/gif">
+                <p class="upload-file-name" id="match-upload-file-name">Nie wybrano pliku.</p>
+              </div>
+            </div>
+          </details>
+
+          <div class="form-group">
+            <label class="form-label" for="match-channel-select">Kanał docelowy</label>
+            <select id="match-channel-select" class="form-select">
+              <option value="">Ładowanie kanałów...</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="match-schedule-at">Publikacja zaplanowana (Europe/Warsaw)</label>
+            <input id="match-schedule-at" type="datetime-local" class="form-input">
+            <p class="form-help">Puste pole = publikacja natychmiastowa. Ustawiona data = ogłoszenie zaplanowane.</p>
+          </div>
+
+          <button id="match-send-btn" class="btn-primary" disabled>
+            <span class="btn-icon">📤</span>
+            <span id="match-send-btn-text">Opublikuj ogłoszenie meczu</span>
+          </button>
+        </div>
+
+        <div class="creator-preview-card">
+          <div class="preview-header">
+            <span>Podgląd zapowiedzi meczu</span>
+            <span class="preview-note">wygląd przybliżony</span>
+          </div>
+          <div class="discord-mockup">
+            <div class="discord-message">
+              <div class="discord-avatar"><img src="/img/hussars_logo_80x80.png" alt="HusariaBot"></div>
+              <div class="discord-msg-content">
+                <span class="discord-bot-name">HusariaBot <span class="bot-badge">BOT</span></span>
+                <div class="preview-ping-line" id="match-preview-ping-line" style="display:none"></div>
+                <div class="discord-embed" id="match-embed-preview-container">
+                  <div class="embed-color-bar" id="match-embed-color-bar"></div>
+                  <div class="embed-body">
+                    <div class="embed-description" id="match-preview-description">Wybierz mecz, aby zobaczyć podgląd ogłoszenia.</div>
+                  </div>
+                </div>
+                <div class="discord-plain-message" id="match-message-preview-container" style="display:none"></div>
+                <div class="preview-image-block" id="match-preview-image-block" style="display:none">
+                  <img class="preview-image" id="match-preview-image" src="" alt="Podgląd grafiki meczu">
+                  <div class="preview-image-caption" id="match-preview-image-caption"></div>
+                </div>
+                <div class="preview-image-placeholder" id="match-preview-image-placeholder" style="display:none">🖼️ Wybierz grafikę, aby zobaczyć podgląd.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="section-match-announcements" class="section-panel">
+      <div class="section-header">
+        <h2>📅 Zaplanowane ogłoszenia meczów</h2>
+        <p>Lista zaplanowanych ogłoszeń meczowych oraz ogłoszeń wymagających ponownego utworzenia wydarzenia Discord.</p>
+      </div>
+
+      <div class="creator-form-card">
+        <div class="scheduled-toolbar">
+          <button id="match-announcements-refresh-btn" class="btn-secondary" type="button">Odśwież listę</button>
+          <span class="preview-note" id="match-announcements-count-label">Ładowanie...</span>
+        </div>
+        <div id="match-announcements-list" class="scheduled-list"></div>
+      </div>
+    </div>
   </section>
 </main>
 
 <div id="toast-container"></div>
 
 <script src="/public/js/app.js"></script>
+<script src="/public/js/match-announcements.js"></script>
 </body>
 </html>

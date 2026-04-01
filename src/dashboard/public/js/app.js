@@ -107,6 +107,10 @@ function switchSection(section) {
   if (section === 'scheduled-posts') {
     void loadScheduledPosts()
   }
+
+  if (typeof window.onDashboardSectionChanged === 'function') {
+    window.onDashboardSectionChanged(section)
+  }
 }
 
 async function initEmbedSection() {

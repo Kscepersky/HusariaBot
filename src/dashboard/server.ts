@@ -6,8 +6,13 @@ import './types.js';
 import { authRouter }  from './routes/auth.js';
 import { apiRouter }   from './routes/api.js';
 import { scheduledRouter } from './routes/scheduled.js';
+import { g2MatchesRouter } from './routes/g2-matches.js';
+import { matchAnnouncementsRouter } from './routes/match-announcements.js';
 import { pagesRouter } from './routes/pages.js';
 import { initializeDashboardScheduler } from './scheduler/service.js';
+import { initializeMatchAnnouncementScheduler } from './match-announcements/service.js';
+import { probePandaScoreApiConnection } from './g2-matches/pandascore-client.js';
+import { probeDiscordBotApi } from './discord-api.js';
 
 config();
 
@@ -26,9 +31,55 @@ const REQUIRED_ENV = [
     'ADMIN_ROLE_ID',
     'MODERATOR_ROLE_ID',
     'DASHBOARD_SESSION_SECRET',
+    'PANDASCORE_API_KEY',
 ];
 
 const DASHBOARD_BODY_LIMIT = '12mb';
+
+function isDevLogsEnabled(): boolean {
+    const forceDisabled = process.env.DEV_LOGS === '0';
+    return process.env.NODE_ENV !== 'production' && !forceDisabled;
+}
+
+async function probeDashboardApi(port: number): Promise<number> {
+    const response = await fetch(`http://127.0.0.1:${port}/api/me`, { method: 'GET' });
+    return response.status;
+}
+
+async function runDashboardStartupDiagnostics(port: number): Promise<void> {
+    const guildId = process.env.GUILD_ID ?? '';
+
+    console.log('🔎  [DEV][DASHBOARD] Start diagnostyki usług...');
+
+    const [discordResult, pandaResult, apiResult] = await Promise.allSettled([
+        probeDiscordBotApi(guildId),
+        probePandaScoreApiConnection(),
+        probeDashboardApi(port),
+    ]);
+
+    if (discordResult.status === 'fulfilled') {
+        const discordProbe = discordResult.value;
+        const guildStatus = discordProbe.inGuild ? 'OK' : 'BOT POZA GUILD';
+        console.log(`✅  [DEV][DASHBOARD] Discord Bot API: OK | bot=${discordProbe.username} (${discordProbe.botId}) | guild=${guildStatus}`);
+    } else {
+        console.warn(`⚠️  [DEV][DASHBOARD] Discord Bot API: FAIL | ${String(discordResult.reason)}`);
+    }
+
+    if (pandaResult.status === 'fulfilled') {
+        console.log(`✅  [DEV][DASHBOARD] PandaScore API: OK | sampleCount=${pandaResult.value.sampleCount}`);
+    } else {
+        console.warn(`⚠️  [DEV][DASHBOARD] PandaScore API: FAIL | ${String(pandaResult.reason)}`);
+    }
+
+    if (apiResult.status === 'fulfilled') {
+        const status = apiResult.value;
+        const healthy = status === 401 || status === 200;
+        const symbol = healthy ? '✅' : '⚠️';
+        console.log(`${symbol}  [DEV][DASHBOARD] Local API /api/me status=${status}${healthy ? ' (expected before login)' : ''}`);
+    } else {
+        console.warn(`⚠️  [DEV][DASHBOARD] Local API probe failed | ${String(apiResult.reason)}`);
+    }
+}
 
 export function createDashboardApp() {
     for (const key of REQUIRED_ENV) requireEnv(key);
@@ -68,6 +119,8 @@ export function createDashboardApp() {
     app.use('/auth', authRouter);
     app.use('/api',  apiRouter);
     app.use('/api/scheduled', scheduledRouter);
+    app.use('/api/g2-matches', g2MatchesRouter);
+    app.use('/api/match-announcements', matchAnnouncementsRouter);
     app.use('/',     pagesRouter);
 
     app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -95,9 +148,21 @@ export function startDashboard(): void {
         console.error('❌  Nie udało się uruchomić schedulera dashboardu:', error);
     });
 
-    app.listen(port, () => {
+    void initializeMatchAnnouncementScheduler().catch((error) => {
+        console.error('❌  Nie udało się uruchomić schedulera ogłoszeń meczowych:', error);
+    });
+
+    const server = app.listen(port, () => {
         console.log('──────────────────────────────────────');
         console.log(`🌐  Dashboard dostępny na http://localhost:${port}`);
+        if (isDevLogsEnabled()) {
+            console.log(`🧪  [DEV][DASHBOARD] NODE_ENV=${process.env.NODE_ENV ?? 'undefined'} | DEV_LOGS=${process.env.DEV_LOGS ?? 'auto'}`);
+            void runDashboardStartupDiagnostics(port);
+        }
         console.log('──────────────────────────────────────');
+    });
+
+    server.on('error', (error) => {
+        console.error('❌  Błąd uruchamiania serwera dashboardu:', error);
     });
 }

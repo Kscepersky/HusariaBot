@@ -952,6 +952,25 @@ input[name="colorName"] { display: none }
   margin-bottom: 16px;
 }
 
+.match-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.status-failed {
+  color: #ff8a8a;
+}
+
+.status-success {
+  color: #57f287;
+}
+
+.status-pending {
+  color: #f5d76e;
+}
+
 .scheduled-list {
   display: grid;
   gap: 12px;

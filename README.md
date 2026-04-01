@@ -1,200 +1,215 @@
 ﻿# HusariaBot
 
-HusariaBot is a TypeScript Discord bot for moderation workflows, ticket management, rich embeds, and an optional web dashboard for admins.
+Nowoczesny bot Discord napisany w TypeScript z panelem administracyjnym, systemem ticketów, kreatorem publikacji oraz bazą meczów G2 opartą o PandaScore + SQLite.
 
-## Table of Contents
+## Spis treści
 
-1. Overview
-2. Features
-3. Requirements
-4. Quick Start
-5. Environment Variables
-6. Commands
-7. Dashboard
-8. Ticket System
-9. Development
-10. Security
+1. Co to jest
+2. Najważniejsze funkcje
+3. Architektura
+4. Wymagania
+5. Szybki start
+6. Konfiguracja środowiska
+7. Komendy bota
+8. Dashboard
+9. Skrypty deweloperskie
+10. Bezpieczeństwo i publikacja na GitHub
 11. Troubleshooting
-12. License
+12. Licencja
 
-## Overview
+## Co to jest
 
-The project contains two main runtime parts:
+Projekt składa się z dwóch procesów:
 
-1. Discord bot process (slash commands, tickets, embeds)
-2. Admin dashboard (Discord OAuth login + embed/image publishing)
+1. Bot Discord
+2. Dashboard webowy (Express + OAuth2 Discord)
 
-## Features
+Dzięki temu możesz oddzielić operacje moderatorskie i publikacyjne od pracy bezpośrednio w Discordzie.
 
-- Modular slash command architecture
-- Role-based access control (`ADMIN_ROLE_ID`, `MODERATOR_ROLE_ID`)
-- Dashboard-first embed publishing flow with multiple templates
-- Image sender from local `img/` assets
-- Ticket panel and per-user ticket channels with persistent counters
-- Admin dashboard with Discord OAuth2 authentication
-- Vitest-based automated tests
+## Najważniejsze funkcje
 
-## Requirements
+- Slash-komendy dla administracji i moderatorów.
+- System ticketów z trwałym licznikiem.
+- Kreator publikacji (Embedded i Wiadomość) z podglądem.
+- Planowanie publikacji i edycja zaplanowanych postów.
+- Baza meczów G2 z PandaScore (lokalnie w SQLite).
+- Kreator ogłoszeń meczów + automatyczne tworzenie wydarzeń Discord.
+- Retry dla eventów Discord, gdy tworzenie się nie powiedzie.
+- Testy jednostkowe/integracyjne w Vitest.
 
-- Node.js 18+
+## Architektura
+
+```text
+src/
+  commands/                 Slash komendy bota
+  tickets/                  Logika ticketów
+  embeds/                   Szablony i budowanie embedów
+  dashboard/
+    routes/                 API dashboardu
+    scheduler/              Scheduler postów
+    g2-matches/             Integracja PandaScore + SQLite
+    match-announcements/    Publikacje meczowe + eventy Discord
+    public/                 Frontend dashboardu
+data/                       Dane lokalne (SQLite/JSON)
+img/                        Biblioteka obrazów
+```
+
+## Wymagania
+
+- Node.js 20.17+ (zalecane Node.js 22 LTS)
 - npm 9+
-- Discord application and bot token
+- Bot i aplikacja Discord w Developer Portal
 
-## Quick Start
+## Szybki start
 
-1. Install dependencies:
+1. Instalacja zależności:
 
 ```bash
 npm install
 ```
 
-2. Copy `.env.example` to `.env` and fill required values.
+2. Skopiuj plik środowiskowy:
 
-3. Register slash commands:
+```bash
+copy .env.example .env
+```
+
+3. Uzupełnij wartości w .env.
+
+4. Zarejestruj komendy:
 
 ```bash
 npm run deploy
 ```
 
-4. Start the bot:
+5. Uruchom bota:
 
 ```bash
 npm run dev
 ```
 
-5. (Optional) Start dashboard:
+6. Uruchom dashboard (opcjonalnie):
 
 ```bash
 npm run dashboard
 ```
 
-## Environment Variables
+## Konfiguracja środowiska
 
-Use `.env.example` as the source of truth. Key variables:
+Źródłem prawdy jest plik .env.example.
 
-- `DISCORD_TOKEN`
-- `CLIENT_ID`
-- `GUILD_ID`
-- `ADMIN_ROLE_ID`
-- `MODERATOR_ROLE_ID`
-- `SUPPORT_CATEGORY_ID`
-- `DISCORD_CLIENT_SECRET`
-- `DISCORD_REDIRECT_URI`
-- `DASHBOARD_SESSION_SECRET`
-- `DASHBOARD_PORT` (optional, default `3000`)
+Najważniejsze zmienne:
 
-Notes:
-
-- `GUILD_ID` enables instant guild command updates.
-- Without `GUILD_ID`, global command propagation may take up to about 1 hour.
-
-## Commands
-
-| Command | Description | Access |
+| Zmienna | Wymagana | Opis |
 | --- | --- | --- |
-| `/ping` | Health check and gateway latency | Admin/Moderator |
-| `/dashboard` | Sends secure link to admin dashboard | Admin/Moderator |
-| `/sendimg` | Sends selected image from `img/` | Admin/Moderator |
-| `/ticketyconfig` | Publishes ticket panel | Admin/Moderator |
+| DISCORD_TOKEN | tak | Token bota |
+| CLIENT_ID | tak | Application ID |
+| GUILD_ID | zalecane | Guild testowy (szybsza propagacja komend) |
+| ADMIN_ROLE_ID | tak | Rola admina |
+| MODERATOR_ROLE_ID | tak | Rola moderatora |
+| SUPPORT_CATEGORY_ID | tak | Kategoria ticketów |
+| DISCORD_CLIENT_SECRET | tak (dashboard) | OAuth2 Client Secret |
+| DISCORD_REDIRECT_URI | tak (dashboard) | OAuth redirect URI |
+| DASHBOARD_SESSION_SECRET | tak (dashboard) | Secret sesji Express |
+| DASHBOARD_PORT | nie | Port dashboardu (domyślnie 3000) |
+| DASHBOARD_BASE_URL | tak (dashboard) | Publiczny URL do komendy /dashboard |
+| PANDASCORE_API_KEY | tak (moduł G2) | API key PandaScore |
+| DEV_LOGS | nie | Logi developerskie dashboardu (1/0) |
+| BOT_DEV_LOGS | nie | Heartbeat i logi developerskie bota (1/0) |
+
+## Komendy bota
+
+| Komenda | Opis | Dostęp |
+| --- | --- | --- |
+| /ping | Health check i latency | Admin/Moderator |
+| /dashboard | Link do dashboardu | Admin/Moderator |
+| /sendimg | Wysyłka obrazu z img | Admin/Moderator |
+| /ticketyconfig | Konfiguracja panelu ticketów | Admin/Moderator |
 
 ## Dashboard
 
-The dashboard is available at `http://localhost:3000` by default.
+Domyślny adres: http://localhost:3000
 
-### Run
+Moduły dashboardu:
+
+- Kreator publikacji (embedded/message).
+- Zaplanowane posty.
+- Baza meczów G2 (PandaScore, filtry, odświeżanie).
+- Kreator publikacji meczów.
+- Zaplanowane ogłoszenia meczowe.
+
+Skrypty dashboardu:
+
+- npm run dashboard
+- npm run dashboard:dev
+
+## Skrypty deweloperskie
+
+- npm run dev
+- npm run build
+- npm start
+- npm run deploy
+- npm run clear-global
+- npm test
+- npm run test:watch
+
+## Bezpieczeństwo i publikacja na GitHub
+
+Przed commitem:
+
+1. Nigdy nie commituj .env i .env.* z realnymi danymi.
+2. Upewnij się, że do repo trafia tylko .env.example z placeholderami.
+3. Sprawdź staged files:
 
 ```bash
-npm run dashboard
+git diff --cached --name-only
 ```
 
-### API endpoints used by UI
+4. Jeśli sekret mógł wyciec, zrotuj natychmiast:
+   - DISCORD_TOKEN
+   - DISCORD_CLIENT_SECRET
+   - PANDASCORE_API_KEY
+   - DASHBOARD_SESSION_SECRET
 
-- `GET /api/me`
-- `GET /api/channels`
-- `GET /api/images`
-- `POST /api/send-image`
-- `POST /api/embed`
+Dodatkowe zasady:
 
-### Dashboard scripts
-
-- `npm run dashboard` - start once
-- `npm run dashboard:dev` - watch mode via `tsx`
-
-## Ticket System
-
-### Ticket setup
-
-1. Run `/ticketyconfig`
-2. Fill in panel modal
-3. Bot publishes ticket panel with open button
-
-### Behavior
-
-- Ticket channel naming: `zgloszenie-username-ticketNumber`
-- Counter persistence file: `data/ticket-counter.json`
-- Access includes ticket author, staff roles, and bot account
-- Admin close flow requires reason submission
-
-## Development
-
-### Core scripts
-
-- `npm run dev`
-- `npm run build`
-- `npm start`
-- `npm run deploy`
-- `npm run clear-global`
-- `npm test`
-- `npm run test:watch`
-
-### Project structure
-
-```text
-src/
-  commands/
-  embeds/
-  tickets/
-  utils/
-  dashboard/
-img/
-data/
-```
-
-## Security
-
-- Never commit `.env` files with real credentials
-- Rotate `DISCORD_TOKEN` and `DISCORD_CLIENT_SECRET` immediately if exposed
-- Keep `DASHBOARD_SESSION_SECRET` strong and unique per environment
-- Staff-only operations are guarded by role checks
-- Dashboard now validates incoming payload sizes and welcome-image URL format
+- Operacje staff-only są chronione rolami.
+- Dashboard waliduje payloady i grafiki przed publikacją.
+- Nie publikuj logów z danymi środowiskowymi.
 
 ## Troubleshooting
 
-### Commands not visible
+### Komendy nie pojawiają się na serwerze
 
-1. Ensure `CLIENT_ID` is valid
-2. Run `npm run deploy`
-3. If using global commands, wait for propagation
+1. Sprawdź CLIENT_ID i token.
+2. Uruchom npm run deploy.
+3. Przy komendach globalnych poczekaj na propagację.
 
-### Dashboard login fails
+### Logowanie do dashboardu nie działa
 
-1. Verify `DISCORD_REDIRECT_URI` matches Discord Developer Portal exactly
-2. Verify `DISCORD_CLIENT_SECRET`
-3. Ensure user has required staff role in target guild
+1. Redirect URI musi być identyczny jak w Discord Developer Portal.
+2. Sprawdź DISCORD_CLIENT_SECRET.
+3. Upewnij się, że użytkownik ma właściwą rolę staff.
 
-### Image send fails from dashboard
+### Baza meczów G2 nie odświeża się
 
-1. Ensure files exist in `img/`
-2. Confirm channel was selected
-3. Verify bot permissions in target channel (`Send Messages`, `Attach Files`)
+1. Sprawdź PANDASCORE_API_KEY.
+2. Zweryfikuj limity/rate limit po stronie PandaScore.
+3. Sprawdź logi dashboardu (DEV_LOGS=1).
 
-### Build or runtime errors
+### Event Discord nie tworzy się
+
+1. Bot musi mieć uprawnienie Manage Events.
+2. Sprawdź GUILD_ID i obecność bota na serwerze.
+3. Upewnij się, że data meczu jest w przyszłości.
+
+### Build/test fail
 
 ```bash
 npm run build
 npm test
 ```
 
-## License
+## Licencja
 
 ISC
