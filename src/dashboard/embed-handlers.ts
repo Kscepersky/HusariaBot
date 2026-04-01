@@ -1,87 +1,222 @@
 import { EmbedBuilder } from 'discord.js';
 import { HusariaColors, ColorChoices } from '../utils/husaria-theme.js';
 
-export type EmbedType =
-    | 'announcement'
-    | 'welcome'
-    | 'rulebook'
-    | 'zgloszenia';
+export type PublishMode = 'embedded' | 'message';
+export type ImageMode = 'none' | 'library' | 'upload';
 
 export interface EmbedFormData {
-    type: EmbedType;
+    mode: PublishMode;
     channelId: string;
-    // announcement
+    mentionRoleEnabled?: boolean;
+    mentionRoleId?: string;
+    content?: string;
     title?: string;
-    description?: string;
     colorName?: string;
-    // welcome
-    message?: string;
-    imageUrl?: string;
-    // rulebook
-    rulesText?: string;
-    // zgloszenia
-    infoText?: string;
+    imageMode?: ImageMode;
+    imageFilename?: string;
+    uploadFileName?: string;
+    uploadMimeType?: string;
+    uploadBase64?: string;
 }
 
-export function buildEmbedJson(data: EmbedFormData): object {
-    switch (data.type) {
-        case 'announcement': {
-            const color = ColorChoices[data.colorName ?? ''] ?? HusariaColors.RED;
-            return new EmbedBuilder()
-                .setColor(color)
-                .setDescription(`# **${data.title}**\n${data.description}`)
-                .toJSON();
+export interface PublishMetadata {
+    publishedBy: string;
+    publishedByUserId?: string;
+}
+
+export interface DashboardMessagePayload {
+    content?: string;
+    allowed_mentions?: {
+        parse: string[];
+        roles?: string[];
+        users?: string[];
+    };
+}
+
+function isValidMode(mode: string): mode is PublishMode {
+    return mode === 'embedded' || mode === 'message';
+}
+
+function isValidImageMode(mode: string): mode is ImageMode {
+    return mode === 'none' || mode === 'library' || mode === 'upload';
+}
+
+function normalizeTrimmedString(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : '';
+}
+
+function extractRoleMentionIds(content: string): string[] {
+    const roleIds = new Set<string>();
+    const regex = /<@&(\d{17,20})>/g;
+
+    for (const match of content.matchAll(regex)) {
+        const roleId = match[1];
+        if (roleId) {
+            roleIds.add(roleId);
         }
-
-        case 'welcome': {
-            const normalizedImageUrl = data.imageUrl?.trim();
-            const embed = new EmbedBuilder()
-                .setColor(HusariaColors.RED)
-                .setDescription(`# **Witaj na Husarii!**\n${data.message}`);
-            if (normalizedImageUrl) embed.setImage(normalizedImageUrl);
-            return embed.toJSON();
-        }
-
-        case 'rulebook':
-            return new EmbedBuilder()
-                .setColor(HusariaColors.RED)
-                .setDescription(`# **Regulamin serwera G2 Hussars**\n${data.rulesText}`)
-                .toJSON();
-
-        case 'zgloszenia':
-            return new EmbedBuilder()
-                .setColor(HusariaColors.RED)
-                .setDescription(`# **Zgłoszenia**\n${data.infoText}`)
-                .toJSON();
     }
+
+    return [...roleIds];
+}
+
+function extractUserMentionIds(content: string): string[] {
+    const userIds = new Set<string>();
+    const regex = /<@!?(\d{17,20})>/g;
+
+    for (const match of content.matchAll(regex)) {
+        const userId = match[1];
+        if (userId) {
+            userIds.add(userId);
+        }
+    }
+
+    return [...userIds];
+}
+
+function hasEveryoneOrHereMention(content: string): boolean {
+    return /(^|\s)@(everyone|here)\b/.test(content);
+}
+
+function isBroadcastPingTarget(target: string): boolean {
+    return target === 'everyone' || target === 'here';
+}
+
+function withPublisherFooter(embed: EmbedBuilder, metadata: PublishMetadata): EmbedBuilder {
+    return embed
+        .setFooter({ text: `Opublikował: ${metadata.publishedBy}` })
+        .setTimestamp();
+}
+
+export function buildEmbedJson(data: EmbedFormData, metadata: PublishMetadata): object {
+    if (data.mode !== 'embedded') {
+        throw new Error('Nie można zbudować embeda dla trybu wiadomości.');
+    }
+
+    const color = ColorChoices[data.colorName ?? ''] ?? HusariaColors.RED;
+    const normalizedTitle = normalizeTrimmedString(data.title);
+    const normalizedContent = normalizeTrimmedString(data.content);
+
+    const description = normalizedTitle
+        ? `# **${normalizedTitle}**\n${normalizedContent}`
+        : normalizedContent;
+
+    const embed = new EmbedBuilder()
+        .setColor(color)
+        .setDescription(description);
+
+    return withPublisherFooter(embed, metadata).toJSON();
+}
+
+export function buildDashboardAllowedMentions(content: string): DashboardMessagePayload['allowed_mentions'] {
+    const roles = extractRoleMentionIds(content);
+    const users = extractUserMentionIds(content);
+    const parse = hasEveryoneOrHereMention(content) ? ['everyone'] : [];
+
+    return {
+        parse,
+        ...(roles.length > 0 ? { roles } : {}),
+        ...(users.length > 0 ? { users } : {}),
+    };
+}
+
+export function buildDashboardPingPayload(data: EmbedFormData): DashboardMessagePayload {
+    const mentionRoleId = normalizeTrimmedString(data.mentionRoleId);
+
+    if (!data.mentionRoleEnabled || !mentionRoleId) {
+        return {};
+    }
+
+    if (isBroadcastPingTarget(mentionRoleId)) {
+        return {
+            content: `@${mentionRoleId}`,
+            allowed_mentions: {
+                parse: ['everyone'],
+            },
+        };
+    }
+
+    if (!/^\d{17,20}$/.test(mentionRoleId)) {
+        return {};
+    }
+
+    return {
+        content: `<@&${mentionRoleId}>`,
+        allowed_mentions: {
+            parse: [],
+            roles: [mentionRoleId],
+        },
+    };
+}
+
+export function buildDashboardMessagePayload(data: EmbedFormData, metadata: PublishMetadata): DashboardMessagePayload {
+    if (data.mode !== 'message') {
+        return {};
+    }
+
+    const normalizedContent = normalizeTrimmedString(data.content);
+    const publisherLabel = metadata.publishedByUserId && /^\d{17,20}$/.test(metadata.publishedByUserId)
+        ? `<@${metadata.publishedByUserId}>`
+        : metadata.publishedBy;
+    const contentWithPublisher = normalizedContent
+        ? `${normalizedContent}\n\n*Opublikował*: ${publisherLabel}`
+        : `*Opublikował*: ${publisherLabel}`;
+
+    return {
+        content: contentWithPublisher,
+        allowed_mentions: buildDashboardAllowedMentions(contentWithPublisher),
+    };
 }
 
 export function validateEmbedForm(data: EmbedFormData): string | null {
-    switch (data.type) {
-        case 'announcement':
-            if (!data.title?.trim())       return 'Tytuł jest wymagany.';
-            if (!data.description?.trim()) return 'Treść jest wymagana.';
-            break;
-        case 'welcome':
-            if (!data.message?.trim()) return 'Wiadomość powitalna jest wymagana.';
-            if (data.imageUrl?.trim()) {
-                try {
-                    const parsed = new URL(data.imageUrl.trim());
-                    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-                        return 'URL bannera musi zaczynać się od http:// lub https://.';
-                    }
-                } catch {
-                    return 'URL bannera ma nieprawidłowy format.';
-                }
-            }
-            break;
-        case 'rulebook':
-            if (!data.rulesText?.trim()) return 'Treść regulaminu jest wymagana.';
-            break;
-        case 'zgloszenia':
-            if (!data.infoText?.trim()) return 'Tekst informacyjny jest wymagany.';
-            break;
+    if (!isValidMode(data.mode)) {
+        return 'Nieprawidłowy tryb wiadomości.';
     }
+
+    const normalizedContent = normalizeTrimmedString(data.content);
+    if (!normalizedContent) {
+        return 'Treść wiadomości jest wymagana.';
+    }
+
+    const normalizedTitle = normalizeTrimmedString(data.title);
+    if (data.mode === 'embedded' && normalizedTitle.length > 256) {
+        return 'Tytuł embeda może mieć maksymalnie 256 znaków.';
+    }
+
+    const normalizedMentionRoleId = normalizeTrimmedString(data.mentionRoleId);
+    if (data.mentionRoleEnabled) {
+        if (!normalizedMentionRoleId) {
+            return 'Wybierz rolę do pingowania.';
+        }
+    }
+
+    if (
+        normalizedMentionRoleId
+        && !isBroadcastPingTarget(normalizedMentionRoleId)
+        && !/^\d{17,20}$/.test(normalizedMentionRoleId)
+    ) {
+        return 'Wybrana rola ma nieprawidłowy identyfikator.';
+    }
+
+    const imageMode = data.imageMode ?? 'none';
+    if (!isValidImageMode(imageMode)) {
+        return 'Nieprawidłowy tryb grafiki.';
+    }
+
+    const normalizedImageFilename = normalizeTrimmedString(data.imageFilename);
+    if (imageMode === 'library' && !normalizedImageFilename) {
+        return 'Wybierz grafikę z biblioteki.';
+    }
+
+    if (imageMode === 'upload') {
+        const normalizedUploadFileName = normalizeTrimmedString(data.uploadFileName);
+        const normalizedUploadMimeType = normalizeTrimmedString(data.uploadMimeType);
+        const normalizedUploadBase64 = normalizeTrimmedString(data.uploadBase64);
+
+        if (!normalizedUploadFileName || !normalizedUploadMimeType || !normalizedUploadBase64) {
+            return 'Wgraj plik graficzny.';
+        }
+    }
+
     if (!data.channelId) return 'Wybierz kanał docelowy.';
     return null;
 }

@@ -47,6 +47,16 @@ export function buildHusariaEmbed(options: EmbedOptions): EmbedBuilder {
     .setDescription(fullDescription);
 }
 
+function applyPublisherFooter(embed: EmbedBuilder, publishedBy?: string): EmbedBuilder {
+    if (!publishedBy) {
+        return embed;
+    }
+
+    return embed
+        .setFooter({ text: `Opublikował: ${publishedBy}` })
+        .setTimestamp();
+}
+
 // ─── Match (Mecz) ────────────────────────────────────────────────────────────
 
 export interface MatchEmbedData {
@@ -57,6 +67,7 @@ export interface MatchEmbedData {
     competition: string;
     timestamp: number;
     stream?: string;
+    publishedBy?: string;
 }
 
 export function buildMatchEmbed(data: MatchEmbedData): EmbedBuilder {
@@ -76,7 +87,7 @@ export function buildMatchEmbed(data: MatchEmbedData): EmbedBuilder {
         embed.addFields({ name: '📺 Oglądaj live', value: data.stream, inline: false });
     }
 
-    return embed;
+    return applyPublisherFooter(embed, data.publishedBy);
 }
 
 // ─── Result (Wynik) ───────────────────────────────────────────────────────────
@@ -89,6 +100,7 @@ export interface ResultEmbedData {
     competition: string;
     comment?: string;
     isWin: boolean;
+    publishedBy?: string;
 }
 
 export function buildResultEmbed(data: ResultEmbedData): EmbedBuilder {
@@ -110,7 +122,7 @@ export function buildResultEmbed(data: ResultEmbedData): EmbedBuilder {
         embed.addFields({ name: '💬 Komentarz', value: data.comment, inline: false });
     }
 
-    return embed;
+    return applyPublisherFooter(embed, data.publishedBy);
 }
 
 // ─── Giveaway ─────────────────────────────────────────────────────────────────
@@ -119,16 +131,19 @@ export interface GiveawayEmbedData {
     prize: string;
     requirements: string;
     endsAt: number;
+    publishedBy?: string;
 }
 
 export function buildGiveawayEmbed(data: GiveawayEmbedData): EmbedBuilder {
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setColor(HusariaColors.GOLD)
         .setDescription(`# **🎁 GIVEAWAY**\n${data.prize}`)
         .addFields(
             { name: '📋 Wymagania', value: data.requirements,                                        inline: false },
             { name: '⏰ Koniec',    value: `<t:${data.endsAt}:F> (<t:${data.endsAt}:R>)`, inline: false },
         );
+
+    return applyPublisherFooter(embed, data.publishedBy);
 }
 
 // ─── Welcome ──────────────────────────────────────────────────────────────────
@@ -137,16 +152,19 @@ export interface WelcomeEmbedData {
     g2Emoji: string;
     message: string;
     memberCount: number;
+    publishedBy?: string;
 }
 
 export function buildWelcomeEmbed(data: WelcomeEmbedData): EmbedBuilder {
     const titleLine = [data.g2Emoji, 'Witaj na Husarii!'].filter(Boolean).join(' ');
 
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setColor(HusariaColors.RED)
         .setDescription(`# **${titleLine}**\n${data.message}`)
         .addFields({ name: 'Liczba Husarzy', value: `**${data.memberCount}**`, inline: false })
         .setImage('attachment://hussars_banner.png');
+
+    return applyPublisherFooter(embed, data.publishedBy);
 }
 
 // ─── Rulebook (Regulamin) ───────────────────────────────────────────────────
@@ -154,6 +172,7 @@ export function buildWelcomeEmbed(data: WelcomeEmbedData): EmbedBuilder {
 export interface RulebookEmbedData {
     rulesEmoji: string;
     message: string;
+    publishedBy?: string;
 }
 
 export function buildRulebookEmbed(data: RulebookEmbedData): EmbedBuilder {
@@ -161,9 +180,11 @@ export function buildRulebookEmbed(data: RulebookEmbedData): EmbedBuilder {
         .filter(Boolean)
         .join(' ');
 
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setColor(HusariaColors.RED)
         .setDescription(`# **${titleLine}**\n${data.message}`);
+
+    return applyPublisherFooter(embed, data.publishedBy);
 }
 
 // ─── Zgloszenia ─────────────────────────────────────────────────────────────
@@ -171,6 +192,7 @@ export function buildRulebookEmbed(data: RulebookEmbedData): EmbedBuilder {
 export interface ZgloszeniaEmbedData {
     reportsEmoji: string;
     message: string;
+    publishedBy?: string;
 }
 
 export function buildZgloszeniaEmbed(data: ZgloszeniaEmbedData): EmbedBuilder {
@@ -178,7 +200,9 @@ export function buildZgloszeniaEmbed(data: ZgloszeniaEmbedData): EmbedBuilder {
         .filter(Boolean)
         .join(' ');
 
-    return new EmbedBuilder()
+    const embed = new EmbedBuilder()
         .setColor(HusariaColors.RED)
         .setDescription(`# **${titleLine}**\n${data.message}`);
+
+    return applyPublisherFooter(embed, data.publishedBy);
 }

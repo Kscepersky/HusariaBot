@@ -8,7 +8,6 @@
 </head>
 <body>
 
-<!-- ── NAVBAR ─────────────────────────────────────────────────────────── -->
 <nav class="navbar">
   <div class="navbar-brand">
     <img src="/img/hussars_logo_80x80.png" class="navbar-logo" alt="HusariaBot">
@@ -20,61 +19,152 @@
   </div>
 </nav>
 
-<!-- ── MAIN ───────────────────────────────────────────────────────────── -->
 <main class="main">
-
-  <!-- Sidebar -->
   <aside class="sidebar">
     <nav class="sidebar-nav">
       <a href="#" class="sidebar-item active" data-section="embed-creator">
         <span class="sidebar-icon">🎨</span>
-        <span>Kreator Embeda</span>
+        <span>Kreator publikacji</span>
       </a>
-      <a href="#" class="sidebar-item" data-section="image-sender">
-        <span class="sidebar-icon">🖼️</span>
-        <span>Wyślij obraz</span>
-      </a>
-      <a href="#" class="sidebar-item disabled" title="Wkrótce">
-        <span class="sidebar-icon">🎟️</span>
-        <span>Tickety</span>
-        <span class="badge-soon">wkrótce</span>
-      </a>
-      <a href="#" class="sidebar-item disabled" title="Wkrótce">
-        <span class="sidebar-icon">📊</span>
-        <span>Statystyki</span>
-        <span class="badge-soon">wkrótce</span>
+      <a href="#" class="sidebar-item" data-section="scheduled-posts">
+        <span class="sidebar-icon">🗓️</span>
+        <span>Zaplanowane posty</span>
       </a>
     </nav>
   </aside>
 
-  <!-- Content -->
   <section class="content">
-
-    <!-- ── EMBED CREATOR ──────────────────────────────────────────────── -->
-    <div id="section-embed-creator" class="section-panel">
-
+    <div id="section-embed-creator" class="section-panel active">
       <div class="section-header">
-        <h2>🎨 Kreator Embeda</h2>
-        <p>Stwórz i wyślij embed bezpośrednio na wybrany kanał Discord. Obsługuje formatowanie Markdown.</p>
+        <h2>🎨 Kreator publikacji</h2>
+        <p>Twórz publikacje w trybie Embedded lub Wiadomość. Możesz pingnąć rolę oraz opcjonalnie dodać grafikę pod postem.</p>
       </div>
 
       <div class="creator-grid">
-
-        <!-- LEFT: Form -->
         <div class="creator-form-card">
-
-          <!-- Type Selector -->
           <div class="form-group">
-            <label class="form-label">Typ embeda</label>
-            <div class="type-tabs" id="type-tabs"></div>
+            <label class="form-label">Tryb publikacji</label>
+            <div class="mode-tabs" id="mode-tabs">
+              <button type="button" class="mode-tab active" data-mode="embedded">Embedded</button>
+              <button type="button" class="mode-tab" data-mode="message">Wiadomość</button>
+            </div>
           </div>
 
-          <!-- Dynamic Fields -->
-          <div id="dynamic-fields"></div>
+          <details class="form-group form-disclosure editor-suite" open>
+            <summary class="disclosure-summary">Narzędzia edytora</summary>
+            <div class="disclosure-content">
+              <div class="format-toolbar" id="format-toolbar">
+                <button type="button" class="toolbar-btn" data-wrap="**" title="Pogrubienie">B</button>
+                <button type="button" class="toolbar-btn" data-wrap="*" title="Kursywa">I</button>
+                <button type="button" class="toolbar-btn" data-wrap="__" title="Podkreślenie">U</button>
+                <button type="button" class="toolbar-btn" data-wrap="~~" title="Przekreślenie">S</button>
+                <button type="button" class="toolbar-btn" data-prefix="# " title="Nagłówek H1">H1</button>
+                <button type="button" class="toolbar-btn" data-prefix="## " title="Nagłówek H2">H2</button>
+                <button type="button" class="toolbar-btn" data-prefix="### " title="Nagłówek H3">H3</button>
+                <button type="button" class="toolbar-btn" data-prefix="> " title="Cytat">❝</button>
+                <button type="button" class="toolbar-btn" data-wrap="`" title="Kod inline">&lt;/&gt;</button>
+              </div>
 
-          <!-- Channel Selector -->
+              <div class="editor-popovers">
+                <div class="editor-popover" id="emoji-popover" hidden>
+                  <div class="popover-header">
+                    <span>Wstaw emotkę</span>
+                    <input type="text" id="emoji-search-input" class="popover-search" placeholder="Szukaj emotki...">
+                  </div>
+                  <div class="emoji-list" id="emoji-list"></div>
+                </div>
+
+                <div class="editor-popover" id="mention-popover" hidden>
+                  <div class="popover-header">
+                    <span>Wstaw wzmiankę</span>
+                  </div>
+
+                  <div class="mention-section">
+                    <span class="mention-label">Szybkie skróty</span>
+                    <div class="mention-list mention-list-inline" id="mention-quick-list">
+                      <button type="button" class="mention-chip mention-broadcast" data-token="@everyone">@everyone</button>
+                      <button type="button" class="mention-chip mention-broadcast" data-token="@here">@here</button>
+                    </div>
+                  </div>
+
+                  <div class="mention-section">
+                    <span class="mention-label">Kanały</span>
+                    <input type="text" id="mention-channel-search" class="popover-search" placeholder="Szukaj kanału...">
+                    <div class="mention-list" id="mention-channel-results"></div>
+                  </div>
+
+                  <div class="mention-section">
+                    <span class="mention-label">Role</span>
+                    <input type="text" id="mention-role-search" class="popover-search" placeholder="Szukaj roli...">
+                    <div class="mention-list" id="mention-role-results"></div>
+                  </div>
+
+                  <div class="mention-section">
+                    <span class="mention-label">Użytkownicy</span>
+                    <input type="text" id="mention-user-search" class="popover-search" placeholder="Szukaj użytkownika...">
+                    <div class="mention-user-results" id="mention-user-results"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <div class="form-group" id="title-group">
+            <label class="form-label" for="title">Tytuł (opcjonalnie)</label>
+            <input id="title" name="title" type="text" class="form-input" placeholder="np. Ważna informacja">
+          </div>
+
+          <div class="form-group" id="color-group">
+            <label class="form-label">Kolor embeda</label>
+            <div class="color-swatches" id="color-swatches">
+              <div class="color-swatch active" data-color="czerwony" title="Czerwony"></div>
+              <div class="color-swatch" data-color="biały" title="Biały"></div>
+              <div class="color-swatch" data-color="szary" title="Szary"></div>
+              <div class="color-swatch" data-color="złoty" title="Złoty"></div>
+            </div>
+          </div>
+
           <div class="form-group">
-            <label class="form-label" for="channel-select">📡 Kanał docelowy</label>
+            <label class="form-label" for="content-textarea">Treść</label>
+            <textarea id="content-textarea" name="content" class="form-textarea" rows="5" placeholder="Wpisz treść publikacji..."></textarea>
+          </div>
+
+          <details class="form-group form-disclosure" id="ping-role-group">
+            <summary class="disclosure-summary">Ping roli przy publikacji</summary>
+            <div class="disclosure-content">
+              <label class="form-checkbox">
+                <input type="checkbox" id="ping-role-enabled">
+                <span>Wyślij osobną wiadomość z wybranym pingiem przed publikacją.</span>
+              </label>
+              <select id="ping-role-select" class="form-select" disabled>
+                <option value="">Wybierz ping (@everyone, @here lub rolę)</option>
+              </select>
+            </div>
+          </details>
+
+          <details class="form-group form-disclosure" id="image-group">
+            <summary class="disclosure-summary">Wstaw grafikę (opcjonalnie)</summary>
+            <div class="disclosure-content">
+              <p class="form-help">Obsługiwane formaty: JPEG, PNG, GIF.</p>
+              <select id="image-mode-select" class="form-select">
+                <option value="none">Nie dodawaj grafiki</option>
+                <option value="library">Wybierz z biblioteki /img</option>
+                <option value="upload">Wgraj plik z komputera</option>
+              </select>
+
+              <div id="image-library-panel" class="image-option-panel" hidden>
+                <div class="image-grid" id="image-grid"></div>
+              </div>
+
+              <div id="image-upload-panel" class="image-option-panel" hidden>
+                <input type="file" id="image-upload-input" class="form-input" accept="image/png,image/jpeg,image/gif">
+                <p class="upload-file-name" id="upload-file-name">Nie wybrano pliku.</p>
+              </div>
+            </div>
+          </details>
+
+          <div class="form-group">
+            <label class="form-label" for="channel-select">Kanał docelowy</label>
             <div class="select-wrapper">
               <select id="channel-select" class="form-select">
                 <option value="">Ładowanie kanałów...</option>
@@ -82,18 +172,20 @@
             </div>
           </div>
 
-          <!-- Submit -->
+          <div class="form-group">
+            <label class="form-label" for="schedule-at">Publikacja zaplanowana (Europe/Warsaw)</label>
+            <input id="schedule-at" type="datetime-local" class="form-input">
+            <p class="form-help">Puste pole = publikacja natychmiast. Ustawiona data = post zaplanowany.</p>
+          </div>
+
           <button id="send-btn" class="btn-primary" disabled>
             <span class="btn-icon">📤</span>
-            <span id="send-btn-text">Wyślij embed</span>
+            <span id="send-btn-text">Opublikuj</span>
           </button>
-
         </div>
-
-        <!-- RIGHT: Preview -->
         <div class="creator-preview-card">
           <div class="preview-header">
-            <span>👁️ Podgląd</span>
+            <span>Podgląd</span>
             <span class="preview-note">wygląd przybliżony</span>
           </div>
           <div class="discord-mockup">
@@ -101,65 +193,43 @@
               <div class="discord-avatar"><img src="/img/hussars_logo_80x80.png" alt="HusariaBot"></div>
               <div class="discord-msg-content">
                 <span class="discord-bot-name">HusariaBot <span class="bot-badge">BOT</span></span>
-                <div class="discord-embed" id="embed-preview">
+                <div class="preview-ping-line" id="preview-ping-line" style="display:none"></div>
+                <div class="discord-embed" id="embed-preview-container">
                   <div class="embed-color-bar" id="embed-color-bar"></div>
                   <div class="embed-body">
-                    <div class="embed-description" id="preview-description">
-                      Wypełnij formularz, aby zobaczyć podgląd embeda.
-                    </div>
-                    <div class="embed-fields" id="preview-fields"></div>
+                    <div class="embed-description" id="preview-description">Wpisz treść publikacji.</div>
                   </div>
                 </div>
+                <div class="discord-plain-message" id="message-preview-container" style="display:none"></div>
+                <div class="preview-image-block" id="preview-image-block" style="display:none">
+                  <img class="preview-image" id="preview-image" src="" alt="Podgląd grafiki">
+                  <div class="preview-image-caption" id="preview-image-caption"></div>
+                </div>
+                <div class="preview-image-placeholder" id="preview-image-placeholder" style="display:none">🖼️ Wybierz grafikę, aby zobaczyć podgląd.</div>
               </div>
             </div>
           </div>
         </div>
+      </div>
+    </div>
 
-      </div><!-- /.creator-grid -->
-    </div><!-- /#section-embed-creator -->
-
-    <!-- ── IMAGE SENDER ───────────────────────────────────────────────── -->
-    <div id="section-image-sender" class="section-panel" style="display:none">
-
+    <div id="section-scheduled-posts" class="section-panel">
       <div class="section-header">
-        <h2>🖼️ Wyślij obraz</h2>
-        <p>Wybierz obraz z biblioteki i wyślij go na wybrany kanał Discord.</p>
+        <h2>🗓️ Zaplanowane posty</h2>
+        <p>Zarządzaj publikacjami oczekującymi. Możesz je edytować, usuwać i sprawdzić podgląd przed publikacją.</p>
       </div>
 
-      <div class="img-sender-grid">
-
-        <!-- Image grid -->
-        <div class="creator-form-card">
-          <div class="form-group">
-            <label class="form-label">Dostępne obrazy</label>
-            <div id="image-grid" class="image-grid"></div>
-          </div>
-
-          <!-- Channel Selector -->
-          <div class="form-group">
-            <label class="form-label" for="img-channel-select">📡 Kanał docelowy</label>
-            <div class="select-wrapper">
-              <select id="img-channel-select" class="form-select">
-                <option value="">Ładowanie kanałów...</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Submit -->
-          <button id="img-send-btn" class="btn-primary" disabled>
-            <span class="btn-icon">📤</span>
-            <span id="img-send-btn-text">Wyślij obraz</span>
-          </button>
+      <div class="creator-form-card">
+        <div class="scheduled-toolbar">
+          <button id="scheduled-refresh-btn" class="btn-secondary" type="button">Odśwież listę</button>
+          <span class="preview-note" id="scheduled-count-label">Ładowanie...</span>
         </div>
-
+        <div id="scheduled-list" class="scheduled-list"></div>
       </div>
-    </div><!-- /#section-image-sender -->
-
-  </section><!-- /.content -->
-
+    </div>
+  </section>
 </main>
 
-<!-- ── TOAST ──────────────────────────────────────────────────────────── -->
 <div id="toast-container"></div>
 
 <script src="/public/js/app.js"></script>

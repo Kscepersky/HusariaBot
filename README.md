@@ -28,7 +28,7 @@ The project contains two main runtime parts:
 
 - Modular slash command architecture
 - Role-based access control (`ADMIN_ROLE_ID`, `MODERATOR_ROLE_ID`)
-- Embed publishing flow with multiple templates
+- Dashboard-first embed publishing flow with multiple templates
 - Image sender from local `img/` assets
 - Ticket panel and per-user ticket channels with persistent counters
 - Admin dashboard with Discord OAuth2 authentication
@@ -93,8 +93,7 @@ Notes:
 | Command | Description | Access |
 | --- | --- | --- |
 | `/ping` | Health check and gateway latency | Admin/Moderator |
-| `/embed` | Opens embed publish flow | Admin/Moderator |
-| `/listemojis` | Exports server emoji definitions | Admin/Moderator |
+| `/dashboard` | Sends secure link to admin dashboard | Admin/Moderator |
 | `/sendimg` | Sends selected image from `img/` | Admin/Moderator |
 | `/ticketyconfig` | Publishes ticket panel | Admin/Moderator |
 

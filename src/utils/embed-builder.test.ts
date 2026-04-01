@@ -186,6 +186,22 @@ describe('buildMatchEmbed', () => {
         expect(json.footer).toBeUndefined();
         expect(json.timestamp).toBeUndefined();
     });
+
+    it('powinien dodać stopkę autora publikacji gdy podano publishedBy', () => {
+        const embed = buildMatchEmbed({
+            g2Emoji: '<:g2:123>',
+            gameEmoji: '<:lol:321>',
+            gameName: 'League of Legends',
+            rival: 'T1',
+            competition: 'MSI',
+            timestamp: 1743861600,
+            publishedBy: 'Admin',
+        });
+        const json = embed.toJSON();
+
+        expect(json.footer?.text).toBe('Opublikował: Admin');
+        expect(json.timestamp).toBeDefined();
+    });
 });
 
 describe('buildResultEmbed', () => {
@@ -202,6 +218,22 @@ describe('buildResultEmbed', () => {
 
         expect(json.footer).toBeUndefined();
         expect(json.timestamp).toBeUndefined();
+    });
+
+    it('powinien dodać stopkę autora publikacji gdy podano publishedBy', () => {
+        const embed = buildResultEmbed({
+            gameEmoji: '<:lol:321>',
+            gameName: 'League of Legends',
+            rival: 'T1',
+            score: '2:1',
+            competition: 'MSI',
+            isWin: true,
+            publishedBy: 'Moderator',
+        });
+        const json = embed.toJSON();
+
+        expect(json.footer?.text).toBe('Opublikował: Moderator');
+        expect(json.timestamp).toBeDefined();
     });
 });
 

@@ -1,10 +1,9 @@
 import { REST, Routes } from 'discord.js';
 import { config } from 'dotenv';
 import { pingCommand } from './commands/ping.js';
-import { embedCommand } from './commands/embed.js';
-import { listEmojisCommand } from './commands/listemojis.js';
 import { sendImgCommand } from './commands/sendimg.js';
 import { ticketyConfigCommand } from './commands/ticketyconfig.js';
+import { dashboardLinkCommand } from './commands/dashboardlink.js';
 
 config();
 
@@ -15,10 +14,9 @@ const guildId = process.env.GUILD_ID;
 // Zbierz dane wszystkich komend
 const commands = [
     pingCommand.data.toJSON(),
-    listEmojisCommand.data.toJSON(),
     sendImgCommand.data.toJSON(),
-    embedCommand.data.toJSON(),
     ticketyConfigCommand.data.toJSON(),
+    dashboardLinkCommand.data.toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(token);

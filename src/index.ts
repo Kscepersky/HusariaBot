@@ -1,20 +1,9 @@
 import { Client, GatewayIntentBits, Collection } from 'discord.js';
 import { config } from 'dotenv';
 import { pingCommand } from './commands/ping.js';
-import { listEmojisCommand } from './commands/listemojis.js';
 import { sendImgCommand } from './commands/sendimg.js';
 import { ticketyConfigCommand } from './commands/ticketyconfig.js';
-import {
-    embedCommand,
-    EMBED_MODAL_ANNOUNCEMENT,
-    EMBED_MODAL_WELCOME,
-    EMBED_MODAL_RULEBOOK,
-    EMBED_MODAL_ZGLOSZENIA,
-} from './commands/embed.js';
-import { handleAnnouncementModalSubmit } from './embeds/announcement.js';
-import { handleWelcomeModalSubmit }      from './embeds/welcome.js';
-import { handleRulebookModalSubmit }     from './embeds/rulebook.js';
-import { handleZgloszeniaModalSubmit }   from './embeds/zgloszenia.js';
+import { dashboardLinkCommand } from './commands/dashboardlink.js';
 import {
     handleAdminCloseReasonModalSubmit,
     handleAdminCloseTicketButton,
@@ -63,10 +52,9 @@ const client = new Client({
 // Zarejestruj komendy w kolekcji
 client.commands = new Collection();
 client.commands.set(pingCommand.data.name, pingCommand);
-client.commands.set(listEmojisCommand.data.name, listEmojisCommand);
 client.commands.set(sendImgCommand.data.name, sendImgCommand);
-client.commands.set(embedCommand.data.name, embedCommand);
 client.commands.set(ticketyConfigCommand.data.name, ticketyConfigCommand);
+client.commands.set(dashboardLinkCommand.data.name, dashboardLinkCommand);
 
 // Event: Bot jest gotowy
 client.on('clientReady', () => {
@@ -127,15 +115,7 @@ client.on('interactionCreate', async (interaction) => {
     // Obsługa modal submit (formularze)
     if (interaction.isModalSubmit()) {
         try {
-            if (interaction.customId === EMBED_MODAL_ANNOUNCEMENT) {
-                await handleAnnouncementModalSubmit(interaction);
-            } else if (interaction.customId === EMBED_MODAL_WELCOME) {
-                await handleWelcomeModalSubmit(interaction);
-            } else if (interaction.customId === EMBED_MODAL_RULEBOOK) {
-                await handleRulebookModalSubmit(interaction);
-            } else if (interaction.customId === EMBED_MODAL_ZGLOSZENIA) {
-                await handleZgloszeniaModalSubmit(interaction);
-            } else if (interaction.customId === TICKETS_CONFIG_MODAL_ID) {
+            if (interaction.customId === TICKETS_CONFIG_MODAL_ID) {
                 await handleTicketsConfigModalSubmit(interaction);
             } else if (interaction.customId === TICKET_CLOSE_ADMIN_REASON_MODAL_ID) {
                 await handleAdminCloseReasonModalSubmit(interaction);
