@@ -43,6 +43,7 @@ export interface PublishDashboardPostResult {
 export interface PublisherContext {
     publishedBy: string;
     publishedByUserId?: string;
+    editedAtTimestamp?: number;
 }
 
 function imgDirPath(): string {

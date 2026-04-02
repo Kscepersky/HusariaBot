@@ -40,15 +40,41 @@ let mentionRoleSearchRequestId = 0
 let mentionUserSearchRequestId = 0
 let embedSectionBound = false
 let scheduledSectionBound = false
+let sentSectionBound = false
+let eventsSectionBound = false
+let g2SectionBound = false
 let currentSection = 'embed-creator'
 let scheduledPosts = []
+let sentPosts = []
+let dashboardEvents = []
 let editingScheduledPostId = null
+let editingSentPostId = null
+let editingEventId = null
+
+let g2Matches = []
+let g2FilterOptions = {
+  games: [],
+  g2Teams: [],
+  tournaments: [],
+  statuses: [],
+}
+let g2SyncMeta = null
+let g2RefreshInProgress = false
+let g2RefreshCooldownMs = 30000
+let g2FilterDebounceId = null
+let g2LoadRequestId = 0
+
+let selectedMatchInfo = null
 
 document.addEventListener('DOMContentLoaded', async () => {
   loadUserInfo()
   initSidebarNav()
   await initEmbedSection()
   await initScheduledSection()
+  await initSentSection()
+  await initEventsSection()
+  await initG2Section()
+  await loadG2Matches({ silent: true })
   switchSection('embed-creator')
 })
 
@@ -108,6 +134,18 @@ function switchSection(section) {
     void loadScheduledPosts()
   }
 
+  if (section === 'sent-posts') {
+    void loadSentPosts()
+  }
+
+  if (section === 'events') {
+    void loadDashboardEvents()
+  }
+
+  if (section === 'g2-matches') {
+    void loadG2Matches({ silent: true })
+  }
+
   if (typeof window.onDashboardSectionChanged === 'function') {
     window.onDashboardSectionChanged(section)
   }
@@ -128,6 +166,9 @@ async function initEmbedSection() {
   renderMentionChannelResults([])
   renderMentionRoleResults([])
   renderMentionUserResults([])
+  renderMatchHelperOptions()
+  renderMatchHelperChips(null)
+  initializeTimestampInput()
 
   updateModeUI()
   updateImagePanels()
@@ -146,6 +187,31 @@ async function initScheduledSection() {
   if (!scheduledSectionBound) {
     scheduledSectionBound = true
     bindScheduledSectionListeners()
+  }
+}
+
+async function initSentSection() {
+  await loadSentPosts()
+
+  if (!sentSectionBound) {
+    sentSectionBound = true
+    bindSentSectionListeners()
+  }
+}
+
+async function initEventsSection() {
+  await loadDashboardEvents()
+
+  if (!eventsSectionBound) {
+    eventsSectionBound = true
+    bindEventsSectionListeners()
+  }
+}
+
+async function initG2Section() {
+  if (!g2SectionBound) {
+    g2SectionBound = true
+    bindG2SectionListeners()
   }
 }
 
@@ -340,6 +406,19 @@ function bindEmbedSectionListeners() {
   const contentTextarea = document.getElementById('content-textarea')
   const channelSelect = document.getElementById('channel-select')
   const scheduleAtInput = document.getElementById('schedule-at')
+  const matchHelperEnabledInput = document.getElementById('match-helper-enabled')
+  const matchHelperSearchInput = document.getElementById('match-helper-search')
+  const matchHelperSelectInput = document.getElementById('match-helper-select')
+  const matchHelperChips = document.getElementById('match-helper-chips')
+  const eventEnabledInput = document.getElementById('event-enabled')
+  const eventFields = document.getElementById('event-fields')
+  const eventTitleInput = document.getElementById('event-title')
+  const eventDescriptionInput = document.getElementById('event-description')
+  const eventLocationInput = document.getElementById('event-location')
+  const eventStartAtInput = document.getElementById('event-start-at')
+  const eventEndAtInput = document.getElementById('event-end-at')
+  const timestampDateTimeInput = document.getElementById('timestamp-datetime')
+  const timestampFormatList = document.getElementById('timestamp-format-list')
 
   const updateHandler = () => {
     updatePreview()
@@ -358,6 +437,107 @@ function bindEmbedSectionListeners() {
 
   channelSelect?.addEventListener('change', updateSendButton)
   scheduleAtInput?.addEventListener('change', updateSendButton)
+
+  matchHelperEnabledInput?.addEventListener('change', () => {
+    const enabled = Boolean(matchHelperEnabledInput.checked)
+    if (matchHelperSearchInput) {
+      matchHelperSearchInput.disabled = !enabled
+      if (!enabled) {
+        matchHelperSearchInput.value = ''
+      }
+    }
+
+    if (matchHelperSelectInput) {
+      matchHelperSelectInput.disabled = !enabled
+      if (!enabled) {
+        matchHelperSelectInput.value = ''
+      }
+    }
+
+    if (!enabled) {
+      selectedMatchInfo = null
+      renderMatchHelperChips(null)
+    }
+
+    renderMatchHelperOptions()
+    updateEventDefaultsFromMatch()
+    updatePreview()
+    updateSendButton()
+  })
+
+  matchHelperSearchInput?.addEventListener('input', () => {
+    renderMatchHelperOptions()
+  })
+
+  matchHelperSelectInput?.addEventListener('change', () => {
+    selectedMatchInfo = findMatchById(matchHelperSelectInput.value)
+    renderMatchHelperChips(selectedMatchInfo)
+    updateEventDefaultsFromMatch()
+    updatePreview()
+    updateSendButton()
+  })
+
+  matchHelperChips?.addEventListener('click', (event) => {
+    const chip = event.target.closest('[data-token]')
+    const token = chip?.dataset.token
+    if (!token) {
+      return
+    }
+
+    insertToken(token)
+  })
+
+  eventEnabledInput?.addEventListener('change', () => {
+    if (eventFields) {
+      eventFields.hidden = !eventEnabledInput.checked
+    }
+
+    updateEventDefaultsFromMatch()
+    updatePreview()
+    updateSendButton()
+  })
+
+  ;[
+    eventTitleInput,
+    eventDescriptionInput,
+    eventLocationInput,
+    eventStartAtInput,
+    eventEndAtInput,
+  ].forEach((input) => {
+    input?.addEventListener('input', updateHandler)
+    input?.addEventListener('change', updateHandler)
+  })
+
+  timestampDateTimeInput?.addEventListener('change', updatePreview)
+
+  document.querySelectorAll('.timestamp-preset').forEach((button) => {
+    button.addEventListener('click', () => {
+      const offsetMinutesRaw = Number.parseInt(button.dataset.offsetMinutes ?? '0', 10)
+      if (!Number.isFinite(offsetMinutesRaw) || !timestampDateTimeInput) {
+        return
+      }
+
+      const targetTimestamp = Date.now() + (offsetMinutesRaw * 60 * 1000)
+      timestampDateTimeInput.value = formatTimestampForDateTimeInput(targetTimestamp)
+      updatePreview()
+    })
+  })
+
+  timestampFormatList?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-token-format]')
+    const tokenFormat = button?.dataset.tokenFormat
+    if (!tokenFormat) {
+      return
+    }
+
+    const unixTimestamp = resolveTimestampInsertUnix()
+    if (!unixTimestamp) {
+      showToast('Ustaw poprawną datę timestampu.', 'error')
+      return
+    }
+
+    insertToken(`<t:${unixTimestamp}:${tokenFormat}>`)
+  })
 
   document.querySelectorAll('.color-swatch').forEach((swatch) => {
     swatch.addEventListener('click', () => {
@@ -408,6 +588,76 @@ function bindScheduledSectionListeners() {
   })
 }
 
+function bindSentSectionListeners() {
+  const refreshButton = document.getElementById('sent-refresh-btn')
+  refreshButton?.addEventListener('click', () => {
+    void loadSentPosts()
+  })
+
+  const list = document.getElementById('sent-list')
+  list?.addEventListener('click', async (event) => {
+    const actionButton = event.target.closest('button[data-action]')
+    const action = actionButton?.dataset.action
+    const postId = actionButton?.dataset.postId
+
+    if (!action || !postId) {
+      return
+    }
+
+    if (action === 'edit') {
+      await openSentPostForEdit(postId)
+      return
+    }
+
+    if (action === 'retry-event') {
+      await retrySentPostEvent(postId)
+      return
+    }
+
+    if (action === 'delete') {
+      await deleteSentPost(postId)
+    }
+  })
+}
+
+function bindEventsSectionListeners() {
+  const refreshButton = document.getElementById('events-refresh-btn')
+  const saveButton = document.getElementById('events-save-btn')
+  const cancelButton = document.getElementById('events-cancel-btn')
+  const list = document.getElementById('events-list')
+
+  refreshButton?.addEventListener('click', () => {
+    void loadDashboardEvents()
+  })
+
+  saveButton?.addEventListener('click', async () => {
+    await saveDashboardEvent()
+  })
+
+  cancelButton?.addEventListener('click', () => {
+    resetDashboardEventForm()
+  })
+
+  list?.addEventListener('click', async (event) => {
+    const actionButton = event.target.closest('button[data-action]')
+    const action = actionButton?.dataset.action
+    const eventId = actionButton?.dataset.eventId
+
+    if (!action || !eventId) {
+      return
+    }
+
+    if (action === 'edit') {
+      openDashboardEventForEdit(eventId)
+      return
+    }
+
+    if (action === 'delete') {
+      await deleteDashboardEvent(eventId)
+    }
+  })
+}
+
 async function loadScheduledPosts() {
   try {
     const response = await fetch('/api/scheduled')
@@ -422,6 +672,44 @@ async function loadScheduledPosts() {
   } catch (error) {
     scheduledPosts = []
     renderScheduledPosts()
+    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
+async function loadSentPosts() {
+  try {
+    const response = await fetch('/api/scheduled/sent')
+    const json = await parseApiResponse(response)
+
+    if (!response.ok) {
+      throw new Error(json.error ?? 'Nie udało się pobrać listy wysłanych postów.')
+    }
+
+    sentPosts = Array.isArray(json.posts) ? json.posts : []
+    renderSentPosts()
+  } catch (error) {
+    sentPosts = []
+    renderSentPosts()
+    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
+async function loadDashboardEvents() {
+  try {
+    const response = await fetch('/api/events')
+    const json = await parseApiResponse(response)
+
+    if (!response.ok) {
+      throw new Error(json.error ?? 'Nie udało się pobrać listy wydarzeń Discord.')
+    }
+
+    dashboardEvents = Array.isArray(json.events) ? json.events : []
+    renderDashboardEvents()
+  } catch (error) {
+    dashboardEvents = []
+    renderDashboardEvents()
     const message = error instanceof Error ? error.message : 'Nieznany błąd'
     showToast(`❌ ${message}`, 'error')
   }
@@ -471,6 +759,250 @@ function renderScheduledPosts() {
   }).join('')
 }
 
+function renderSentPosts() {
+  const list = document.getElementById('sent-list')
+  const counter = document.getElementById('sent-count-label')
+  if (!list || !counter) {
+    return
+  }
+
+  counter.textContent = `Wysłane: ${sentPosts.length}`
+
+  if (sentPosts.length === 0) {
+    list.innerHTML = '<div class="scheduled-empty">Brak wysłanych postów (historia zaczyna się po wdrożeniu refaktoru).</div>'
+    return
+  }
+
+  list.innerHTML = sentPosts.map((post) => {
+    const modeLabel = post?.payload?.mode === 'message' ? 'Wiadomość' : 'Embedded'
+    const channelName = channels.find((channel) => channel.id === post?.payload?.channelId)?.name ?? 'nieznany-kanał'
+    const sentAtLabel = post.sentAt ? formatTimestampInWarsaw(post.sentAt) : formatTimestampInWarsaw(post.updatedAt)
+    const eventStatus = post.eventStatus ?? 'not_requested'
+    const eventLabelMap = {
+      not_requested: 'Event: brak',
+      pending: 'Event: oczekuje',
+      created: 'Event: utworzono',
+      failed: 'Event: błąd',
+    }
+
+    const previewHtml = post?.payload?.mode === 'embedded'
+      ? renderPreviewEmbedText(post?.payload?.title ?? '', post?.payload?.content ?? '')
+      : (renderMarkdown(post?.payload?.content ?? '') || '<span style="opacity:.45">Brak treści.</span>')
+
+    return `
+      <article class="scheduled-card">
+        <div class="scheduled-card-header">
+          <span class="scheduled-card-title">Post ${escapeHtml(post.id.slice(0, 8))}</span>
+          <span class="scheduled-chip">${escapeHtml(modeLabel)}</span>
+        </div>
+        <div class="scheduled-card-meta">
+          <span class="scheduled-chip">Kanał: #${escapeHtml(channelName)}</span>
+          <span class="scheduled-chip">Wysłano: ${escapeHtml(sentAtLabel)}</span>
+          <span class="scheduled-chip">${escapeHtml(eventLabelMap[eventStatus] ?? 'Event: brak')}</span>
+        </div>
+        <div class="scheduled-preview">${previewHtml}</div>
+        <div class="scheduled-actions">
+          <button type="button" class="btn-secondary" data-action="edit" data-post-id="${escapeHtml(post.id)}">Edytuj</button>
+          ${eventStatus === 'failed'
+            ? `<button type="button" class="btn-secondary" data-action="retry-event" data-post-id="${escapeHtml(post.id)}">Ponów event</button>`
+            : ''}
+          <button type="button" class="btn-secondary" data-action="delete" data-post-id="${escapeHtml(post.id)}">Usuń</button>
+        </div>
+      </article>`
+  }).join('')
+}
+
+function renderDashboardEvents() {
+  const list = document.getElementById('events-list')
+  const counter = document.getElementById('events-count-label')
+
+  if (!list || !counter) {
+    return
+  }
+
+  counter.textContent = `Wydarzenia: ${dashboardEvents.length}`
+
+  if (dashboardEvents.length === 0) {
+    list.innerHTML = '<div class="scheduled-empty">Brak wydarzeń Discord.</div>'
+    return
+  }
+
+  list.innerHTML = dashboardEvents.map((event) => {
+    const eventId = String(event.id ?? '')
+    const name = String(event.name ?? 'Bez nazwy')
+    const description = String(event.description ?? '')
+    const location = String(event.location ?? 'Online')
+    const startIso = String(event.scheduledStartTimeIso ?? '')
+    const endIso = String(event.scheduledEndTimeIso ?? '')
+    const startLabel = Number.isFinite(Date.parse(startIso))
+      ? formatTimestampInWarsaw(Date.parse(startIso))
+      : 'Nie ustawiono'
+    const endLabel = Number.isFinite(Date.parse(endIso))
+      ? formatTimestampInWarsaw(Date.parse(endIso))
+      : 'Nie ustawiono'
+
+    return `
+      <article class="scheduled-card">
+        <div class="scheduled-card-header">
+          <span class="scheduled-card-title">${escapeHtml(name)}</span>
+          <span class="scheduled-chip">ID: ${escapeHtml(eventId.slice(0, 8))}</span>
+        </div>
+        <div class="scheduled-card-meta">
+          <span class="scheduled-chip">Start: ${escapeHtml(startLabel)}</span>
+          <span class="scheduled-chip">Koniec: ${escapeHtml(endLabel)}</span>
+          <span class="scheduled-chip">Miejsce: ${escapeHtml(location)}</span>
+        </div>
+        <div class="scheduled-preview">${renderMarkdown(description) || '<span style="opacity:.45">Brak opisu.</span>'}</div>
+        <div class="scheduled-actions">
+          <button type="button" class="btn-secondary" data-action="edit" data-event-id="${escapeHtml(eventId)}">Edytuj</button>
+          <button type="button" class="btn-secondary" data-action="delete" data-event-id="${escapeHtml(eventId)}">Usuń</button>
+        </div>
+      </article>`
+  }).join('')
+}
+
+function collectDashboardEventForm() {
+  return {
+    title: String(document.getElementById('events-title')?.value ?? '').trim(),
+    description: String(document.getElementById('events-description')?.value ?? '').trim(),
+    location: String(document.getElementById('events-location')?.value ?? '').trim(),
+    startAtLocal: String(document.getElementById('events-start-at')?.value ?? '').trim(),
+    endAtLocal: String(document.getElementById('events-end-at')?.value ?? '').trim(),
+  }
+}
+
+function setDashboardEventForm(eventData) {
+  const titleInput = document.getElementById('events-title')
+  const descriptionInput = document.getElementById('events-description')
+  const locationInput = document.getElementById('events-location')
+  const startInput = document.getElementById('events-start-at')
+  const endInput = document.getElementById('events-end-at')
+
+  if (titleInput) {
+    titleInput.value = String(eventData.name ?? '')
+  }
+
+  if (descriptionInput) {
+    descriptionInput.value = String(eventData.description ?? '')
+  }
+
+  if (locationInput) {
+    locationInput.value = String(eventData.location ?? 'Online')
+  }
+
+  if (startInput) {
+    const startIso = String(eventData.scheduledStartTimeIso ?? '')
+    startInput.value = Number.isFinite(Date.parse(startIso))
+      ? formatTimestampForDateTimeInput(Date.parse(startIso))
+      : ''
+  }
+
+  if (endInput) {
+    const endIso = String(eventData.scheduledEndTimeIso ?? '')
+    endInput.value = Number.isFinite(Date.parse(endIso))
+      ? formatTimestampForDateTimeInput(Date.parse(endIso))
+      : ''
+  }
+}
+
+function resetDashboardEventForm() {
+  editingEventId = null
+
+  const titleInput = document.getElementById('events-title')
+  const descriptionInput = document.getElementById('events-description')
+  const locationInput = document.getElementById('events-location')
+  const startInput = document.getElementById('events-start-at')
+  const endInput = document.getElementById('events-end-at')
+  const saveButton = document.getElementById('events-save-btn')
+  const cancelButton = document.getElementById('events-cancel-btn')
+
+  if (titleInput) titleInput.value = ''
+  if (descriptionInput) descriptionInput.value = ''
+  if (locationInput) locationInput.value = 'Online'
+  if (startInput) startInput.value = ''
+  if (endInput) endInput.value = ''
+  if (saveButton) saveButton.textContent = 'Utwórz wydarzenie'
+  if (cancelButton) cancelButton.style.display = 'none'
+}
+
+function openDashboardEventForEdit(eventId) {
+  const selectedEvent = dashboardEvents.find((event) => String(event.id) === String(eventId))
+  if (!selectedEvent) {
+    showToast('❌ Nie znaleziono wydarzenia do edycji.', 'error')
+    return
+  }
+
+  editingEventId = String(selectedEvent.id)
+  setDashboardEventForm(selectedEvent)
+
+  const saveButton = document.getElementById('events-save-btn')
+  const cancelButton = document.getElementById('events-cancel-btn')
+  if (saveButton) saveButton.textContent = 'Zapisz zmiany wydarzenia'
+  if (cancelButton) cancelButton.style.display = ''
+}
+
+async function saveDashboardEvent() {
+  try {
+    const isEditing = Boolean(editingEventId)
+    const payload = collectDashboardEventForm()
+
+    const requestUrl = isEditing
+      ? `/api/events/${encodeURIComponent(editingEventId)}`
+      : '/api/events'
+    const requestMethod = isEditing ? 'PATCH' : 'POST'
+
+    const response = await fetch(requestUrl, {
+      method: requestMethod,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    })
+
+    const json = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(json.error ?? 'Nie udało się zapisać wydarzenia Discord.')
+    }
+
+    await loadDashboardEvents()
+    resetDashboardEventForm()
+    showToast(isEditing
+      ? '✅ Wydarzenie Discord zostało zaktualizowane.'
+      : '✅ Wydarzenie Discord zostało utworzone.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
+async function deleteDashboardEvent(eventId) {
+  const shouldDelete = window.confirm('Czy na pewno chcesz usunąć to wydarzenie Discord?')
+  if (!shouldDelete) {
+    return
+  }
+
+  try {
+    const response = await fetch(`/api/events/${encodeURIComponent(eventId)}`, {
+      method: 'DELETE',
+    })
+    const json = await parseApiResponse(response)
+
+    if (!response.ok) {
+      throw new Error(json.error ?? 'Nie udało się usunąć wydarzenia Discord.')
+    }
+
+    if (editingEventId === eventId) {
+      resetDashboardEventForm()
+    }
+
+    await loadDashboardEvents()
+    showToast('🗑️ Wydarzenie Discord zostało usunięte.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
 async function openScheduledPostForEdit(postId) {
   try {
     const response = await fetch(`/api/scheduled/${encodeURIComponent(postId)}`)
@@ -494,10 +1026,60 @@ async function openScheduledPostForEdit(postId) {
   }
 }
 
+async function openSentPostForEdit(postId) {
+  try {
+    const response = await fetch(`/api/scheduled/sent/${encodeURIComponent(postId)}`)
+    const json = await parseApiResponse(response)
+
+    if (!response.ok) {
+      throw new Error(json.error ?? 'Nie udało się pobrać wysłanego posta.')
+    }
+
+    const post = json.post
+    if (!post || !post.payload) {
+      throw new Error('Nieprawidłowe dane wysłanego posta.')
+    }
+
+    applySentPostToCreator(post)
+    switchSection('embed-creator')
+    showToast('✏️ Załadowano wysłany post do edycji.', 'info')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
 function applyScheduledPostToCreator(post) {
   editingScheduledPostId = post.id
-  currentMode = post.payload.mode === 'message' ? 'message' : 'embedded'
-  selectedColor = post.payload.colorName || 'czerwony'
+  editingSentPostId = null
+  applyPostPayloadToCreator(post.payload)
+
+  const scheduleInput = document.getElementById('schedule-at')
+  if (scheduleInput) {
+    scheduleInput.value = formatTimestampForDateTimeInput(post.scheduledFor)
+  }
+
+  updatePreview()
+  updateSendButton()
+}
+
+function applySentPostToCreator(post) {
+  editingSentPostId = post.id
+  editingScheduledPostId = null
+  applyPostPayloadToCreator(post.payload)
+
+  const scheduleInput = document.getElementById('schedule-at')
+  if (scheduleInput) {
+    scheduleInput.value = ''
+  }
+
+  updatePreview()
+  updateSendButton()
+}
+
+function applyPostPayloadToCreator(payload) {
+  currentMode = payload.mode === 'message' ? 'message' : 'embedded'
+  selectedColor = payload.colorName || 'czerwony'
 
   const titleInput = document.getElementById('title')
   const contentTextarea = document.getElementById('content-textarea')
@@ -505,58 +1087,119 @@ function applyScheduledPostToCreator(post) {
   const pingToggle = document.getElementById('ping-role-enabled')
   const pingSelect = document.getElementById('ping-role-select')
   const imageModeSelect = document.getElementById('image-mode-select')
-  const scheduleInput = document.getElementById('schedule-at')
+  const matchHelperEnabledInput = document.getElementById('match-helper-enabled')
+  const eventEnabledInput = document.getElementById('event-enabled')
+  const eventFields = document.getElementById('event-fields')
+  const eventTitleInput = document.getElementById('event-title')
+  const eventDescriptionInput = document.getElementById('event-description')
+  const eventLocationInput = document.getElementById('event-location')
+  const eventStartAtInput = document.getElementById('event-start-at')
+  const eventEndAtInput = document.getElementById('event-end-at')
 
   if (titleInput) {
-    titleInput.value = post.payload.title ?? ''
+    titleInput.value = payload.title ?? ''
   }
 
   if (contentTextarea) {
-    contentTextarea.value = post.payload.content ?? ''
+    contentTextarea.value = payload.content ?? ''
   }
 
   if (channelSelect) {
-    channelSelect.value = post.payload.channelId ?? ''
+    channelSelect.value = payload.channelId ?? ''
   }
 
   if (pingToggle) {
-    pingToggle.checked = post.payload.mentionRoleEnabled === true
+    pingToggle.checked = payload.mentionRoleEnabled === true
   }
 
   renderPingRoleSelector()
   if (pingSelect) {
-    pingSelect.value = post.payload.mentionRoleId ?? ''
+    pingSelect.value = payload.mentionRoleId ?? ''
     pingSelect.disabled = !(pingToggle?.checked ?? false)
   }
 
   if (imageModeSelect) {
-    imageModeSelect.value = post.payload.imageMode ?? 'none'
+    imageModeSelect.value = payload.imageMode ?? 'none'
   }
 
-  selectedImageName = post.payload.imageMode === 'library'
-    ? (post.payload.imageFilename ?? null)
+  selectedImageName = payload.imageMode === 'library'
+    ? (payload.imageFilename ?? null)
     : null
   selectedUploadFile = null
   scheduledStoredUpload = null
   clearUploadPreviewUrl()
 
-  if (post.payload.imageMode === 'upload' && post.payload.uploadBase64) {
+  if (payload.imageMode === 'upload' && payload.uploadBase64) {
     scheduledStoredUpload = {
-      uploadFileName: post.payload.uploadFileName ?? '',
-      uploadMimeType: post.payload.uploadMimeType ?? '',
-      uploadBase64: post.payload.uploadBase64,
+      uploadFileName: payload.uploadFileName ?? '',
+      uploadMimeType: payload.uploadMimeType ?? '',
+      uploadBase64: payload.uploadBase64,
     }
 
     const fileNameElement = document.getElementById('upload-file-name')
     if (fileNameElement) {
-      fileNameElement.textContent = post.payload.uploadFileName
-        ? `Zachowano: ${post.payload.uploadFileName}`
+      fileNameElement.textContent = payload.uploadFileName
+        ? `Zachowano: ${payload.uploadFileName}`
         : 'Zachowano zapisany upload.'
+    }
+  } else {
+    const fileNameElement = document.getElementById('upload-file-name')
+    if (fileNameElement) {
+      fileNameElement.textContent = 'Nie wybrano pliku.'
     }
   }
 
-  if (scheduleInput) {
-    scheduleInput.value = formatTimestampForDateTimeInput(post.scheduledFor)
+  if (matchHelperEnabledInput) {
+    const hasMatch = Boolean(payload.matchInfo?.matchId)
+    matchHelperEnabledInput.checked = hasMatch
+    selectedMatchInfo = hasMatch
+      ? {
+        ...payload.matchInfo,
+        beginAtTimestamp: payload.matchInfo?.beginAtUtc ? Date.parse(payload.matchInfo.beginAtUtc) : null,
+      }
+      : null
+  }
+
+  const matchHelperSearchInput = document.getElementById('match-helper-search')
+  const matchHelperSelectInput = document.getElementById('match-helper-select')
+  if (matchHelperSearchInput) {
+    matchHelperSearchInput.disabled = !(matchHelperEnabledInput?.checked ?? false)
+  }
+
+  if (matchHelperSelectInput) {
+    matchHelperSelectInput.disabled = !(matchHelperEnabledInput?.checked ?? false)
+  }
+
+  renderMatchHelperOptions()
+  renderMatchHelperChips(selectedMatchInfo)
+
+  const eventEnabled = Boolean(payload.eventDraft?.enabled)
+  if (eventEnabledInput) {
+    eventEnabledInput.checked = eventEnabled
+  }
+
+  if (eventFields) {
+    eventFields.hidden = !eventEnabled
+  }
+
+  if (eventTitleInput) {
+    eventTitleInput.value = payload.eventDraft?.title ?? ''
+  }
+
+  if (eventDescriptionInput) {
+    eventDescriptionInput.value = payload.eventDraft?.description ?? ''
+  }
+
+  if (eventLocationInput) {
+    eventLocationInput.value = payload.eventDraft?.location ?? ''
+  }
+
+  if (eventStartAtInput) {
+    eventStartAtInput.value = payload.eventDraft?.startAtLocal ?? ''
+  }
+
+  if (eventEndAtInput) {
+    eventEndAtInput.value = payload.eventDraft?.endAtLocal ?? ''
   }
 
   updateModeUI()
@@ -567,8 +1210,6 @@ function applyScheduledPostToCreator(post) {
     swatch.classList.toggle('active', swatch.dataset.color === selectedColor)
   })
 
-  updatePreview()
-  updateSendButton()
 }
 
 async function deleteScheduledPost(postId) {
@@ -599,6 +1240,56 @@ async function deleteScheduledPost(postId) {
   }
 }
 
+async function retrySentPostEvent(postId) {
+  try {
+    const response = await fetch(`/api/scheduled/sent/${encodeURIComponent(postId)}/retry-event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    const json = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(json.error ?? 'Nie udało się ponowić tworzenia wydarzenia Discord.')
+    }
+
+    await loadSentPosts()
+    showToast('✅ Wydarzenie Discord zostało utworzone.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
+async function deleteSentPost(postId) {
+  const shouldDelete = window.confirm('Czy na pewno chcesz usunąć wysłany post z historii?')
+  if (!shouldDelete) {
+    return
+  }
+
+  try {
+    const response = await fetch(`/api/scheduled/sent/${encodeURIComponent(postId)}`, {
+      method: 'DELETE',
+    })
+
+    const json = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(json.error ?? 'Nie udało się usunąć wysłanego posta.')
+    }
+
+    if (editingSentPostId === postId) {
+      editingSentPostId = null
+    }
+
+    await loadSentPosts()
+    showToast('🗑️ Wysłany post został usunięty z historii.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
 function formatTimestampInWarsaw(timestamp) {
   return new Intl.DateTimeFormat('pl-PL', {
     timeZone: 'Europe/Warsaw',
@@ -623,6 +1314,437 @@ function formatTimestampForDateTimeInput(timestamp) {
   }).format(new Date(timestamp))
 
   return parts.replace(' ', 'T')
+}
+
+function initializeTimestampInput() {
+  const timestampInput = document.getElementById('timestamp-datetime')
+  if (!timestampInput || timestampInput.value) {
+    return
+  }
+
+  timestampInput.value = formatTimestampForDateTimeInput(Date.now())
+}
+
+function resolveTimestampInsertUnix() {
+  const timestampInput = document.getElementById('timestamp-datetime')
+  const dateTimeValue = timestampInput?.value?.trim() ?? ''
+
+  if (!dateTimeValue) {
+    return Math.floor(Date.now() / 1000)
+  }
+
+  const timestamp = Date.parse(dateTimeValue)
+  if (!Number.isFinite(timestamp)) {
+    return null
+  }
+
+  return Math.floor(timestamp / 1000)
+}
+
+function bindG2SectionListeners() {
+  const refreshButton = document.getElementById('g2-refresh-btn')
+  const gameFilter = document.getElementById('g2-filter-game')
+  const g2TeamFilter = document.getElementById('g2-filter-g2-team')
+  const tournamentFilter = document.getElementById('g2-filter-tournament')
+  const statusFilter = document.getElementById('g2-filter-status')
+  const opponentFilter = document.getElementById('g2-filter-opponent')
+
+  refreshButton?.addEventListener('click', async () => {
+    await refreshG2Matches()
+  })
+
+  const triggerFilterReload = () => {
+    if (g2FilterDebounceId) {
+      clearTimeout(g2FilterDebounceId)
+    }
+
+    g2FilterDebounceId = setTimeout(async () => {
+      await loadG2Matches({ silent: true })
+    }, 220)
+  }
+
+  gameFilter?.addEventListener('change', triggerFilterReload)
+  g2TeamFilter?.addEventListener('change', triggerFilterReload)
+  tournamentFilter?.addEventListener('change', triggerFilterReload)
+  statusFilter?.addEventListener('change', triggerFilterReload)
+  opponentFilter?.addEventListener('input', triggerFilterReload)
+}
+
+async function loadG2Matches({ silent } = { silent: false }) {
+  g2LoadRequestId += 1
+  const requestId = g2LoadRequestId
+
+  const params = buildG2FilterQueryParams()
+  const query = params.toString()
+  const requestUrl = query ? `/api/g2-matches?${query}` : '/api/g2-matches'
+
+  try {
+    const response = await fetch(requestUrl)
+    const payload = await parseApiResponse(response)
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udało się pobrać bazy meczów G2.')
+    }
+
+    if (requestId !== g2LoadRequestId) {
+      return
+    }
+
+    g2Matches = Array.isArray(payload.matches) ? payload.matches : []
+    g2FilterOptions = payload.filters ?? { games: [], g2Teams: [], tournaments: [], statuses: [] }
+    g2SyncMeta = payload.meta ?? null
+    g2RefreshInProgress = Boolean(payload.refreshInProgress)
+    g2RefreshCooldownMs = Number.isFinite(payload.refreshCooldownMs) ? payload.refreshCooldownMs : 30000
+
+    renderG2Filters()
+    renderG2MatchesList()
+    updateG2Meta()
+    renderMatchHelperOptions()
+  } catch (error) {
+    if (requestId !== g2LoadRequestId) {
+      return
+    }
+
+    g2Matches = []
+    g2FilterOptions = {
+      games: [],
+      g2Teams: [],
+      tournaments: [],
+      statuses: [],
+    }
+    g2SyncMeta = null
+    g2RefreshInProgress = false
+    renderG2Filters()
+    renderG2MatchesList()
+    updateG2Meta()
+    renderMatchHelperOptions()
+
+    if (!silent) {
+      const message = error instanceof Error ? error.message : 'Nieznany błąd'
+      showToast(`❌ ${message}`, 'error')
+    }
+  }
+}
+
+async function refreshG2Matches() {
+  const button = document.getElementById('g2-refresh-btn')
+  if (!button) {
+    return
+  }
+
+  if (g2RefreshInProgress) {
+    showToast('Trwa odświeżanie meczów. Poczekaj chwilę.', 'info')
+    return
+  }
+
+  button.disabled = true
+
+  try {
+    const response = await fetch('/api/g2-matches/refresh', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udało się odświeżyć meczów z PandaScore.')
+    }
+
+    showToast(`✅ Odświeżono bazę meczów (${payload.count ?? 0}).`, 'success')
+    window.setTimeout(() => {
+      window.location.reload()
+    }, 250)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    showToast(`❌ ${message}`, 'error')
+  } finally {
+    button.disabled = false
+  }
+}
+
+function buildG2FilterQueryParams() {
+  const gameFilter = document.getElementById('g2-filter-game')
+  const g2TeamFilter = document.getElementById('g2-filter-g2-team')
+  const tournamentFilter = document.getElementById('g2-filter-tournament')
+  const statusFilter = document.getElementById('g2-filter-status')
+  const opponentFilter = document.getElementById('g2-filter-opponent')
+
+  const params = new URLSearchParams()
+
+  const game = gameFilter?.value?.trim() ?? ''
+  const g2Team = g2TeamFilter?.value?.trim() ?? ''
+  const tournament = tournamentFilter?.value?.trim() ?? ''
+  const status = statusFilter?.value?.trim() ?? ''
+  const opponent = opponentFilter?.value?.trim() ?? ''
+
+  if (game) params.set('game', game)
+  if (g2Team) params.set('g2Team', g2Team)
+  if (tournament) params.set('tournament', tournament)
+  if (status) params.set('status', status)
+  if (opponent) params.set('opponent', opponent)
+
+  params.set('limit', '400')
+  params.set('offset', '0')
+
+  return params
+}
+
+function renderG2Filters() {
+  const gameFilter = document.getElementById('g2-filter-game')
+  const g2TeamFilter = document.getElementById('g2-filter-g2-team')
+  const tournamentFilter = document.getElementById('g2-filter-tournament')
+  const statusFilter = document.getElementById('g2-filter-status')
+
+  if (!gameFilter || !g2TeamFilter || !tournamentFilter || !statusFilter) {
+    return
+  }
+
+  const selectedGame = gameFilter.value
+  const selectedG2Team = g2TeamFilter.value
+  const selectedTournament = tournamentFilter.value
+  const selectedStatus = statusFilter.value
+
+  gameFilter.innerHTML = [
+    '<option value="">Wszystkie gry</option>',
+    ...g2FilterOptions.games.map((game) => `<option value="${escapeHtml(game)}">${escapeHtml(game)}</option>`),
+  ].join('')
+
+  g2TeamFilter.innerHTML = [
+    '<option value="">Wszystkie drużyny G2</option>',
+    ...g2FilterOptions.g2Teams.map((teamName) => `<option value="${escapeHtml(teamName)}">${escapeHtml(teamName)}</option>`),
+  ].join('')
+
+  tournamentFilter.innerHTML = [
+    '<option value="">Wszystkie turnieje</option>',
+    ...g2FilterOptions.tournaments.map((tournament) => `<option value="${escapeHtml(tournament)}">${escapeHtml(tournament)}</option>`),
+  ].join('')
+
+  statusFilter.innerHTML = [
+    '<option value="">Wszystkie statusy</option>',
+    ...g2FilterOptions.statuses.map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`),
+  ].join('')
+
+  gameFilter.value = g2FilterOptions.games.includes(selectedGame) ? selectedGame : ''
+  g2TeamFilter.value = g2FilterOptions.g2Teams.includes(selectedG2Team) ? selectedG2Team : ''
+  tournamentFilter.value = g2FilterOptions.tournaments.includes(selectedTournament) ? selectedTournament : ''
+  statusFilter.value = g2FilterOptions.statuses.includes(selectedStatus) ? selectedStatus : ''
+}
+
+function renderG2MatchesList() {
+  const list = document.getElementById('g2-matches-list')
+  const countLabel = document.getElementById('g2-count-label')
+
+  if (!list || !countLabel) {
+    return
+  }
+
+  countLabel.textContent = `Mecze: ${g2Matches.length}`
+
+  if (g2Matches.length === 0) {
+    list.innerHTML = '<div class="scheduled-empty">Brak meczów spełniających aktualne filtry. Odśwież bazę lub zmień filtry.</div>'
+    return
+  }
+
+  list.innerHTML = g2Matches.map((match) => {
+    return `
+      <article class="scheduled-card">
+        <div class="scheduled-card-header">
+          <span class="scheduled-card-title">${escapeHtml(match.game)} | ${escapeHtml(match.g2TeamName ?? 'G2 Esports')} vs ${escapeHtml(match.opponent)}</span>
+          <span class="scheduled-chip">${escapeHtml(match.matchType)}</span>
+        </div>
+        <div class="scheduled-card-meta">
+          <span class="scheduled-chip">Turniej: ${escapeHtml(match.tournament)}</span>
+          <span class="scheduled-chip">Data: ${escapeHtml(match.date)} ${escapeHtml(match.time)}</span>
+          <span class="scheduled-chip">Status: ${escapeHtml(match.status)}</span>
+        </div>
+      </article>`
+  }).join('')
+}
+
+function updateG2Meta() {
+  const metaLabel = document.getElementById('g2-sync-meta')
+  if (!metaLabel) {
+    return
+  }
+
+  if (!g2SyncMeta || !g2SyncMeta.lastSyncAt) {
+    metaLabel.textContent = 'Brak synchronizacji.'
+    return
+  }
+
+  const syncTimestamp = Number(g2SyncMeta.lastSyncAt)
+  const formatted = formatTimestampInWarsaw(syncTimestamp)
+
+  let metaText = `Ostatnia synchronizacja: ${formatted} | Rekordy: ${g2SyncMeta.lastSyncCount ?? 0}`
+  if (g2SyncMeta.lastError) {
+    metaText += ` | Ostatni błąd: ${g2SyncMeta.lastError}`
+  }
+
+  if (g2RefreshInProgress) {
+    metaText += ' | Trwa odświeżanie...'
+  }
+
+  if (g2RefreshCooldownMs > 0) {
+    metaText += ` | Cooldown: ${Math.ceil(g2RefreshCooldownMs / 1000)} s`
+  }
+
+  metaLabel.textContent = metaText
+}
+
+function getFutureG2Matches() {
+  const now = Date.now()
+  return g2Matches.filter((match) => {
+    const beginAtTimestamp = Number(match.beginAtTimestamp)
+    return Number.isFinite(beginAtTimestamp) && beginAtTimestamp > now
+  })
+}
+
+function findMatchById(matchId) {
+  if (!matchId) {
+    return null
+  }
+
+  return g2Matches.find((match) => match.matchId === matchId)
+    ?? (selectedMatchInfo?.matchId === matchId ? selectedMatchInfo : null)
+}
+
+function renderMatchHelperOptions() {
+  const enabled = document.getElementById('match-helper-enabled')?.checked ?? false
+  const searchInput = document.getElementById('match-helper-search')
+  const matchSelect = document.getElementById('match-helper-select')
+
+  if (!searchInput || !matchSelect) {
+    return
+  }
+
+  const search = String(searchInput.value ?? '').trim().toLowerCase()
+  const availableMatches = getFutureG2Matches().filter((match) => {
+    if (!search) {
+      return true
+    }
+
+    return [
+      match.g2TeamName,
+      match.game,
+      match.opponent,
+      match.tournament,
+      match.matchType,
+      match.date,
+      match.time,
+    ].join(' ').toLowerCase().includes(search)
+  })
+
+  const previousValue = selectedMatchInfo?.matchId ?? matchSelect.value
+
+  matchSelect.innerHTML = [
+    '<option value="">Wybierz mecz...</option>',
+    ...availableMatches.map((match) => {
+      const optionLabel = `${match.date} ${match.time} | ${match.game} | ${match.g2TeamName ?? 'G2 Esports'} vs ${match.opponent} | ${match.tournament} | ${match.matchType}`
+      return `<option value="${escapeHtml(match.matchId)}">${escapeHtml(optionLabel)}</option>`
+    }),
+  ].join('')
+
+  if (selectedMatchInfo && !availableMatches.some((match) => match.matchId === selectedMatchInfo.matchId)) {
+    const selectedLabel = `${selectedMatchInfo.date ?? ''} ${selectedMatchInfo.time ?? ''} | ${selectedMatchInfo.game ?? ''} | ${(selectedMatchInfo.g2TeamName ?? 'G2 Esports')} vs ${selectedMatchInfo.opponent ?? ''}`
+    matchSelect.innerHTML += `<option value="${escapeHtml(selectedMatchInfo.matchId)}">${escapeHtml(selectedLabel)}</option>`
+  }
+
+  matchSelect.value = previousValue || ''
+  matchSelect.disabled = !enabled
+  searchInput.disabled = !enabled
+}
+
+function buildMatchHelperTokens(match) {
+  if (!match) {
+    return []
+  }
+
+  const timestamp = Number.isFinite(Number(match.beginAtTimestamp))
+    ? Math.floor(Number(match.beginAtTimestamp) / 1000)
+    : (match.beginAtUtc ? Math.floor(Date.parse(match.beginAtUtc) / 1000) : null)
+
+  const teamsLabel = `${match.g2TeamName ?? 'G2 Esports'} vs ${match.opponent ?? 'TBD'}`
+  const tokens = [
+    { label: teamsLabel, token: teamsLabel },
+    { label: match.game ?? '-', token: match.game ?? '-' },
+    { label: match.matchType ?? '-', token: match.matchType ?? '-' },
+    { label: match.tournament ?? '-', token: match.tournament ?? '-' },
+  ]
+
+  if (timestamp) {
+    tokens.push(
+      { label: 'Data', token: `<t:${timestamp}:d>` },
+      { label: 'Godzina', token: `<t:${timestamp}:t>` },
+      { label: 'Odliczanie', token: `<t:${timestamp}:R>` },
+    )
+  }
+
+  return tokens
+}
+
+function renderMatchHelperChips(match) {
+  const chipsContainer = document.getElementById('match-helper-chips')
+  if (!chipsContainer) {
+    return
+  }
+
+  const enabled = document.getElementById('match-helper-enabled')?.checked ?? false
+  if (!enabled) {
+    chipsContainer.innerHTML = '<p class="popover-empty">Włącz opcję „Dodaj mecz”, aby zobaczyć podpowiedzi.</p>'
+    return
+  }
+
+  const tokens = buildMatchHelperTokens(match)
+  if (!tokens.length) {
+    chipsContainer.innerHTML = '<p class="popover-empty">Wybierz mecz, aby zobaczyć klikalne podpowiedzi.</p>'
+    return
+  }
+
+  chipsContainer.innerHTML = tokens.map((entry) => (
+    `<button type="button" class="mention-chip" data-token="${escapeHtml(entry.token)}">${escapeHtml(entry.label)}</button>`
+  )).join('')
+}
+
+function updateEventDefaultsFromMatch() {
+  const eventEnabled = document.getElementById('event-enabled')?.checked ?? false
+  if (!eventEnabled || !selectedMatchInfo) {
+    return
+  }
+
+  const eventTitleInput = document.getElementById('event-title')
+  const eventDescriptionInput = document.getElementById('event-description')
+  const eventLocationInput = document.getElementById('event-location')
+  const eventStartAtInput = document.getElementById('event-start-at')
+  const eventEndAtInput = document.getElementById('event-end-at')
+
+  const beginAtTimestamp = Number(selectedMatchInfo.beginAtTimestamp)
+  const hasMatchTime = Number.isFinite(beginAtTimestamp)
+
+  if (eventTitleInput && !eventTitleInput.value.trim()) {
+    eventTitleInput.value = `${selectedMatchInfo.g2TeamName ?? 'G2 Esports'} vs ${selectedMatchInfo.opponent ?? 'TBD'} | ${selectedMatchInfo.tournament ?? 'Mecz'}`
+  }
+
+  if (eventDescriptionInput && !eventDescriptionInput.value.trim()) {
+    const game = selectedMatchInfo.game ?? 'Nieznana gra'
+    const format = selectedMatchInfo.matchType ?? 'BO?'
+    eventDescriptionInput.value = `Spotkanie: ${(selectedMatchInfo.g2TeamName ?? 'G2 Esports')} vs ${(selectedMatchInfo.opponent ?? 'TBD')}\nGra: ${game}\nFormat: ${format}\nTurniej: ${selectedMatchInfo.tournament ?? '-'}`
+  }
+
+  if (eventLocationInput && !eventLocationInput.value.trim()) {
+    eventLocationInput.value = 'Online'
+  }
+
+  if (hasMatchTime) {
+    if (eventStartAtInput && !eventStartAtInput.value.trim()) {
+      eventStartAtInput.value = formatTimestampForDateTimeInput(beginAtTimestamp)
+    }
+
+    if (eventEndAtInput && !eventEndAtInput.value.trim()) {
+      eventEndAtInput.value = formatTimestampForDateTimeInput(beginAtTimestamp + (2 * 60 * 60 * 1000))
+    }
+  }
 }
 
 async function loadChannels() {
@@ -1084,6 +2206,8 @@ function updatePreview() {
       imagePlaceholder.style.display = ''
     }
   }
+
+  updateEventPreview(data)
 }
 
 function resolvePingTargetLabel(pingTargetId) {
@@ -1115,6 +2239,7 @@ function renderInlineText(value) {
   let html = escapeHtml(value)
   html = renderDiscordCustomEmojis(html)
   html = renderDiscordMentions(html)
+  html = renderDiscordTimestamps(html)
   return html
 }
 
@@ -1123,6 +2248,31 @@ function collectFormDataSync() {
   const pingRoleId = document.getElementById('ping-role-select')?.value ?? ''
   const imageMode = document.getElementById('image-mode-select')?.value ?? 'none'
   const scheduleAtLocal = document.getElementById('schedule-at')?.value ?? ''
+  const matchHelperEnabled = document.getElementById('match-helper-enabled')?.checked ?? false
+  const eventEnabled = document.getElementById('event-enabled')?.checked ?? false
+
+  const matchInfo = matchHelperEnabled && selectedMatchInfo
+    ? {
+      matchId: selectedMatchInfo.matchId ?? '',
+      game: selectedMatchInfo.game ?? '',
+      g2TeamName: selectedMatchInfo.g2TeamName ?? '',
+      opponent: selectedMatchInfo.opponent ?? '',
+      tournament: selectedMatchInfo.tournament ?? '',
+      matchType: selectedMatchInfo.matchType ?? '',
+      beginAtUtc: selectedMatchInfo.beginAtUtc ?? '',
+      date: selectedMatchInfo.date ?? '',
+      time: selectedMatchInfo.time ?? '',
+    }
+    : undefined
+
+  const eventDraft = {
+    enabled: eventEnabled,
+    title: document.getElementById('event-title')?.value ?? '',
+    description: document.getElementById('event-description')?.value ?? '',
+    location: document.getElementById('event-location')?.value ?? '',
+    startAtLocal: document.getElementById('event-start-at')?.value ?? '',
+    endAtLocal: document.getElementById('event-end-at')?.value ?? '',
+  }
 
   return {
     mode: currentMode,
@@ -1135,6 +2285,8 @@ function collectFormDataSync() {
     scheduleAtLocal,
     imageMode,
     imageFilename: imageMode === 'library' ? (selectedImageName ?? '') : '',
+    matchInfo,
+    eventDraft,
   }
 }
 
@@ -1186,7 +2338,26 @@ function updateSendButton() {
     || (data.imageMode === 'library' && !!data.imageFilename)
     || (data.imageMode === 'upload' && (!!selectedUploadFile || !!scheduledStoredUpload))
 
-  button.disabled = !(hasChannel && hasContent && pingReady && imageReady)
+  const matchReady = !document.getElementById('match-helper-enabled')?.checked || Boolean(data.matchInfo?.matchId)
+
+  const eventDraftEnabled = data.eventDraft?.enabled === true
+  const eventStartTimestamp = data.eventDraft?.startAtLocal ? Date.parse(data.eventDraft.startAtLocal) : NaN
+  const eventEndTimestamp = data.eventDraft?.endAtLocal ? Date.parse(data.eventDraft.endAtLocal) : NaN
+  const eventReady = !eventDraftEnabled || (
+    Boolean(data.eventDraft?.title?.trim())
+    && Boolean(data.eventDraft?.description?.trim())
+    && Boolean(data.eventDraft?.location?.trim())
+    && Number.isFinite(eventStartTimestamp)
+    && Number.isFinite(eventEndTimestamp)
+    && eventEndTimestamp > eventStartTimestamp
+  )
+
+  button.disabled = !(hasChannel && hasContent && pingReady && imageReady && matchReady && eventReady)
+
+  if (editingSentPostId) {
+    buttonText.textContent = 'Zapisz zmiany wysłanego posta'
+    return
+  }
 
   if (data.scheduleAtLocal) {
     buttonText.textContent = editingScheduledPostId ? 'Zapisz zaplanowany post' : 'Zaplanuj publikację'
@@ -1209,14 +2380,22 @@ async function publishMessage() {
     const payload = await collectFormData()
     const hasScheduleDate = Boolean(payload.scheduleAtLocal?.trim())
 
+    if (editingSentPostId && hasScheduleDate) {
+      throw new Error('Wysłany post nie może zostać ponownie zaplanowany. Usuń datę publikacji.')
+    }
+
     if (editingScheduledPostId && !hasScheduleDate) {
       throw new Error('Edytowany post zaplanowany musi mieć ustawioną datę publikacji.')
     }
 
-    const requestUrl = hasScheduleDate
-      ? (editingScheduledPostId ? `/api/scheduled/${encodeURIComponent(editingScheduledPostId)}` : '/api/scheduled')
-      : '/api/embed'
-    const requestMethod = hasScheduleDate && editingScheduledPostId ? 'PATCH' : 'POST'
+    const requestUrl = editingSentPostId
+      ? `/api/scheduled/sent/${encodeURIComponent(editingSentPostId)}`
+      : (hasScheduleDate
+        ? (editingScheduledPostId ? `/api/scheduled/${encodeURIComponent(editingScheduledPostId)}` : '/api/scheduled')
+        : '/api/embed')
+    const requestMethod = editingSentPostId
+      ? 'PATCH'
+      : (hasScheduleDate && editingScheduledPostId ? 'PATCH' : 'POST')
 
     const resp = await fetch(requestUrl, {
       method: requestMethod,
@@ -1233,6 +2412,14 @@ async function publishMessage() {
       json.warnings.forEach((warning) => {
         showToast(`⚠️ ${warning}`, 'info')
       })
+    }
+
+    if (editingSentPostId) {
+      editingSentPostId = null
+      await loadSentPosts()
+      switchSection('sent-posts')
+      showToast('✅ Wysłany post został zaktualizowany.', 'success')
+      return
     }
 
     if (hasScheduleDate) {
@@ -1261,6 +2448,7 @@ async function publishMessage() {
       renderImageLibrary(images)
     }
 
+    await loadSentPosts()
     showToast('✅ Publikacja wysłana pomyślnie!', 'success')
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nieznany błąd'
@@ -1436,11 +2624,56 @@ function renderMarkdown(text) {
 
   html = renderDiscordCustomEmojis(html)
   html = renderDiscordMentions(html)
+  html = renderDiscordTimestamps(html)
 
   html = html.replace(/\n/g, '<br>')
   html = html.replace(/@@CODEBLOCK_(\d+)@@/g, (_match, index) => codeBlocks[Number(index)] ?? '')
 
   return html
+}
+
+function updateEventPreview(data) {
+  const previewCard = document.getElementById('event-preview-card')
+  const previewContent = document.getElementById('event-preview-content')
+
+  if (!previewCard || !previewContent) {
+    return
+  }
+
+  const draft = data.eventDraft ?? {}
+  if (!draft.enabled) {
+    previewCard.style.display = 'none'
+    previewContent.innerHTML = ''
+    return
+  }
+
+  previewCard.style.display = ''
+
+  const title = String(draft.title ?? '').trim() || 'Brak tytułu wydarzenia'
+  const description = String(draft.description ?? '').trim() || 'Brak opisu wydarzenia.'
+  const location = String(draft.location ?? '').trim() || 'Online'
+
+  const startUnix = Number.isFinite(Date.parse(String(draft.startAtLocal ?? '')))
+    ? Math.floor(Date.parse(String(draft.startAtLocal ?? '')) / 1000)
+    : null
+  const endUnix = Number.isFinite(Date.parse(String(draft.endAtLocal ?? '')))
+    ? Math.floor(Date.parse(String(draft.endAtLocal ?? '')) / 1000)
+    : null
+
+  const startLabel = startUnix ? `<t:${startUnix}:F>` : 'Nie ustawiono'
+  const endLabel = endUnix ? `<t:${endUnix}:F>` : 'Nie ustawiono'
+
+  const previewText = [
+    `# ${title}`,
+    '',
+    `Start: ${startLabel}`,
+    `Koniec: ${endLabel}`,
+    `Miejsce: ${location}`,
+    '',
+    description,
+  ].join('\n')
+
+  previewContent.innerHTML = renderMarkdown(previewText)
 }
 
 function renderDiscordCustomEmojis(text) {
@@ -1474,6 +2707,71 @@ function renderDiscordMentions(text) {
   html = html.replace(/(^|[\s(>])@here\b/g, '$1<span class="md-mention">@here</span>')
 
   return html
+}
+
+function renderDiscordTimestamps(text) {
+  return text.replace(/(?:&lt;|<)t:(\d{1,12})(?::([tTdDfFR]))?(?:&gt;|>)/g, (_match, unixSecondsRaw, format = 'f') => {
+    const unixSeconds = Number.parseInt(unixSecondsRaw, 10)
+    if (!Number.isFinite(unixSeconds)) {
+      return _match
+    }
+
+    const timestamp = unixSeconds * 1000
+    const date = new Date(timestamp)
+
+    const formatMap = {
+      t: new Intl.DateTimeFormat('pl-PL', { hour: '2-digit', minute: '2-digit', hour12: false }).format(date),
+      T: new Intl.DateTimeFormat('pl-PL', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(date),
+      d: new Intl.DateTimeFormat('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(date),
+      D: new Intl.DateTimeFormat('pl-PL', { day: '2-digit', month: 'long', year: 'numeric' }).format(date),
+      f: new Intl.DateTimeFormat('pl-PL', {
+        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(date),
+      F: new Intl.DateTimeFormat('pl-PL', {
+        weekday: 'long', day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
+      }).format(date),
+      R: formatRelativeCountdown(timestamp),
+    }
+
+    const label = formatMap[format] ?? formatMap.f
+    return `<span class="md-mention" title="<t:${unixSeconds}:${format}>">${escapeHtml(label)}</span>`
+  })
+}
+
+function formatRelativeCountdown(targetTimestamp) {
+  const diffMs = targetTimestamp - Date.now()
+  const diffMinutes = Math.round(diffMs / 60000)
+
+  if (Math.abs(diffMinutes) < 1) {
+    return 'za chwilę'
+  }
+
+  if (diffMinutes > 0) {
+    if (diffMinutes < 60) {
+      return `za ${diffMinutes} min`
+    }
+
+    const hours = Math.round(diffMinutes / 60)
+    if (hours < 48) {
+      return `za ${hours} h`
+    }
+
+    const days = Math.round(hours / 24)
+    return `za ${days} dni`
+  }
+
+  const pastMinutes = Math.abs(diffMinutes)
+  if (pastMinutes < 60) {
+    return `${pastMinutes} min temu`
+  }
+
+  const hours = Math.round(pastMinutes / 60)
+  if (hours < 48) {
+    return `${hours} h temu`
+  }
+
+  const days = Math.round(hours / 24)
+  return `${days} dni temu`
 }
 
 function fileExtension(filename) {

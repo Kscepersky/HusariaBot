@@ -7,10 +7,8 @@ import { authRouter }  from './routes/auth.js';
 import { apiRouter }   from './routes/api.js';
 import { scheduledRouter } from './routes/scheduled.js';
 import { g2MatchesRouter } from './routes/g2-matches.js';
-import { matchAnnouncementsRouter } from './routes/match-announcements.js';
 import { pagesRouter } from './routes/pages.js';
 import { initializeDashboardScheduler } from './scheduler/service.js';
-import { initializeMatchAnnouncementScheduler } from './match-announcements/service.js';
 import { probePandaScoreApiConnection } from './g2-matches/pandascore-client.js';
 import { probeDiscordBotApi } from './discord-api.js';
 
@@ -120,7 +118,6 @@ export function createDashboardApp() {
     app.use('/api',  apiRouter);
     app.use('/api/scheduled', scheduledRouter);
     app.use('/api/g2-matches', g2MatchesRouter);
-    app.use('/api/match-announcements', matchAnnouncementsRouter);
     app.use('/',     pagesRouter);
 
     app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -146,10 +143,6 @@ export function startDashboard(): void {
 
     void initializeDashboardScheduler().catch((error) => {
         console.error('❌  Nie udało się uruchomić schedulera dashboardu:', error);
-    });
-
-    void initializeMatchAnnouncementScheduler().catch((error) => {
-        console.error('❌  Nie udało się uruchomić schedulera ogłoszeń meczowych:', error);
     });
 
     const server = app.listen(port, () => {

@@ -32,9 +32,11 @@ Dzięki temu możesz oddzielić operacje moderatorskie i publikacyjne od pracy b
 - System ticketów z trwałym licznikiem.
 - Kreator publikacji (Embedded i Wiadomość) z podglądem.
 - Planowanie publikacji i edycja zaplanowanych postów.
+- Historia wysłanych postów: edycja, retry eventu oraz usuwanie z historii.
+- Zakładka Wydarzenia: szybkie tworzenie, edycja i usuwanie wydarzeń Discord.
 - Baza meczów G2 z PandaScore (lokalnie w SQLite).
-- Kreator ogłoszeń meczów + automatyczne tworzenie wydarzeń Discord.
-- Retry dla eventów Discord, gdy tworzenie się nie powiedzie.
+- Opcjonalne dodawanie podpowiedzi meczowych i tworzenie wydarzeń Discord w głównym kreatorze.
+- Retry dla eventów Discord, gdy tworzenie się nie powiedzie + bezpieczny lifecycle przy edycji wysłanych postów.
 - Testy jednostkowe/integracyjne w Vitest.
 
 ## Architektura
@@ -48,7 +50,7 @@ src/
     routes/                 API dashboardu
     scheduler/              Scheduler postów
     g2-matches/             Integracja PandaScore + SQLite
-    match-announcements/    Publikacje meczowe + eventy Discord
+    event-publisher.ts      Tworzenie wydarzeń Discord (wspólny flow)
     public/                 Frontend dashboardu
 data/                       Dane lokalne (SQLite/JSON)
 img/                        Biblioteka obrazów
@@ -134,9 +136,9 @@ Moduły dashboardu:
 
 - Kreator publikacji (embedded/message).
 - Zaplanowane posty.
-- Baza meczów G2 (PandaScore, filtry, odświeżanie).
-- Kreator publikacji meczów.
-- Zaplanowane ogłoszenia meczowe.
+- Wysłane posty (edycja, retry eventu, usuwanie wpisów z historii).
+- Wydarzenia (Discord Scheduled Events: CRUD z poziomu panelu).
+- Baza meczów G2 (PandaScore, filtry, odświeżanie + automatyczny refresh widoku po udanej synchronizacji).
 
 Skrypty dashboardu:
 

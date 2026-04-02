@@ -1,4 +1,5 @@
 import { publishDashboardPost } from '../publish-flow.js';
+import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
 import {
     getScheduledPostById,
     listScheduledPosts,
@@ -35,6 +36,9 @@ async function executeScheduledPost(postId: string): Promise<void> {
             publishedByUserId: scheduledPost.publisherUserId,
         });
 
+        const eventResult = await tryCreateDiscordEventFromPayload(scheduledPost.payload);
+        const warnings = [...result.warnings, ...eventResult.warnings];
+
         await updateScheduledPost(postId, (post) => ({
             ...post,
             status: 'sent',
@@ -43,7 +47,11 @@ async function executeScheduledPost(postId: string): Promise<void> {
             messageId: result.messageId,
             pingMessageId: result.pingMessageId,
             imageMessageId: result.imageMessageId,
-            lastError: result.warnings.length > 0 ? result.warnings.join(' | ') : undefined,
+            lastError: warnings.length > 0 ? warnings.join(' | ') : undefined,
+            eventStatus: eventResult.status,
+            discordEventId: eventResult.eventId,
+            eventLastError: eventResult.eventError,
+            source: post.source ?? 'scheduled',
         }));
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Nieznany błąd';

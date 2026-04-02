@@ -81,6 +81,25 @@ describe('validateEmbedForm', () => {
 
         expect(validateEmbedForm(data)).toBe('Treść wiadomości jest wymagana.');
     });
+
+    it('wymaga poprawnych pol wydarzenia Discord gdy opcja eventu jest wlaczona', () => {
+        const data: EmbedFormData = {
+            mode: 'embedded',
+            channelId: '123456789012345678',
+            title: 'Tytul',
+            content: 'Tresc',
+            eventDraft: {
+                enabled: true,
+                title: 'Mecz tygodnia',
+                description: 'Opis',
+                location: 'Online',
+                startAtLocal: '2026-04-05T20:00',
+                endAtLocal: '2026-04-05T19:59',
+            },
+        };
+
+        expect(validateEmbedForm(data)).toBe('Data zakończenia wydarzenia musi być późniejsza od startu.');
+    });
 });
 
 describe('buildDashboardMessagePayload', () => {
@@ -135,6 +154,22 @@ describe('buildDashboardMessagePayload', () => {
                 users: ['123456789012345679', '123456789012345680'],
             },
         });
+    });
+
+    it('dopina linie edycji dla recznie edytowanej wiadomosci', () => {
+        const data: EmbedFormData = {
+            mode: 'message',
+            channelId: '123456789012345678',
+            content: 'Aktualizacja posta',
+        };
+
+        const payload = buildDashboardMessagePayload(data, {
+            publishedBy: 'Admin',
+            publishedByUserId: '123456789012345680',
+            editedAtTimestamp: Date.now(),
+        });
+
+        expect(payload.content).toContain('*Edytowano*:');
     });
 });
 
@@ -200,5 +235,23 @@ describe('buildEmbedJson', () => {
         expect(json.footer?.text).toBe('Opublikował: Admin');
         expect(json.fields).toBeUndefined();
         expect(json.timestamp).toBeDefined();
+    });
+
+    it('zastepuje stopke informacja o edycji po recznej zmianie', () => {
+        const json = buildEmbedJson(
+            {
+                mode: 'embedded',
+                channelId: '123456789012345678',
+                title: 'Wazne',
+                content: 'Info',
+            },
+            {
+                publishedBy: 'Admin',
+                publishedByUserId: '123456789012345678',
+                editedAtTimestamp: Date.now(),
+            },
+        ) as { footer?: { text?: string } };
+
+        expect(json.footer?.text?.startsWith('Edytowano ')).toBe(true);
     });
 });

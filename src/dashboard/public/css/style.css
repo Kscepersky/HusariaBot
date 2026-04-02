@@ -611,6 +611,48 @@ body {
   font-size: 12px;
 }
 
+.timestamp-tools {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.18);
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.timestamp-tools-header {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.timestamp-inputs {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto auto;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .timestamp-inputs {
+    grid-template-columns: 1fr;
+  }
+}
+
+.event-fields {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.events-form-grid {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
 .image-option-panel {
   margin-top: 10px;
 }

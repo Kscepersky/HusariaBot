@@ -61,4 +61,45 @@ describe('pandascore client', () => {
         expect(result.matches[0]?.g2TeamName).toBe('G2 Gozen');
         expect(result.fetchedPages).toBe(2);
     });
+
+    it('normalizuje gre LoL do pelnej nazwy League of Legends', async () => {
+        const beginAtIso = new Date(Date.now() + (2 * 24 * 60 * 60 * 1000)).toISOString();
+
+        const firstPage = [
+            {
+                id: 54321,
+                name: 'G2 Esports vs Team BDS',
+                begin_at: beginAtIso,
+                status: 'not_started',
+                match_type: 'best_of',
+                number_of_games: 5,
+                opponents: [
+                    { opponent: { name: 'G2 Esports' } },
+                    { opponent: { name: 'Team BDS' } },
+                ],
+                videogame: { name: 'LoL' },
+                tournament: { name: 'LEC' },
+                league: { name: 'LEC' },
+                serie: { full_name: 'Spring Split' },
+            },
+        ];
+
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(new Response(JSON.stringify(firstPage), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            }))
+            .mockResolvedValueOnce(new Response(JSON.stringify([]), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            }));
+
+        global.fetch = fetchMock as typeof fetch;
+
+        const result = await fetchUpcomingG2Matches();
+
+        expect(result.matches).toHaveLength(1);
+        expect(result.matches[0]?.game).toBe('League of Legends');
+    });
 });

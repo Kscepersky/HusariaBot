@@ -66,6 +66,28 @@ export interface CreateExternalScheduledEventInput {
     location: string;
 }
 
+export interface DiscordScheduledEvent {
+    id: string;
+    guild_id: string;
+    name: string;
+    description?: string | null;
+    status: number;
+    scheduled_start_time: string;
+    scheduled_end_time?: string | null;
+    entity_type: number;
+    entity_metadata?: {
+        location?: string | null;
+    } | null;
+}
+
+export interface UpdateExternalScheduledEventInput {
+    name: string;
+    description?: string;
+    scheduledStartTimeIso: string;
+    scheduledEndTimeIso?: string;
+    location: string;
+}
+
 export interface DiscordEmoji {
     id: string;
     name: string | null;
@@ -268,6 +290,79 @@ export async function createExternalGuildScheduledEvent(
     return created.id;
 }
 
+export async function listGuildScheduledEvents(guildId: string): Promise<DiscordScheduledEvent[]> {
+    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/scheduled-events?with_user_count=false`, {
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+        },
+    });
+
+    if (!resp.ok) {
+        const errPayload = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to list Discord events: ${resp.status} — ${JSON.stringify(errPayload)}`);
+    }
+
+    const events = await resp.json() as DiscordScheduledEvent[];
+    return Array.isArray(events) ? events : [];
+}
+
+export async function updateGuildScheduledEvent(
+    guildId: string,
+    eventId: string,
+    input: UpdateExternalScheduledEventInput,
+): Promise<DiscordScheduledEvent> {
+    const eventName = input.name.trim();
+    const eventDescription = input.description?.trim() ?? '';
+    const eventLocation = input.location.trim();
+
+    if (!eventName) {
+        throw new Error('Nazwa wydarzenia Discord jest wymagana.');
+    }
+
+    const body = {
+        name: eventName,
+        ...(eventDescription ? { description: eventDescription } : { description: null }),
+        scheduled_start_time: input.scheduledStartTimeIso,
+        scheduled_end_time: input.scheduledEndTimeIso,
+        privacy_level: 2,
+        entity_type: 3,
+        channel_id: null,
+        entity_metadata: {
+            location: eventLocation || 'Online',
+        },
+    };
+
+    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/scheduled-events/${eventId}`, {
+        method: 'PATCH',
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+        const errPayload = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to update Discord event: ${resp.status} — ${JSON.stringify(errPayload)}`);
+    }
+
+    return await resp.json() as DiscordScheduledEvent;
+}
+
+export async function deleteGuildScheduledEvent(guildId: string, eventId: string): Promise<void> {
+    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/scheduled-events/${eventId}`, {
+        method: 'DELETE',
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+        },
+    });
+
+    if (!resp.ok) {
+        const errPayload = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to delete Discord event: ${resp.status} — ${JSON.stringify(errPayload)}`);
+    }
+}
+
 export async function searchGuildMembers(guildId: string, query: string, limit = 8): Promise<DiscordMentionUser[]> {
     const trimmedQuery = query.trim();
     if (!trimmedQuery) {
@@ -330,6 +425,26 @@ export async function sendMessageToChannel(channelId: string, payload: DiscordMe
 
     const msg = await resp.json() as { id: string };
     return msg.id;
+}
+
+export async function editChannelMessage(
+    channelId: string,
+    messageId: string,
+    payload: DiscordMessagePayload,
+): Promise<void> {
+    const resp = await fetch(`${DISCORD_API}/channels/${channelId}/messages/${messageId}`, {
+        method: 'PATCH',
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to edit message: ${resp.status} — ${JSON.stringify(err)}`);
+    }
 }
 
 export async function deleteChannelMessage(channelId: string, messageId: string): Promise<void> {

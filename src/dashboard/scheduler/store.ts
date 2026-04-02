@@ -5,6 +5,14 @@ import type { ScheduledPost, ScheduledPostStatus, ScheduledPostStoreData } from 
 const STORE_FILE_PATH = join(process.cwd(), 'data', 'scheduled-posts.json');
 let storeLock = Promise.resolve();
 
+function clonePayload<T extends ScheduledPost['payload']>(payload: T): T {
+    return {
+        ...payload,
+        ...(payload.matchInfo ? { matchInfo: { ...payload.matchInfo } } : {}),
+        ...(payload.eventDraft ? { eventDraft: { ...payload.eventDraft } } : {}),
+    };
+}
+
 function isScheduledPostStatus(value: unknown): value is ScheduledPostStatus {
     return value === 'pending' || value === 'sent' || value === 'failed' || value === 'skipped';
 }
@@ -30,7 +38,7 @@ function toScheduledPostStoreData(content: string): ScheduledPostStoreData {
                     && isScheduledPostStatus(post.status),
                 );
             })
-            .map((post) => ({ ...post, payload: { ...post.payload } }));
+            .map((post) => ({ ...post, payload: clonePayload(post.payload) }));
 
         return { posts };
     } catch {
@@ -73,7 +81,7 @@ function withStoreLock<T>(work: () => Promise<T>): Promise<T> {
 export async function listScheduledPosts(filePath: string = STORE_FILE_PATH): Promise<ScheduledPost[]> {
     return withStoreLock(async () => {
         const store = await loadStore(filePath);
-        return store.posts.map((post) => ({ ...post, payload: { ...post.payload } }));
+        return store.posts.map((post) => ({ ...post, payload: clonePayload(post.payload) }));
     });
 }
 
@@ -84,7 +92,7 @@ export async function getScheduledPostById(
     return withStoreLock(async () => {
         const store = await loadStore(filePath);
         const matchedPost = store.posts.find((post) => post.id === id);
-        return matchedPost ? { ...matchedPost, payload: { ...matchedPost.payload } } : null;
+        return matchedPost ? { ...matchedPost, payload: clonePayload(matchedPost.payload) } : null;
     });
 }
 
@@ -95,11 +103,11 @@ export async function insertScheduledPost(
     return withStoreLock(async () => {
         const store = await loadStore(filePath);
         const nextStore: ScheduledPostStoreData = {
-            posts: [...store.posts, { ...post, payload: { ...post.payload } }],
+            posts: [...store.posts, { ...post, payload: clonePayload(post.payload) }],
         };
 
         await saveStore(nextStore, filePath);
-        return { ...post, payload: { ...post.payload } };
+        return { ...post, payload: clonePayload(post.payload) };
     });
 }
 
@@ -116,16 +124,16 @@ export async function updateScheduledPost(
             return null;
         }
 
-        const updatedPost = updater({ ...existingPost, payload: { ...existingPost.payload } });
+        const updatedPost = updater({ ...existingPost, payload: clonePayload(existingPost.payload) });
         const nextPosts = store.posts.map((post) => {
             if (post.id !== id) {
                 return post;
             }
-            return { ...updatedPost, payload: { ...updatedPost.payload } };
+            return { ...updatedPost, payload: clonePayload(updatedPost.payload) };
         });
 
         await saveStore({ posts: nextPosts }, filePath);
-        return { ...updatedPost, payload: { ...updatedPost.payload } };
+        return { ...updatedPost, payload: clonePayload(updatedPost.payload) };
     });
 }
 

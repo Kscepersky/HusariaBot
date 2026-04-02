@@ -1,8 +1,30 @@
 import { EmbedBuilder } from 'discord.js';
 import { HusariaColors, ColorChoices } from '../utils/husaria-theme.js';
+import { parseWarsawDateTimeToTimestamp } from './scheduler/warsaw-time.js';
 
 export type PublishMode = 'embedded' | 'message';
 export type ImageMode = 'none' | 'library' | 'upload';
+
+export interface MatchInfoSnapshot {
+    matchId: string;
+    game: string;
+    g2TeamName: string;
+    opponent: string;
+    tournament: string;
+    matchType: string;
+    beginAtUtc: string;
+    date: string;
+    time: string;
+}
+
+export interface EventDraftFormData {
+    enabled?: boolean;
+    title?: string;
+    description?: string;
+    location?: string;
+    startAtLocal?: string;
+    endAtLocal?: string;
+}
 
 export interface EmbedFormData {
     mode: PublishMode;
@@ -17,11 +39,14 @@ export interface EmbedFormData {
     uploadFileName?: string;
     uploadMimeType?: string;
     uploadBase64?: string;
+    matchInfo?: MatchInfoSnapshot;
+    eventDraft?: EventDraftFormData;
 }
 
 export interface PublishMetadata {
     publishedBy: string;
     publishedByUserId?: string;
+    editedAtTimestamp?: number;
 }
 
 export interface DashboardMessagePayload {
@@ -39,6 +64,10 @@ function isValidMode(mode: string): mode is PublishMode {
 
 function isValidImageMode(mode: string): mode is ImageMode {
     return mode === 'none' || mode === 'library' || mode === 'upload';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function normalizeTrimmedString(value: unknown): string {
@@ -81,7 +110,55 @@ function isBroadcastPingTarget(target: string): boolean {
     return target === 'everyone' || target === 'here';
 }
 
+function formatEditedAtInWarsaw(timestamp: number): string {
+    const targetDate = new Date(timestamp);
+    const nowDate = new Date();
+    const yesterdayDate = new Date(nowDate.getTime() - (24 * 60 * 60 * 1000));
+
+    const dayFormatter = new Intl.DateTimeFormat('sv-SE', {
+        timeZone: 'Europe/Warsaw',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    });
+
+    const hourFormatter = new Intl.DateTimeFormat('pl-PL', {
+        timeZone: 'Europe/Warsaw',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    });
+
+    const targetDay = dayFormatter.format(targetDate);
+    const todayDay = dayFormatter.format(nowDate);
+    const yesterdayDay = dayFormatter.format(yesterdayDate);
+    const hourLabel = hourFormatter.format(targetDate);
+
+    if (targetDay === todayDay) {
+        return `dzisiaj o ${hourLabel}`;
+    }
+
+    if (targetDay === yesterdayDay) {
+        return `wczoraj o ${hourLabel}`;
+    }
+
+    const dateLabel = new Intl.DateTimeFormat('pl-PL', {
+        timeZone: 'Europe/Warsaw',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(targetDate);
+
+    return `${dateLabel} o ${hourLabel}`;
+}
+
 function withPublisherFooter(embed: EmbedBuilder, metadata: PublishMetadata): EmbedBuilder {
+    if (metadata.editedAtTimestamp) {
+        return embed
+            .setFooter({ text: `Edytowano ${formatEditedAtInWarsaw(metadata.editedAtTimestamp)}` })
+            .setTimestamp();
+    }
+
     return embed
         .setFooter({ text: `Opublikował: ${metadata.publishedBy}` })
         .setTimestamp();
@@ -161,9 +238,15 @@ export function buildDashboardMessagePayload(data: EmbedFormData, metadata: Publ
         ? `${normalizedContent}\n\n*Opublikował*: ${publisherLabel}`
         : `*Opublikował*: ${publisherLabel}`;
 
+    const editedLabel = metadata.editedAtTimestamp
+        ? `\n*Edytowano*: ${formatEditedAtInWarsaw(metadata.editedAtTimestamp)}`
+        : '';
+
+    const finalContent = `${contentWithPublisher}${editedLabel}`;
+
     return {
-        content: contentWithPublisher,
-        allowed_mentions: buildDashboardAllowedMentions(contentWithPublisher),
+        content: finalContent,
+        allowed_mentions: buildDashboardAllowedMentions(finalContent),
     };
 }
 
@@ -218,5 +301,48 @@ export function validateEmbedForm(data: EmbedFormData): string | null {
     }
 
     if (!data.channelId) return 'Wybierz kanał docelowy.';
+
+    if (data.matchInfo !== undefined && data.matchInfo !== null) {
+        if (!isRecord(data.matchInfo)) {
+            return 'Nieprawidłowe dane meczu.';
+        }
+
+        const matchId = normalizeTrimmedString(data.matchInfo.matchId);
+        if (!matchId) {
+            return 'Identyfikator meczu jest wymagany.';
+        }
+    }
+
+    if (data.eventDraft?.enabled) {
+        const title = normalizeTrimmedString(data.eventDraft.title);
+        const description = normalizeTrimmedString(data.eventDraft.description);
+        const location = normalizeTrimmedString(data.eventDraft.location);
+        const startAtLocal = normalizeTrimmedString(data.eventDraft.startAtLocal);
+        const endAtLocal = normalizeTrimmedString(data.eventDraft.endAtLocal);
+
+        if (!title) {
+            return 'Tytuł wydarzenia Discord jest wymagany.';
+        }
+
+        if (!description) {
+            return 'Opis wydarzenia Discord jest wymagany.';
+        }
+
+        if (!location) {
+            return 'Miejsce wydarzenia Discord jest wymagane.';
+        }
+
+        const startAtTimestamp = parseWarsawDateTimeToTimestamp(startAtLocal);
+        const endAtTimestamp = parseWarsawDateTimeToTimestamp(endAtLocal);
+
+        if (!startAtTimestamp || !endAtTimestamp) {
+            return 'Podaj poprawną datę rozpoczęcia i zakończenia wydarzenia (Europe/Warsaw).';
+        }
+
+        if (endAtTimestamp <= startAtTimestamp) {
+            return 'Data zakończenia wydarzenia musi być późniejsza od startu.';
+        }
+    }
+
     return null;
 }

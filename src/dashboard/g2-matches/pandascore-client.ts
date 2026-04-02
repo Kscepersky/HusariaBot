@@ -63,6 +63,19 @@ function normalizeWhitespace(value: string): string {
     return value.replace(/\s+/g, ' ').trim();
 }
 
+function normalizeGameName(value: string): string {
+    const normalized = normalizeWhitespace(value);
+    if (!normalized) {
+        return 'Nieznana gra';
+    }
+
+    if (normalized.toLowerCase() === 'lol') {
+        return 'League of Legends';
+    }
+
+    return normalized;
+}
+
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -337,7 +350,7 @@ function normalizeMatch(match: PandaScoreMatch, horizonTimestamp: number): G2Mat
         return null;
     }
 
-    const gameName = normalizeWhitespace(match.videogame?.name ?? '') || 'Nieznana gra';
+    const gameName = normalizeGameName(match.videogame?.name ?? '');
     const tournamentName = buildCompetitionName(match);
 
     const opponent = inferOpponentName(match.name ?? '', teamNames);
