@@ -63,11 +63,13 @@ let g2RefreshInProgress = false
 let g2RefreshCooldownMs = 30000
 let g2FilterDebounceId = null
 let g2LoadRequestId = 0
+let csrfTokenPromise = null
 
 let selectedMatchInfo = null
 
 document.addEventListener('DOMContentLoaded', async () => {
-  loadUserInfo()
+  await loadUserInfo()
+  await ensureCsrfToken().catch(() => undefined)
   initSidebarNav()
   await initEmbedSection()
   await initScheduledSection()
@@ -98,11 +100,100 @@ async function loadUserInfo() {
           ? `<img class="user-avatar" src="${avatarUrl}" alt="avatar">`
           : `<div class="user-avatar-placeholder">👤</div>`}
         <span class="user-name">${escapeHtml(user.globalName || user.username)}</span>
-        <a href="/auth/logout" class="btn-logout">Wyloguj</a>
+        <button type="button" class="btn-logout" id="logout-btn">Wyloguj</button>
       </div>`
+
+    const logoutButton = document.getElementById('logout-btn')
+    logoutButton?.addEventListener('click', async () => {
+      await logoutDashboard()
+    })
   } catch {
     window.location.href = '/auth/discord'
   }
+}
+
+async function logoutDashboard() {
+  try {
+    const response = await fetchWithCsrf('/auth/logout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+
+    if (!response.ok) {
+      const payload = await parseApiResponse(response)
+      throw new Error(payload.error ?? 'Nie udało się wylogować.')
+    }
+
+    window.location.href = '/auth/login'
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
+async function ensureCsrfToken(forceRefresh = false) {
+  if (forceRefresh) {
+    csrfTokenPromise = null
+  }
+
+  if (!csrfTokenPromise) {
+    csrfTokenPromise = (async () => {
+      const response = await fetch('/api/csrf-token')
+      if (response.status === 401) {
+        window.location.href = '/auth/discord'
+        throw new Error('Sesja wygasła. Zaloguj się ponownie.')
+      }
+
+      const payload = await parseApiResponse(response)
+      if (!response.ok || typeof payload.csrfToken !== 'string' || payload.csrfToken.length === 0) {
+        throw new Error(payload.error ?? 'Nie udało się pobrać tokenu bezpieczeństwa.')
+      }
+
+      return payload.csrfToken
+    })().catch((error) => {
+      csrfTokenPromise = null
+      throw error
+    })
+  }
+
+  return csrfTokenPromise
+}
+
+async function fetchWithCsrf(url, options = {}) {
+  const method = String(options.method ?? 'GET').toUpperCase()
+  const isMutatingRequest = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+
+  if (!isMutatingRequest) {
+    return fetch(url, options)
+  }
+
+  const headers = new Headers(options.headers ?? {})
+  headers.set('x-csrf-token', await ensureCsrfToken())
+
+  const firstResponse = await fetch(url, {
+    ...options,
+    method,
+    headers,
+  })
+
+  if (firstResponse.status === 401) {
+    window.location.href = '/auth/discord'
+    return firstResponse
+  }
+
+  if (firstResponse.status !== 403) {
+    return firstResponse
+  }
+
+  headers.set('x-csrf-token', await ensureCsrfToken(true))
+  return fetch(url, {
+    ...options,
+    method,
+    headers,
+  })
 }
 
 function initSidebarNav() {
@@ -951,7 +1042,7 @@ async function saveDashboardEvent() {
       : '/api/events'
     const requestMethod = isEditing ? 'PATCH' : 'POST'
 
-    const response = await fetch(requestUrl, {
+    const response = await fetchWithCsrf(requestUrl, {
       method: requestMethod,
       headers: {
         'Content-Type': 'application/json',
@@ -982,7 +1073,7 @@ async function deleteDashboardEvent(eventId) {
   }
 
   try {
-    const response = await fetch(`/api/events/${encodeURIComponent(eventId)}`, {
+    const response = await fetchWithCsrf(`/api/events/${encodeURIComponent(eventId)}`, {
       method: 'DELETE',
     })
     const json = await parseApiResponse(response)
@@ -1219,7 +1310,7 @@ async function deleteScheduledPost(postId) {
   }
 
   try {
-    const response = await fetch(`/api/scheduled/${encodeURIComponent(postId)}`, {
+    const response = await fetchWithCsrf(`/api/scheduled/${encodeURIComponent(postId)}`, {
       method: 'DELETE',
     })
     const json = await parseApiResponse(response)
@@ -1242,7 +1333,7 @@ async function deleteScheduledPost(postId) {
 
 async function retrySentPostEvent(postId) {
   try {
-    const response = await fetch(`/api/scheduled/sent/${encodeURIComponent(postId)}/retry-event`, {
+    const response = await fetchWithCsrf(`/api/scheduled/sent/${encodeURIComponent(postId)}/retry-event`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1269,7 +1360,7 @@ async function deleteSentPost(postId) {
   }
 
   try {
-    const response = await fetch(`/api/scheduled/sent/${encodeURIComponent(postId)}`, {
+    const response = await fetchWithCsrf(`/api/scheduled/sent/${encodeURIComponent(postId)}`, {
       method: 'DELETE',
     })
 
@@ -1440,7 +1531,7 @@ async function refreshG2Matches() {
   button.disabled = true
 
   try {
-    const response = await fetch('/api/g2-matches/refresh', {
+    const response = await fetchWithCsrf('/api/g2-matches/refresh', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2397,7 +2488,7 @@ async function publishMessage() {
       ? 'PATCH'
       : (hasScheduleDate && editingScheduledPostId ? 'PATCH' : 'POST')
 
-    const resp = await fetch(requestUrl, {
+    const resp = await fetchWithCsrf(requestUrl, {
       method: requestMethod,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

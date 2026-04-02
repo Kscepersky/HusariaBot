@@ -7,6 +7,11 @@ import { requireAuth } from '../middleware/require-auth.js';
 import { publishDashboardPost } from '../publish-flow.js';
 import { parseWarsawDateTimeToTimestamp } from '../scheduler/warsaw-time.js';
 import {
+    scheduledPayloadSchema,
+    scheduledSentEditPayloadSchema,
+    zodErrorToMessage,
+} from '../validation/request-schemas.js';
+import {
     deleteScheduledPostById,
     getScheduledPostById,
     insertScheduledPost,
@@ -249,7 +254,13 @@ scheduledRouter.get('/:id', async (req, res) => {
 });
 
 scheduledRouter.post('/', async (req, res) => {
-    const body = req.body as ScheduledPostRequestBody;
+    const parsedBody = scheduledPayloadSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const body = parsedBody.data as ScheduledPostRequestBody;
     const scheduleAtLocal = normalizeTrimmedString(body.scheduleAtLocal);
 
     if (!scheduleAtLocal) {
@@ -321,7 +332,13 @@ scheduledRouter.patch('/:id', async (req, res) => {
         return;
     }
 
-    const body = req.body as ScheduledPostRequestBody;
+    const parsedBody = scheduledPayloadSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const body = parsedBody.data as ScheduledPostRequestBody;
     const scheduleAtLocal = normalizeTrimmedString(body.scheduleAtLocal);
 
     if (!scheduleAtLocal) {
@@ -416,7 +433,13 @@ scheduledRouter.patch('/sent/:id', async (req, res) => {
         return;
     }
 
-    const body = req.body as ScheduledPostEditRequestBody;
+    const parsedBody = scheduledSentEditPayloadSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const body = parsedBody.data as ScheduledPostEditRequestBody;
     const payload = sanitizePayload(body);
 
     const validationError = validateEmbedForm(payload);

@@ -1,6 +1,6 @@
 import express from 'express';
 import session from 'express-session';
-import { join } from 'path';
+import { basename, dirname, isAbsolute, join } from 'path';
 import { config } from 'dotenv';
 import './types.js';
 import { authRouter }  from './routes/auth.js';
@@ -8,6 +8,9 @@ import { apiRouter }   from './routes/api.js';
 import { scheduledRouter } from './routes/scheduled.js';
 import { g2MatchesRouter } from './routes/g2-matches.js';
 import { pagesRouter } from './routes/pages.js';
+import { ensureCsrfTokenForSession, requireCsrfToken } from './middleware/csrf.js';
+import { authRateLimiter, globalRateLimiter, mutationRateLimiter } from './middleware/rate-limit.js';
+import { SQLiteSessionStore } from './session/sqlite-store.js';
 import { initializeDashboardScheduler } from './scheduler/service.js';
 import { probePandaScoreApiConnection } from './g2-matches/pandascore-client.js';
 import { probeDiscordBotApi } from './discord-api.js';
@@ -33,6 +36,32 @@ const REQUIRED_ENV = [
 ];
 
 const DASHBOARD_BODY_LIMIT = '12mb';
+const DEFAULT_SESSION_TTL_HOURS = 24;
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+    const parsed = Number.parseInt(value ?? '', 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+
+    return parsed;
+}
+
+function isEnabled(value: string | undefined): boolean {
+    return value === '1' || value?.toLowerCase() === 'true';
+}
+
+function resolveSessionDbLocation(): { dir: string; db: string } {
+    const configuredPath = process.env.DASHBOARD_SESSION_DB_PATH?.trim() || 'data/dashboard-sessions.sqlite';
+    const absolutePath = isAbsolute(configuredPath)
+        ? configuredPath
+        : join(process.cwd(), configuredPath);
+
+    return {
+        dir: dirname(absolutePath),
+        db: basename(absolutePath),
+    };
+}
 
 function isDevLogsEnabled(): boolean {
     const forceDisabled = process.env.DEV_LOGS === '0';
@@ -82,7 +111,19 @@ async function runDashboardStartupDiagnostics(port: number): Promise<void> {
 export function createDashboardApp() {
     for (const key of REQUIRED_ENV) requireEnv(key);
 
+    const { dir: sessionDir, db: sessionDbFile } = resolveSessionDbLocation();
+    const sessionTtlHours = parsePositiveInt(process.env.DASHBOARD_SESSION_TTL_HOURS, DEFAULT_SESSION_TTL_HOURS);
+    const sessionMaxAgeMs = sessionTtlHours * 60 * 60 * 1000;
+    const sessionDbPath = join(sessionDir, sessionDbFile);
+    const sessionStore = new SQLiteSessionStore({
+        filePath: sessionDbPath,
+        defaultTtlMs: sessionMaxAgeMs,
+    });
+
     const app = express();
+    if (isEnabled(process.env.DASHBOARD_TRUST_PROXY)) {
+        app.set('trust proxy', 1);
+    }
 
     // Security headers
     app.use((_req, res, next) => {
@@ -96,20 +137,38 @@ export function createDashboardApp() {
         next();
     });
 
+    app.use(globalRateLimiter);
+
     app.use(express.json({ limit: DASHBOARD_BODY_LIMIT }));
     app.use(express.urlencoded({ extended: true, limit: DASHBOARD_BODY_LIMIT }));
 
     app.use(session({
         secret:            requireEnv('DASHBOARD_SESSION_SECRET'),
+        store:             sessionStore,
         resave:            false,
         saveUninitialized: false,
         cookie: {
             httpOnly: true,
             sameSite: 'lax',
-            maxAge:   24 * 60 * 60 * 1000,
+            maxAge:   sessionMaxAgeMs,
             secure:   process.env.NODE_ENV === 'production',
         },
     }));
+
+    app.use(ensureCsrfTokenForSession);
+    app.use('/auth/discord/callback', authRateLimiter);
+    app.use('/api', mutationRateLimiter);
+    app.use(requireCsrfToken);
+
+    app.get('/api/csrf-token', (req, res) => {
+        if (!req.session.user) {
+            res.status(401).json({ error: 'Brak autoryzacji.' });
+            return;
+        }
+
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ csrfToken: req.session.csrfToken });
+    });
 
     app.use('/public', express.static(join(__dirname, 'public')));
     app.use('/img',    express.static(join(__dirname, '..', '..', 'img')));

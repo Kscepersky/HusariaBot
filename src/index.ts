@@ -32,6 +32,8 @@ import {
     TICKETS_CONFIG_MODAL_ID,
     TICKETS_OPEN_BUTTON_ID,
 } from './tickets/constants.js';
+import { handleVoiceStateUpdate } from './voice-channels/flow.js';
+import { cleanupOrphanedTemporaryVoiceRecords } from './voice-channels/service.js';
 // Załaduj zmienne środowiskowe z .env
 config();
 
@@ -68,6 +70,7 @@ declare module 'discord.js' {
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildVoiceStates,
     ],
 });
 
@@ -91,6 +94,11 @@ client.on('clientReady', () => {
             console.log(`💓  [DEV][BOT] active=true | ws=${formatWebSocketState(client.ws.status)} | ping=${client.ws.ping}ms | guilds=${client.guilds.cache.size} | uptime=${uptimeSec}s`);
         }, BOT_HEARTBEAT_INTERVAL_MS).unref();
     }
+
+    void cleanupOrphanedTemporaryVoiceRecords(client).catch((error) => {
+        console.error('❌  [BOT] Nie udało się posprzątać osieroconych rekordów kanałów voice:', error);
+    });
+
     console.log('──────────────────────────────────────');
 });
 
@@ -195,6 +203,14 @@ client.on('interactionCreate', async (interaction) => {
             await safelyReplyInteractionError(interaction, '❌ Wystąpił błąd podczas obsługi przycisku.');
         }
         return;
+    }
+});
+
+client.on('voiceStateUpdate', async (oldState, newState) => {
+    try {
+        await handleVoiceStateUpdate(oldState, newState);
+    } catch (error) {
+        console.error('❌  Błąd obsługi tymczasowych kanałów voice:', error);
     }
 });
 

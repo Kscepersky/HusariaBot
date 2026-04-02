@@ -30,6 +30,8 @@ Dzięki temu możesz oddzielić operacje moderatorskie i publikacyjne od pracy b
 
 - Slash-komendy dla administracji i moderatorów.
 - System ticketów z trwałym licznikiem.
+- Tymczasowe kanały voice: wejście na kanał trigger tworzy kanal nick-voice i przenosi użytkownika.
+- Grace period 10 sekund: pusty kanał voice jest usuwany z opóźnieniem, dzięki czemu użytkownik może wrócić po rozłączeniu.
 - Kreator publikacji (Embedded i Wiadomość) z podglądem.
 - Planowanie publikacji i edycja zaplanowanych postów.
 - Historia wysłanych postów: edycja, retry eventu oraz usuwanie z historii.
@@ -45,6 +47,7 @@ Dzięki temu możesz oddzielić operacje moderatorskie i publikacyjne od pracy b
 src/
   commands/                 Slash komendy bota
   tickets/                  Logika ticketów
+  voice-channels/           Tymczasowe kanały voice (create/move/cleanup)
   embeds/                   Szablony i budowanie embedów
   dashboard/
     routes/                 API dashboardu
@@ -110,14 +113,32 @@ Najważniejsze zmienne:
 | ADMIN_ROLE_ID | tak | Rola admina |
 | MODERATOR_ROLE_ID | tak | Rola moderatora |
 | SUPPORT_CATEGORY_ID | tak | Kategoria ticketów |
+| VOICE_TRIGGER_CHANNEL_ID | tak (temp voice) | ID kanału voice trigger |
+| VOICE_CATEGORY_ID | tak (temp voice) | ID kategorii dla tymczasowych kanałów voice |
 | DISCORD_CLIENT_SECRET | tak (dashboard) | OAuth2 Client Secret |
 | DISCORD_REDIRECT_URI | tak (dashboard) | OAuth redirect URI |
 | DASHBOARD_SESSION_SECRET | tak (dashboard) | Secret sesji Express |
+| DASHBOARD_SESSION_DB_PATH | nie | Ścieżka do SQLite store sesji dashboardu |
+| DASHBOARD_SESSION_TTL_HOURS | nie | Czas życia sesji dashboardu (h) |
+| DASHBOARD_TRUST_PROXY | nie | Zaufanie nagłówkom proxy (1/0) |
 | DASHBOARD_PORT | nie | Port dashboardu (domyślnie 3000) |
 | DASHBOARD_BASE_URL | tak (dashboard) | Publiczny URL do komendy /dashboard |
 | PANDASCORE_API_KEY | tak (moduł G2) | API key PandaScore |
 | DEV_LOGS | nie | Logi developerskie dashboardu (1/0) |
 | BOT_DEV_LOGS | nie | Heartbeat i logi developerskie bota (1/0) |
+| DASHBOARD_RATE_LIMIT_WINDOW_MS | nie | Okno limitu globalnego dashboardu (ms) |
+| DASHBOARD_RATE_LIMIT_MAX | nie | Maksymalna liczba requestów globalnie na okno |
+| DASHBOARD_AUTH_RATE_LIMIT_WINDOW_MS | nie | Okno limitu callbacku OAuth (ms) |
+| DASHBOARD_AUTH_RATE_LIMIT_MAX | nie | Maksymalna liczba callbacków OAuth na okno |
+| DASHBOARD_MUTATION_RATE_LIMIT_WINDOW_MS | nie | Okno limitu mutacji API (ms) |
+| DASHBOARD_MUTATION_RATE_LIMIT_MAX | nie | Maksymalna liczba mutacji API na okno |
+
+Zachowanie modułu temp voice:
+
+1. Użytkownik wchodzi na VOICE_TRIGGER_CHANNEL_ID.
+2. Bot tworzy kanał nazwa-uzytkownika-voice w VOICE_CATEGORY_ID i przenosi użytkownika.
+3. Jeśli użytkownik miał już aktywny kanał tymczasowy, bot przenosi go do istniejącego kanału zamiast tworzyć nowy.
+4. Gdy kanał opustoszeje, bot czeka 10 sekund i dopiero usuwa kanał (grace period na reconnect po rozłączeniu).
 
 ## Komendy bota
 
@@ -177,6 +198,9 @@ Dodatkowe zasady:
 
 - Operacje staff-only są chronione rolami.
 - Dashboard waliduje payloady i grafiki przed publikacją.
+- Dashboard używa tokenów CSRF dla mutacji API.
+- Dashboard ma wielowarstwowy rate limiting (globalny + auth callback + mutacje API).
+- Sesje dashboardu są trzymane w SQLite store zamiast domyślnego MemoryStore.
 - Nie publikuj logów z danymi środowiskowymi.
 
 ## Troubleshooting

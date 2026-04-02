@@ -21,6 +21,12 @@ import {
     type EventDraftFormData,
     type MatchInfoSnapshot,
 } from '../embed-handlers.js';
+import {
+    dashboardEventSchema,
+    embedPayloadSchema,
+    sendImageSchema,
+    zodErrorToMessage,
+} from '../validation/request-schemas.js';
 import { publishDashboardPost } from '../publish-flow.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
 import { insertScheduledPost } from '../scheduler/store.js';
@@ -403,7 +409,13 @@ apiRouter.post('/events', async (req, res) => {
         return;
     }
 
-    const form = sanitizeEventForm(req.body);
+    const parsedBody = dashboardEventSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const form = sanitizeEventForm(parsedBody.data);
 
     try {
         const { startAtIso, endAtIso } = validateAndResolveEventForm(form);
@@ -435,7 +447,13 @@ apiRouter.patch('/events/:id', async (req, res) => {
         return;
     }
 
-    const form = sanitizeEventForm(req.body);
+    const parsedBody = dashboardEventSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const form = sanitizeEventForm(parsedBody.data);
 
     try {
         const { startAtIso, endAtIso } = validateAndResolveEventForm(form);
@@ -480,13 +498,14 @@ apiRouter.delete('/events/:id', async (req, res) => {
 
 // POST /api/send-image — send an image file to a Discord channel
 apiRouter.post('/send-image', async (req, res) => {
-    const { filename, channelId } = req.body as { filename?: string; channelId?: string };
-
-    if (!filename || typeof filename !== 'string') {
-        res.status(400).json({ error: 'Nazwa pliku jest wymagana.' });
+    const parsedBody = sendImageSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
         return;
     }
-    if (!channelId || typeof channelId !== 'string' || !/^\d{17,20}$/.test(channelId)) {
+
+    const { filename, channelId } = parsedBody.data;
+    if (!/^\d{17,20}$/.test(channelId)) {
         res.status(400).json({ error: 'Wybierz kanał docelowy.' });
         return;
     }
@@ -507,7 +526,13 @@ apiRouter.post('/send-image', async (req, res) => {
 
 // POST /api/embed — build & send embed
 apiRouter.post('/embed', async (req, res) => {
-    const data = sanitizeEmbedPayload(req.body);
+    const parsedBody = embedPayloadSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const data = sanitizeEmbedPayload(parsedBody.data);
 
     const validationError = validateEmbedForm(data);
     if (validationError) {

@@ -80,10 +80,15 @@ authRouter.get('/discord/callback', async (req, res) => {
     }
 });
 
-authRouter.get('/logout', (req, res) => {
+authRouter.post('/logout', (req, res) => {
     req.session.destroy((err) => {
-        if (err) console.error('Session destroy error:', err);
-        res.redirect('/auth/login');
+        if (err) {
+            console.error('Session destroy error:', err);
+            res.status(500).json({ error: 'Nie udało się zakończyć sesji.' });
+            return;
+        }
+
+        res.json({ success: true });
     });
 });
 
@@ -96,6 +101,7 @@ const ERROR_MESSAGES: Record<string, string> = {
     not_member:    'Nie jesteś członkiem tego serwera Discord.',
     invalid_state: 'Błąd autoryzacji — nieprawidłowy stan. Spróbuj ponownie.',
     auth_failed:   'Logowanie nie powiodło się. Spróbuj ponownie.',
+    too_many_attempts: 'Za dużo prób logowania. Poczekaj chwilę i spróbuj ponownie.',
 };
 
 authRouter.get('/error', (req, res) => {
