@@ -15,7 +15,7 @@
     "dashboard:dev": "npx tsx watch src/dashboard/index.ts"
   },
   "keywords": [],
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "discord.js": "^14.25.1",
     "dotenv": "^17.3.1",

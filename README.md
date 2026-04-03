@@ -238,4 +238,4 @@ npm test
 
 ## Licencja
 
-ISC
+MIT
