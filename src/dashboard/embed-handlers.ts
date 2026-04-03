@@ -47,6 +47,8 @@ export interface PublishMetadata {
     publishedBy: string;
     publishedByUserId?: string;
     editedAtTimestamp?: number;
+    editedBy?: string;
+    editedByUserId?: string;
 }
 
 export interface DashboardMessagePayload {
@@ -72,6 +74,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeTrimmedString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
+}
+
+function sanitizeMetadataLabel(value: string): string {
+    const normalized = normalizeTrimmedString(value);
+
+    return normalized
+        .replace(/@(everyone|here)\b/gi, '$1')
+        .replace(/<@!?(\d{17,20})>/g, 'uzytkownik')
+        .replace(/<@&(\d{17,20})>/g, 'rola');
 }
 
 function extractRoleMentionIds(content: string): string[] {
@@ -154,8 +165,10 @@ function formatEditedAtInWarsaw(timestamp: number): string {
 
 function withPublisherFooter(embed: EmbedBuilder, metadata: PublishMetadata): EmbedBuilder {
     if (metadata.editedAtTimestamp) {
+        const editorLabel = sanitizeMetadataLabel(metadata.editedBy ?? metadata.publishedBy) || metadata.publishedBy;
+
         return embed
-            .setFooter({ text: `Edytowano ${formatEditedAtInWarsaw(metadata.editedAtTimestamp)}` })
+            .setFooter({ text: `Edytował: ${editorLabel}` })
             .setTimestamp();
     }
 
@@ -239,7 +252,7 @@ export function buildDashboardMessagePayload(data: EmbedFormData, metadata: Publ
         : `*Opublikował*: ${publisherLabel}`;
 
     const editedLabel = metadata.editedAtTimestamp
-        ? `\n*Edytowano*: ${formatEditedAtInWarsaw(metadata.editedAtTimestamp)}`
+        ? `\n*Edytował*: ${sanitizeMetadataLabel(metadata.editedBy ?? metadata.publishedBy) || metadata.publishedBy}`
         : '';
 
     const finalContent = `${contentWithPublisher}${editedLabel}`;

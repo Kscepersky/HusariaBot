@@ -88,13 +88,14 @@ vi.mock('../event-publisher.js', () => ({
 }));
 
 vi.mock('../discord-api.js', () => ({
+    editChannelMessage: vi.fn(),
     deleteChannelMessage: vi.fn(),
     deleteGuildScheduledEvent: vi.fn(),
 }));
 
 import { publishDashboardPost } from '../publish-flow.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
-import { deleteChannelMessage, deleteGuildScheduledEvent } from '../discord-api.js';
+import { deleteChannelMessage, deleteGuildScheduledEvent, editChannelMessage } from '../discord-api.js';
 import { scheduledRouter } from './scheduled.js';
 
 function buildPayload(overrides: Partial<EmbedFormData> = {}): EmbedFormData {
@@ -212,14 +213,7 @@ describe('scheduled routes - sent posts', () => {
         });
         postStore.set(existingPost.id, clonePost(existingPost));
 
-        vi.mocked(publishDashboardPost).mockResolvedValue({
-            messageId: 'msg-new',
-            pingMessageId: 'ping-new',
-            imageMessageId: 'img-new',
-            warnings: ['publish-warning'],
-        });
-
-        vi.mocked(deleteChannelMessage).mockResolvedValue(undefined);
+        vi.mocked(editChannelMessage).mockResolvedValue(undefined);
         vi.mocked(tryCreateDiscordEventFromPayload).mockResolvedValue({
             status: 'created',
             eventId: 'event-should-not-be-used',
@@ -254,22 +248,209 @@ describe('scheduled routes - sent posts', () => {
             expect(response.status).toBe(200);
             expect(body.success).toBe(true);
             expect(body.eventStatus).toBe('created');
+            expect(vi.mocked(publishDashboardPost)).not.toHaveBeenCalled();
             expect(vi.mocked(tryCreateDiscordEventFromPayload)).not.toHaveBeenCalled();
-            expect(vi.mocked(deleteChannelMessage)).toHaveBeenCalledTimes(3);
-            const deletionCalls = vi.mocked(deleteChannelMessage).mock.calls;
-            expect(deletionCalls).toEqual(expect.arrayContaining([
-                [existingPost.payload.channelId, 'msg-old'],
-                [existingPost.payload.channelId, 'ping-old'],
-                [existingPost.payload.channelId, 'img-old'],
-            ]));
+            expect(vi.mocked(editChannelMessage)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(editChannelMessage)).toHaveBeenCalledWith(
+                existingPost.payload.channelId,
+                'msg-old',
+                expect.objectContaining({
+                    content: expect.stringContaining('*Edytował*: Admin'),
+                    embeds: [],
+                }),
+            );
+            expect(vi.mocked(deleteChannelMessage)).not.toHaveBeenCalled();
 
             const updated = postStore.get(existingPost.id);
-            expect(updated?.messageId).toBe('msg-new');
+            expect(updated?.messageId).toBe('msg-old');
+            expect(updated?.pingMessageId).toBe('ping-old');
+            expect(updated?.imageMessageId).toBe('img-old');
             expect(updated?.eventStatus).toBe('created');
             expect(updated?.discordEventId).toBe('event-preserved-123');
-            expect(updated?.lastError).toContain('publish-warning');
+            expect(updated?.lastError).toBeUndefined();
             expect(updated?.editedBy).toBe('Admin');
             expect(vi.mocked(deleteGuildScheduledEvent)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('czyści content i podmienia embed przy zmianie trybu na embedded', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-switch-to-embedded',
+            payload: buildPayload({
+                mode: 'message',
+                imageMode: 'none',
+            }),
+            eventStatus: 'created',
+            discordEventId: 'event-preserved-321',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        vi.mocked(editChannelMessage).mockResolvedValue(undefined);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload({
+                    mode: 'embedded',
+                    title: 'Nowy tytuł embeda',
+                    content: 'Nowa treść embeda',
+                    imageMode: 'none',
+                })),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(editChannelMessage)).toHaveBeenCalledWith(
+                existingPost.payload.channelId,
+                'msg-old',
+                expect.objectContaining({
+                    content: '',
+                    embeds: expect.any(Array),
+                }),
+            );
+        });
+    });
+
+    it('odrzuca zmiane kanalu przy edycji opublikowanego posta', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-channel-change',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload({
+                    channelId: '123456789012345679',
+                })),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(body.error).toBe('Nie można zmienić kanału dla opublikowanego posta.');
+            expect(vi.mocked(editChannelMessage)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('odrzuca zmiane ustawien pingu lub grafiki przy edycji opublikowanego posta', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-side-messages-change',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload({
+                    mentionRoleEnabled: true,
+                    mentionRoleId: 'everyone',
+                })),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(body.error).toBe('W edycji opublikowanego posta nie można zmieniać ustawień pingu ani grafiki.');
+            expect(vi.mocked(editChannelMessage)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('odrzuca zmiane danych uploadu grafiki przy edycji opublikowanego posta', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-upload-change',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload({
+                    uploadFileName: 'nowa-grafika.png',
+                    uploadMimeType: 'image/png',
+                    uploadBase64: 'ZmFrZS1pbWFnZS1kYXRh',
+                })),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(body.error).toBe('W edycji opublikowanego posta nie można zmieniać ustawień pingu ani grafiki.');
+            expect(vi.mocked(editChannelMessage)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('akceptuje niezmieniony upload grafiki gdy klient wysyla placeholder [stored]', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-upload-placeholder',
+            payload: buildPayload({
+                imageMode: 'upload',
+                uploadFileName: 'grafika.png',
+                uploadMimeType: 'image/png',
+                uploadBase64: 'REAL_BASE64_DATA',
+            }),
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        vi.mocked(editChannelMessage).mockResolvedValue(undefined);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload({
+                    imageMode: 'upload',
+                    uploadFileName: 'grafika.png',
+                    uploadMimeType: 'image/png',
+                    uploadBase64: '[stored]',
+                })),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(editChannelMessage)).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    it('zwraca 409 gdy wyslany post nie ma messageId do edycji', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-without-message-id',
+            messageId: undefined,
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload()),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(409);
+            expect(body.error).toBe('Nie można edytować posta bez identyfikatora wiadomości.');
+            expect(vi.mocked(editChannelMessage)).not.toHaveBeenCalled();
         });
     });
 
@@ -283,12 +464,7 @@ describe('scheduled routes - sent posts', () => {
         });
         postStore.set(existingPost.id, clonePost(existingPost));
 
-        vi.mocked(publishDashboardPost).mockResolvedValue({
-            messageId: 'msg-updated',
-            pingMessageId: undefined,
-            imageMessageId: undefined,
-            warnings: [],
-        });
+        vi.mocked(editChannelMessage).mockResolvedValue(undefined);
         vi.mocked(deleteChannelMessage).mockResolvedValue(undefined);
         vi.mocked(deleteGuildScheduledEvent).mockResolvedValue(undefined);
 
@@ -331,12 +507,7 @@ describe('scheduled routes - sent posts', () => {
         });
         postStore.set(existingPost.id, clonePost(existingPost));
 
-        vi.mocked(publishDashboardPost).mockResolvedValue({
-            messageId: 'msg-updated-2',
-            pingMessageId: undefined,
-            imageMessageId: undefined,
-            warnings: [],
-        });
+        vi.mocked(editChannelMessage).mockResolvedValue(undefined);
         vi.mocked(deleteChannelMessage).mockResolvedValue(undefined);
         vi.mocked(deleteGuildScheduledEvent).mockRejectedValue(new Error('delete failed'));
 

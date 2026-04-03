@@ -116,3 +116,115 @@ describe('hasBotManageEventsPermission', () => {
     await expect(hasBotManageEventsPermission('123')).resolves.toBe(false)
   })
 })
+
+describe('listGuildScheduledEvents', () => {
+  it('returns cached events when Discord responds with 429 after cache TTL', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    let currentNow = 0
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => currentNow)
+
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return jsonResponse([
+          {
+            id: 'event-1',
+            guild_id: '123',
+            name: 'Test Event',
+            status: 1,
+            scheduled_start_time: '2099-04-01T18:00:00.000Z',
+            entity_type: 3,
+          },
+        ])
+      }
+
+      return jsonResponse({
+        message: 'You are being rate limited.',
+        retry_after: 5,
+        global: false,
+      }, 429)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { listGuildScheduledEvents } = await import('./discord-api.js')
+
+    const firstResult = await listGuildScheduledEvents('123')
+
+    currentNow = 16_000
+    const secondResult = await listGuildScheduledEvents('123')
+
+    currentNow = 16_100
+    const thirdResult = await listGuildScheduledEvents('123')
+
+    expect(firstResult).toHaveLength(1)
+    expect(secondResult).toEqual(firstResult)
+    expect(thirdResult).toEqual(firstResult)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    nowSpy.mockRestore()
+  })
+
+  it('returns cached empty snapshot during 429 cooldown when empty list was fetched successfully before', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    let currentNow = 0
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => currentNow)
+
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        return jsonResponse([])
+      }
+
+      return jsonResponse({
+        message: 'You are being rate limited.',
+        retry_after: 5,
+        global: false,
+      }, 429)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { listGuildScheduledEvents } = await import('./discord-api.js')
+
+    const firstResult = await listGuildScheduledEvents('123')
+
+    currentNow = 16_000
+    const secondResult = await listGuildScheduledEvents('123')
+
+    currentNow = 16_500
+    const thirdResult = await listGuildScheduledEvents('123')
+
+    expect(firstResult).toEqual([])
+    expect(secondResult).toEqual([])
+    expect(thirdResult).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    nowSpy.mockRestore()
+  })
+
+  it('throws rate-limit error during 429 cooldown when no cache exists', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    const nowValues = [1000, 1200]
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => nowValues.shift() ?? 1200)
+
+    const fetchMock = vi.fn(async () => {
+      return jsonResponse({
+        message: 'You are being rate limited.',
+        retry_after: 5,
+        global: false,
+      }, 429)
+    })
+
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { listGuildScheduledEvents } = await import('./discord-api.js')
+
+    await expect(listGuildScheduledEvents('123')).rejects.toThrow('Discord events endpoint is rate limited.')
+    await expect(listGuildScheduledEvents('123')).rejects.toThrow('Discord events endpoint is rate limited.')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    nowSpy.mockRestore()
+  })
+})

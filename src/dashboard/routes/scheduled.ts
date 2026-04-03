@@ -1,10 +1,17 @@
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
-import { deleteChannelMessage, deleteGuildScheduledEvent } from '../discord-api.js';
-import { validateEmbedForm, type EmbedFormData, type EventDraftFormData, type MatchInfoSnapshot } from '../embed-handlers.js';
+import { deleteGuildScheduledEvent, editChannelMessage } from '../discord-api.js';
+import {
+    buildDashboardAllowedMentions,
+    buildDashboardMessagePayload,
+    buildEmbedJson,
+    validateEmbedForm,
+    type EmbedFormData,
+    type EventDraftFormData,
+    type MatchInfoSnapshot,
+} from '../embed-handlers.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
 import { requireAuth } from '../middleware/require-auth.js';
-import { publishDashboardPost } from '../publish-flow.js';
 import { parseWarsawDateTimeToTimestamp } from '../scheduler/warsaw-time.js';
 import {
     scheduledPayloadSchema,
@@ -29,6 +36,8 @@ interface ScheduledPostRequestBody extends Omit<EmbedFormData, 'mentionRoleEnabl
 }
 
 interface ScheduledPostEditRequestBody extends ScheduledPostRequestBody {}
+
+const STORED_UPLOAD_PLACEHOLDER = '[stored]';
 
 function normalizeTrimmedString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
@@ -144,29 +153,6 @@ function sanitizePayload(input: ScheduledPostRequestBody): EmbedFormData {
         matchInfo: sanitizeMatchInfo(input.matchInfo),
         eventDraft: sanitizeEventDraft(input.eventDraft),
     };
-}
-
-async function deletePostMessages(post: ScheduledPost): Promise<string[]> {
-    const warnings: string[] = [];
-    const messageIds: Array<{ id?: string; label: string }> = [
-        { id: post.messageId, label: 'główna wiadomość' },
-        { id: post.pingMessageId, label: 'wiadomość z pingiem' },
-        { id: post.imageMessageId, label: 'wiadomość z grafiką' },
-    ];
-
-    await Promise.all(messageIds.map(async ({ id, label }) => {
-        if (!id) {
-            return;
-        }
-
-        try {
-            await deleteChannelMessage(post.payload.channelId, id);
-        } catch {
-            warnings.push(`Nie udało się usunąć poprzedniej wiadomości: ${label}.`);
-        }
-    }));
-
-    return warnings;
 }
 
 function toListResponsePost(post: ScheduledPost): ScheduledPost {
@@ -465,15 +451,67 @@ scheduledRouter.patch('/sent/:id', async (req, res) => {
             res.status(404).json({ error: 'Nie znaleziono wysłanego posta do edycji.' });
             return;
         }
+
+        if (payload.channelId !== existingPost.payload.channelId) {
+            res.status(400).json({ error: 'Nie można zmienić kanału dla opublikowanego posta.' });
+            return;
+        }
+
+        if (!existingPost.messageId) {
+            res.status(409).json({ error: 'Nie można edytować posta bez identyfikatora wiadomości.' });
+            return;
+        }
+
+        const hasPingSettingsChanged = Boolean(payload.mentionRoleEnabled) !== Boolean(existingPost.payload.mentionRoleEnabled)
+            || normalizeTrimmedString(payload.mentionRoleId) !== normalizeTrimmedString(existingPost.payload.mentionRoleId);
+        const normalizedIncomingUploadBase64 = normalizeTrimmedString(payload.uploadBase64);
+        const normalizedExistingUploadBase64 = normalizeTrimmedString(existingPost.payload.uploadBase64);
+        const preservesStoredUpload = normalizedIncomingUploadBase64 === STORED_UPLOAD_PLACEHOLDER
+            && normalizedExistingUploadBase64.length > 0;
+        const hasImageSettingsChanged = (payload.imageMode ?? 'none') !== (existingPost.payload.imageMode ?? 'none')
+            || normalizeTrimmedString(payload.imageFilename) !== normalizeTrimmedString(existingPost.payload.imageFilename)
+            || normalizeTrimmedString(payload.uploadFileName) !== normalizeTrimmedString(existingPost.payload.uploadFileName)
+            || normalizeTrimmedString(payload.uploadMimeType) !== normalizeTrimmedString(existingPost.payload.uploadMimeType)
+            || (!preservesStoredUpload && normalizedIncomingUploadBase64 !== normalizedExistingUploadBase64);
+
+        if (hasPingSettingsChanged || hasImageSettingsChanged) {
+            res.status(400).json({
+                error: 'W edycji opublikowanego posta nie można zmieniać ustawień pingu ani grafiki.',
+            });
+            return;
+        }
+
+        const editedBy = req.session.user?.globalName ?? req.session.user?.username ?? 'Administrator';
         const editedAt = Date.now();
 
-        const publishResult = await publishDashboardPost(payload, {
-            publishedBy: existingPost.publisherName,
-            publishedByUserId: existingPost.publisherUserId,
-            editedAtTimestamp: editedAt,
-        });
+        if (payload.mode === 'embedded') {
+            const embedJson = buildEmbedJson(payload, {
+                publishedBy: existingPost.publisherName,
+                publishedByUserId: existingPost.publisherUserId,
+                editedAtTimestamp: editedAt,
+                editedBy,
+                editedByUserId: req.session.user?.id,
+            });
 
-        const deletionWarnings = await deletePostMessages(existingPost);
+            await editChannelMessage(payload.channelId, existingPost.messageId, {
+                content: '',
+                embeds: [embedJson],
+                allowed_mentions: buildDashboardAllowedMentions(normalizeTrimmedString(payload.content)),
+            });
+        } else {
+            const messagePayload = buildDashboardMessagePayload(payload, {
+                publishedBy: existingPost.publisherName,
+                publishedByUserId: existingPost.publisherUserId,
+                editedAtTimestamp: editedAt,
+                editedBy,
+                editedByUserId: req.session.user?.id,
+            });
+
+            await editChannelMessage(payload.channelId, existingPost.messageId, {
+                ...messagePayload,
+                embeds: [],
+            });
+        }
 
         const eventEnabled = payload.eventDraft?.enabled === true;
         const hasExistingCreatedEvent = existingPost.eventStatus === 'created' && Boolean(existingPost.discordEventId);
@@ -561,8 +599,6 @@ scheduledRouter.patch('/sent/:id', async (req, res) => {
         }
 
         const warnings = [
-            ...deletionWarnings,
-            ...publishResult.warnings,
             ...eventResult.warnings,
             ...lifecycleWarnings,
         ];
@@ -573,14 +609,14 @@ scheduledRouter.patch('/sent/:id', async (req, res) => {
             status: 'sent',
             updatedAt: editedAt,
             sentAt: editedAt,
-            messageId: publishResult.messageId,
-            pingMessageId: publishResult.pingMessageId,
-            imageMessageId: publishResult.imageMessageId,
+            messageId: existingPost.messageId,
+            pingMessageId: existingPost.pingMessageId,
+            imageMessageId: existingPost.imageMessageId,
             eventStatus: eventResult.status,
             discordEventId: eventResult.eventId,
             eventLastError: eventResult.eventError,
             editedAt,
-            editedBy: req.session.user?.globalName ?? req.session.user?.username ?? 'Administrator',
+            editedBy,
             editedByUserId: req.session.user?.id,
             lastError: warnings.length > 0 ? warnings.join(' | ') : undefined,
         }));

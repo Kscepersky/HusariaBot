@@ -13,6 +13,7 @@ import {
     listImages,
     sendImageToChannel,
     updateGuildScheduledEvent,
+    DiscordRateLimitedError,
     type DiscordScheduledEvent,
 } from '../discord-api.js';
 import {
@@ -390,6 +391,15 @@ apiRouter.get('/events', async (_req, res) => {
 
         res.json({ events: mapped });
     } catch (error) {
+        if (error instanceof DiscordRateLimitedError) {
+            const retryAfterSeconds = Math.max(1, Math.ceil(error.retryAfterSeconds));
+            res.setHeader('Retry-After', String(retryAfterSeconds));
+            res.status(503).json({
+                error: 'Discord chwilowo ogranicza zapytania o wydarzenia. Spróbuj ponownie za chwilę.',
+            });
+            return;
+        }
+
         if (isDiscordEventOperationError(error)) {
             console.error('Failed to load Discord events (upstream):', error);
             res.status(502).json({ error: 'Nie udało się pobrać listy wydarzeń Discord (błąd usługi zewnętrznej).' });

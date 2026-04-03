@@ -167,9 +167,28 @@ describe('buildDashboardMessagePayload', () => {
             publishedBy: 'Admin',
             publishedByUserId: '123456789012345680',
             editedAtTimestamp: Date.now(),
+            editedBy: 'ModeratorX',
         });
 
-        expect(payload.content).toContain('*Edytowano*:');
+        expect(payload.content).toContain('*Edytował*: ModeratorX');
+    });
+
+    it('sanityzuje nazwe edytora aby uniknac przypadkowych mentionow', () => {
+        const data: EmbedFormData = {
+            mode: 'message',
+            channelId: '123456789012345678',
+            content: 'Aktualizacja posta',
+        };
+
+        const payload = buildDashboardMessagePayload(data, {
+            publishedBy: 'Admin',
+            editedAtTimestamp: Date.now(),
+            editedBy: '@everyone <@123456789012345680>',
+        });
+
+        expect(payload.content).toContain('*Edytował*: everyone uzytkownik');
+        expect(payload.content).not.toContain('@everyone');
+        expect(payload.content).not.toContain('<@123456789012345680>');
     });
 });
 
@@ -249,9 +268,10 @@ describe('buildEmbedJson', () => {
                 publishedBy: 'Admin',
                 publishedByUserId: '123456789012345678',
                 editedAtTimestamp: Date.now(),
+                editedBy: 'ModeratorX',
             },
         ) as { footer?: { text?: string } };
 
-        expect(json.footer?.text?.startsWith('Edytowano ')).toBe(true);
+        expect(json.footer?.text).toBe('Edytował: ModeratorX');
     });
 });

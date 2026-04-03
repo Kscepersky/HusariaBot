@@ -7,6 +7,45 @@ config();
 const DISCORD_API = 'https://discord.com/api/v10';
 const MANAGE_EVENTS_PERMISSION = 1n << 33n;
 const ADMINISTRATOR_PERMISSION = 1n << 3n;
+const SCHEDULED_EVENTS_CACHE_TTL_MS = 15_000;
+const SCHEDULED_EVENTS_DEFAULT_RETRY_MS = 1_000;
+const SCHEDULED_EVENTS_MAX_CACHE_ENTRIES = 20;
+
+interface DiscordRateLimitPayload {
+    message?: string;
+    retry_after?: number;
+    global?: boolean;
+}
+
+interface ScheduledEventsCacheEntry {
+    events: DiscordScheduledEvent[];
+    fetchedAt: number;
+    rateLimitedUntil: number;
+    hasSnapshot: boolean;
+}
+
+const scheduledEventsCache = new Map<string, ScheduledEventsCacheEntry>();
+const scheduledEventsInFlight = new Map<string, Promise<DiscordScheduledEvent[]>>();
+
+class DiscordRequestError extends Error {
+    status: number;
+    payload: unknown;
+
+    constructor(operation: string, status: number, payload: unknown) {
+        super(`Failed to ${operation}: ${status} — ${JSON.stringify(payload)}`);
+        this.status = status;
+        this.payload = payload;
+    }
+}
+
+export class DiscordRateLimitedError extends Error {
+    retryAfterSeconds: number;
+
+    constructor(retryAfterSeconds: number) {
+        super('Discord events endpoint is rate limited.');
+        this.retryAfterSeconds = retryAfterSeconds;
+    }
+}
 
 function requireEnv(name: string): string {
     const value = process.env[name];
@@ -291,19 +330,126 @@ export async function createExternalGuildScheduledEvent(
 }
 
 export async function listGuildScheduledEvents(guildId: string): Promise<DiscordScheduledEvent[]> {
-    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/scheduled-events?with_user_count=false`, {
-        headers: {
-            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
-        },
-    });
+    const now = Date.now();
+    cleanupScheduledEventsCache(now);
 
-    if (!resp.ok) {
-        const errPayload = await resp.json().catch(() => ({}));
-        throw new Error(`Failed to list Discord events: ${resp.status} — ${JSON.stringify(errPayload)}`);
+    const cached = scheduledEventsCache.get(guildId);
+
+    if (cached && now < cached.rateLimitedUntil) {
+        if (cached.hasSnapshot) {
+            return [...cached.events];
+        }
+
+        throw new DiscordRateLimitedError((cached.rateLimitedUntil - now) / 1000);
     }
 
-    const events = await resp.json() as DiscordScheduledEvent[];
-    return Array.isArray(events) ? events : [];
+    if (cached && now - cached.fetchedAt <= SCHEDULED_EVENTS_CACHE_TTL_MS) {
+        return [...cached.events];
+    }
+
+    const inFlightRequest = scheduledEventsInFlight.get(guildId);
+    if (inFlightRequest) {
+        return inFlightRequest;
+    }
+
+    const requestPromise = (async (): Promise<DiscordScheduledEvent[]> => {
+        try {
+            const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/scheduled-events?with_user_count=false`, {
+                headers: {
+                    Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+                },
+            });
+
+            if (!resp.ok) {
+                const errPayload = await resp.json().catch(() => ({}));
+                throw new DiscordRequestError('list Discord events', resp.status, errPayload);
+            }
+
+            const events = await resp.json() as DiscordScheduledEvent[];
+            const normalizedEvents = Array.isArray(events) ? [...events] : [];
+
+            scheduledEventsCache.set(guildId, {
+                events: normalizedEvents,
+                fetchedAt: Date.now(),
+                rateLimitedUntil: 0,
+                hasSnapshot: true,
+            });
+
+            return normalizedEvents;
+        } catch (error) {
+            if (error instanceof DiscordRequestError && error.status === 429) {
+                const retryAfterSeconds = extractRetryAfterSeconds(error.payload);
+                const retryAfterMs = Math.max(
+                    SCHEDULED_EVENTS_DEFAULT_RETRY_MS,
+                    Math.ceil(retryAfterSeconds * 1000),
+                );
+                const fallbackEvents = cached ? [...cached.events] : [];
+
+                scheduledEventsCache.set(guildId, {
+                    events: fallbackEvents,
+                    fetchedAt: cached?.fetchedAt ?? 0,
+                    rateLimitedUntil: Date.now() + retryAfterMs,
+                    hasSnapshot: cached?.hasSnapshot ?? false,
+                });
+
+                if (cached?.hasSnapshot) {
+                    return fallbackEvents;
+                }
+
+                throw new DiscordRateLimitedError(retryAfterMs / 1000);
+            }
+
+            throw error;
+        }
+    })().finally(() => {
+        scheduledEventsInFlight.delete(guildId);
+    });
+
+    scheduledEventsInFlight.set(guildId, requestPromise);
+    return requestPromise;
+}
+
+function extractRetryAfterSeconds(payload: unknown): number {
+    if (!payload || typeof payload !== 'object') {
+        return SCHEDULED_EVENTS_DEFAULT_RETRY_MS / 1000;
+    }
+
+    const maybeRateLimitPayload = payload as DiscordRateLimitPayload;
+    const retryAfter = maybeRateLimitPayload.retry_after;
+
+    if (typeof retryAfter !== 'number' || !Number.isFinite(retryAfter) || retryAfter < 0) {
+        return SCHEDULED_EVENTS_DEFAULT_RETRY_MS / 1000;
+    }
+
+    return retryAfter;
+}
+
+function cleanupScheduledEventsCache(now: number): void {
+    for (const [guildId, entry] of scheduledEventsCache.entries()) {
+        const isCooldownExpired = now >= entry.rateLimitedUntil;
+        const isSnapshotExpired = now - entry.fetchedAt > SCHEDULED_EVENTS_CACHE_TTL_MS * 2;
+
+        if (isCooldownExpired && isSnapshotExpired) {
+            scheduledEventsCache.delete(guildId);
+        }
+    }
+
+    if (scheduledEventsCache.size <= SCHEDULED_EVENTS_MAX_CACHE_ENTRIES) {
+        return;
+    }
+
+    const entriesByAge = [...scheduledEventsCache.entries()]
+        .sort((left, right) => left[1].fetchedAt - right[1].fetchedAt);
+
+    const entriesToDelete = scheduledEventsCache.size - SCHEDULED_EVENTS_MAX_CACHE_ENTRIES;
+    for (let index = 0; index < entriesToDelete; index += 1) {
+        const oldest = entriesByAge[index];
+        if (!oldest) {
+            break;
+        }
+
+        scheduledEventsCache.delete(oldest[0]);
+    }
 }
 
 export async function updateGuildScheduledEvent(
