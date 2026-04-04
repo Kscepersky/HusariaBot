@@ -26,6 +26,13 @@ export interface EventDraftFormData {
     endAtLocal?: string;
 }
 
+export interface WatchpartyDraftFormData {
+    enabled?: boolean;
+    channelName?: string;
+    startAtLocal?: string;
+    endAtLocal?: string;
+}
+
 export interface EmbedFormData {
     mode: PublishMode;
     channelId: string;
@@ -41,6 +48,7 @@ export interface EmbedFormData {
     uploadBase64?: string;
     matchInfo?: MatchInfoSnapshot;
     eventDraft?: EventDraftFormData;
+    watchpartyDraft?: WatchpartyDraftFormData;
 }
 
 export interface PublishMetadata {
@@ -354,6 +362,31 @@ export function validateEmbedForm(data: EmbedFormData): string | null {
 
         if (endAtTimestamp <= startAtTimestamp) {
             return 'Data zakończenia wydarzenia musi być późniejsza od startu.';
+        }
+    }
+
+    if (data.watchpartyDraft?.enabled) {
+        const channelName = normalizeTrimmedString(data.watchpartyDraft.channelName);
+        const startAtLocal = normalizeTrimmedString(data.watchpartyDraft.startAtLocal);
+        const endAtLocal = normalizeTrimmedString(data.watchpartyDraft.endAtLocal);
+
+        if (!channelName) {
+            return 'Nazwa kanału watchparty jest wymagana.';
+        }
+
+        if (channelName.length > 100) {
+            return 'Nazwa kanału watchparty może mieć maksymalnie 100 znaków.';
+        }
+
+        const startAtTimestamp = parseWarsawDateTimeToTimestamp(startAtLocal);
+        const endAtTimestamp = parseWarsawDateTimeToTimestamp(endAtLocal);
+
+        if (!startAtTimestamp || !endAtTimestamp) {
+            return 'Podaj poprawną datę rozpoczęcia i zakończenia watchparty (Europe/Warsaw).';
+        }
+
+        if (endAtTimestamp <= startAtTimestamp) {
+            return 'Data zakończenia watchparty musi być późniejsza od startu.';
         }
     }
 

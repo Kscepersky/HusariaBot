@@ -9,6 +9,7 @@ import {
     type EmbedFormData,
     type EventDraftFormData,
     type MatchInfoSnapshot,
+    type WatchpartyDraftFormData,
 } from '../embed-handlers.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
 import { requireAuth } from '../middleware/require-auth.js';
@@ -26,6 +27,8 @@ import {
     updateScheduledPost,
 } from '../scheduler/store.js';
 import { registerScheduledPost, unregisterScheduledPost } from '../scheduler/service.js';
+import { registerWatchpartyLifecycle, unregisterWatchpartyLifecycle } from '../watchparty-lifecycle.js';
+import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
 import type { ScheduledPost } from '../scheduler/types.js';
 
 export const scheduledRouter = Router();
@@ -96,6 +99,21 @@ function sanitizeEventDraft(input: unknown): EventDraftFormData | undefined {
     };
 }
 
+function sanitizeWatchpartyDraft(input: unknown): WatchpartyDraftFormData | undefined {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        return undefined;
+    }
+
+    const raw = input as Partial<WatchpartyDraftFormData>;
+
+    return {
+        enabled: normalizeBoolean(raw.enabled),
+        channelName: normalizeTrimmedString(raw.channelName),
+        startAtLocal: normalizeTrimmedString(raw.startAtLocal),
+        endAtLocal: normalizeTrimmedString(raw.endAtLocal),
+    };
+}
+
 function normalizeEventDraftForCompare(input: EventDraftFormData | undefined): {
     enabled: boolean;
     title: string;
@@ -133,6 +151,50 @@ function areEventDraftsEqual(left: EventDraftFormData | undefined, right: EventD
         && normalizedLeft.endAtLocal === normalizedRight.endAtLocal;
 }
 
+function normalizeWatchpartyDraftForCompare(input: WatchpartyDraftFormData | undefined): {
+    enabled: boolean;
+    channelName: string;
+    startAtLocal: string;
+    endAtLocal: string;
+} | null {
+    if (!input || input.enabled !== true) {
+        return null;
+    }
+
+    return {
+        enabled: true,
+        channelName: normalizeTrimmedString(input.channelName),
+        startAtLocal: normalizeTrimmedString(input.startAtLocal),
+        endAtLocal: normalizeTrimmedString(input.endAtLocal),
+    };
+}
+
+function areWatchpartyDraftsEqual(
+    left: WatchpartyDraftFormData | undefined,
+    right: WatchpartyDraftFormData | undefined,
+): boolean {
+    const normalizedLeft = normalizeWatchpartyDraftForCompare(left);
+    const normalizedRight = normalizeWatchpartyDraftForCompare(right);
+
+    if (!normalizedLeft || !normalizedRight) {
+        return false;
+    }
+
+    return normalizedLeft.channelName === normalizedRight.channelName
+        && normalizedLeft.startAtLocal === normalizedRight.startAtLocal
+        && normalizedLeft.endAtLocal === normalizedRight.endAtLocal;
+}
+
+function resolveRetainedWatchpartyStatus(
+    status: ScheduledPost['watchpartyStatus'],
+): 'scheduled' | 'open' | 'closed' | 'failed' {
+    if (status === 'open' || status === 'closed' || status === 'failed') {
+        return status;
+    }
+
+    return 'scheduled';
+}
+
 function sanitizePayload(input: ScheduledPostRequestBody): EmbedFormData {
     const mentionRoleId = normalizeTrimmedString(input.mentionRoleId);
     const mentionRoleEnabled = input.mentionRoleEnabled === true || input.mentionRoleEnabled === 'true';
@@ -152,6 +214,7 @@ function sanitizePayload(input: ScheduledPostRequestBody): EmbedFormData {
         uploadBase64: normalizeTrimmedString(input.uploadBase64),
         matchInfo: sanitizeMatchInfo(input.matchInfo),
         eventDraft: sanitizeEventDraft(input.eventDraft),
+        watchpartyDraft: sanitizeWatchpartyDraft(input.watchpartyDraft),
     };
 }
 
@@ -295,6 +358,7 @@ scheduledRouter.post('/', async (req, res) => {
         publisherUserId: req.session.user?.id,
         source: 'scheduled',
         eventStatus: payload.eventDraft?.enabled ? 'pending' : 'not_requested',
+        watchpartyStatus: payload.watchpartyDraft?.enabled ? 'pending' : 'not_requested',
     };
 
     try {
@@ -370,6 +434,9 @@ scheduledRouter.patch('/:id', async (req, res) => {
                 eventStatus: payload.eventDraft?.enabled ? 'pending' : 'not_requested',
                 discordEventId: undefined,
                 eventLastError: undefined,
+                watchpartyStatus: payload.watchpartyDraft?.enabled ? 'pending' : 'not_requested',
+                watchpartyChannelId: undefined,
+                watchpartyLastError: undefined,
             };
         });
 
@@ -405,6 +472,7 @@ scheduledRouter.delete('/:id', async (req, res) => {
         }
 
         unregisterScheduledPost(postId);
+        unregisterWatchpartyLifecycle(postId);
         res.json({ success: true });
     } catch (error) {
         console.error('Failed to delete scheduled post:', error);
@@ -598,40 +666,176 @@ scheduledRouter.patch('/sent/:id', async (req, res) => {
             }
         }
 
+        const watchpartyEnabled = payload.watchpartyDraft?.enabled === true;
+        const hasExistingWatchpartyChannel = Boolean(existingPost.watchpartyChannelId)
+            && existingPost.watchpartyStatus !== 'deleted';
+        const watchpartyChanged = !areWatchpartyDraftsEqual(existingPost.payload.watchpartyDraft, payload.watchpartyDraft);
+
+        let watchpartyResult: {
+            status: 'not_requested' | 'scheduled' | 'open' | 'closed' | 'failed';
+            channelId?: string;
+            watchpartyError?: string;
+            warnings: string[];
+        } = {
+            status: 'not_requested',
+            channelId: undefined,
+            watchpartyError: undefined,
+            warnings: [],
+        };
+        let oldWatchpartyChannelIdToDeleteAfterPersist: string | null = null;
+
+        if (!watchpartyEnabled) {
+            if (hasExistingWatchpartyChannel && existingPost.watchpartyChannelId) {
+                oldWatchpartyChannelIdToDeleteAfterPersist = existingPost.watchpartyChannelId;
+            }
+
+            watchpartyResult = {
+                status: 'not_requested',
+                channelId: undefined,
+                watchpartyError: undefined,
+                warnings: [],
+            };
+        } else if (hasExistingWatchpartyChannel && !watchpartyChanged) {
+            watchpartyResult = {
+                status: resolveRetainedWatchpartyStatus(existingPost.watchpartyStatus),
+                channelId: existingPost.watchpartyChannelId,
+                watchpartyError: undefined,
+                warnings: [],
+            };
+        } else {
+            const creationResult = await tryCreateWatchpartyChannelFromPayload(payload);
+
+            if (creationResult.status !== 'failed') {
+                watchpartyResult = creationResult;
+
+                if (
+                    hasExistingWatchpartyChannel
+                    && existingPost.watchpartyChannelId
+                    && existingPost.watchpartyChannelId !== creationResult.channelId
+                ) {
+                    oldWatchpartyChannelIdToDeleteAfterPersist = existingPost.watchpartyChannelId;
+                }
+            } else if (hasExistingWatchpartyChannel) {
+                watchpartyResult = {
+                    status: resolveRetainedWatchpartyStatus(existingPost.watchpartyStatus),
+                    channelId: existingPost.watchpartyChannelId,
+                    watchpartyError: undefined,
+                    warnings: [
+                        ...creationResult.warnings,
+                        'Nie udało się zaktualizować kanału watchparty. Zachowano poprzedni kanał.',
+                    ],
+                };
+            } else {
+                watchpartyResult = creationResult;
+            }
+        }
+
         const warnings = [
             ...eventResult.warnings,
+            ...watchpartyResult.warnings,
             ...lifecycleWarnings,
         ];
 
-        const updatedPost = await updateScheduledPost(postId, (post) => ({
-            ...post,
-            payload,
-            status: 'sent',
-            updatedAt: editedAt,
-            sentAt: editedAt,
-            messageId: existingPost.messageId,
-            pingMessageId: existingPost.pingMessageId,
-            imageMessageId: existingPost.imageMessageId,
-            eventStatus: eventResult.status,
-            discordEventId: eventResult.eventId,
-            eventLastError: eventResult.eventError,
-            editedAt,
-            editedBy,
-            editedByUserId: req.session.user?.id,
-            lastError: warnings.length > 0 ? warnings.join(' | ') : undefined,
-        }));
+        const rollbackWatchpartyChannelId = (
+            watchpartyResult.channelId
+            && watchpartyResult.channelId !== existingPost.watchpartyChannelId
+        )
+            ? watchpartyResult.channelId
+            : null;
+
+        let updatedPost: ScheduledPost | null = null;
+        try {
+            updatedPost = await updateScheduledPost(postId, (post) => ({
+                ...post,
+                payload,
+                status: 'sent',
+                updatedAt: editedAt,
+                sentAt: editedAt,
+                messageId: existingPost.messageId,
+                pingMessageId: existingPost.pingMessageId,
+                imageMessageId: existingPost.imageMessageId,
+                eventStatus: eventResult.status,
+                discordEventId: eventResult.eventId,
+                eventLastError: eventResult.eventError,
+                watchpartyStatus: watchpartyResult.status,
+                watchpartyChannelId: watchpartyResult.channelId,
+                watchpartyLastError: watchpartyResult.watchpartyError,
+                editedAt,
+                editedBy,
+                editedByUserId: req.session.user?.id,
+                lastError: warnings.length > 0 ? warnings.join(' | ') : undefined,
+            }));
+        } catch (persistError) {
+            if (rollbackWatchpartyChannelId) {
+                try {
+                    await deleteWatchpartyChannel(rollbackWatchpartyChannelId);
+                } catch (cleanupError) {
+                    console.error('Failed to rollback watchparty channel after sent-post persist error:', cleanupError);
+                    res.status(502).json({
+                        error: 'Nie udało się zapisać zmian i wycofać nowego kanału watchparty. Wymagane ręczne sprzątanie kanału.',
+                        rollbackChannelId: rollbackWatchpartyChannelId,
+                    });
+                    return;
+                }
+            }
+
+            throw persistError;
+        }
 
         if (!updatedPost) {
+            if (rollbackWatchpartyChannelId) {
+                try {
+                    await deleteWatchpartyChannel(rollbackWatchpartyChannelId);
+                } catch (cleanupError) {
+                    console.error('Failed to rollback watchparty channel after sent-post missing persist result:', cleanupError);
+                }
+            }
+
             res.status(404).json({ error: 'Nie znaleziono wysłanego posta po zapisie.' });
             return;
         }
 
+        const postPersistenceWarnings: string[] = [];
+        if (oldWatchpartyChannelIdToDeleteAfterPersist) {
+            try {
+                await deleteWatchpartyChannel(oldWatchpartyChannelIdToDeleteAfterPersist);
+            } catch {
+                postPersistenceWarnings.push('Nie udało się usunąć poprzedniego kanału watchparty po zapisaniu zmian. Wymagane ręczne sprzątanie.');
+            }
+        }
+
+        const responseWarnings = postPersistenceWarnings.length > 0
+            ? [...warnings, ...postPersistenceWarnings]
+            : warnings;
+
+        let responsePost = updatedPost;
+        if (postPersistenceWarnings.length > 0) {
+            try {
+                const persistedWithCleanupWarning = await updateScheduledPost(postId, (post) => ({
+                    ...post,
+                    updatedAt: Date.now(),
+                    watchpartyLastError: post.watchpartyLastError ?? postPersistenceWarnings[0],
+                    lastError: responseWarnings.length > 0 ? responseWarnings.join(' | ') : undefined,
+                }));
+
+                if (persistedWithCleanupWarning) {
+                    responsePost = persistedWithCleanupWarning;
+                }
+            } catch (warningPersistError) {
+                console.error('Failed to persist sent-post cleanup warning:', warningPersistError);
+            }
+        }
+
+        registerWatchpartyLifecycle(responsePost);
+
         res.json({
             success: true,
-            post: toListResponsePost(updatedPost),
-            warnings,
+            post: toListResponsePost(responsePost),
+            warnings: responseWarnings,
             eventStatus: eventResult.status,
             eventError: eventResult.eventError,
+            watchpartyStatus: watchpartyResult.status,
+            watchpartyError: watchpartyResult.watchpartyError,
         });
     } catch (error) {
         console.error('Failed to edit sent post:', error);
@@ -707,11 +911,24 @@ scheduledRouter.delete('/sent/:id', async (req, res) => {
             return;
         }
 
+        if (post.watchpartyChannelId && post.watchpartyStatus !== 'deleted') {
+            try {
+                await deleteWatchpartyChannel(post.watchpartyChannelId);
+            } catch {
+                res.status(502).json({
+                    error: 'Nie udało się usunąć kanału watchparty powiązanego z tym postem. Spróbuj ponownie.',
+                });
+                return;
+            }
+        }
+
         const deleted = await deleteScheduledPostById(postId);
         if (!deleted) {
             res.status(404).json({ error: 'Nie znaleziono wysłanego posta.' });
             return;
         }
+
+        unregisterWatchpartyLifecycle(postId);
 
         res.json({ success: true });
     } catch (error) {

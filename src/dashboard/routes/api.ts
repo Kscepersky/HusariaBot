@@ -1,4 +1,4 @@
-import { Router, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import { config } from 'dotenv';
 import { randomUUID } from 'node:crypto';
 import { requireAuth } from '../middleware/require-auth.js';
@@ -8,7 +8,9 @@ import {
     getGuildTextChannels,
     getGuildRoles,
     getGuildEmojis,
+    getGuildMember,
     listGuildScheduledEvents,
+    hasRequiredRole,
     searchGuildMembers,
     listImages,
     sendImageToChannel,
@@ -21,22 +23,48 @@ import {
     type EmbedFormData,
     type EventDraftFormData,
     type MatchInfoSnapshot,
+    type WatchpartyDraftFormData,
 } from '../embed-handlers.js';
 import {
     dashboardEventSchema,
+    economyConfigSchema,
     embedPayloadSchema,
     sendImageSchema,
     zodErrorToMessage,
 } from '../validation/request-schemas.js';
 import { publishDashboardPost } from '../publish-flow.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
-import { insertScheduledPost } from '../scheduler/store.js';
+import { registerWatchpartyLifecycle } from '../watchparty-lifecycle.js';
+import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
+import { insertScheduledPost, updateScheduledPost } from '../scheduler/store.js';
 import { parseWarsawDateTimeToTimestamp } from '../scheduler/warsaw-time.js';
 import type { ScheduledPost } from '../scheduler/types.js';
+import {
+    getEconomyConfig,
+    getEconomyLeaderboardPage,
+    resetEconomyUsers,
+    updateEconomyConfig,
+} from '../../economy/repository.js';
+import type { EconomyLeaderboardPage, EconomyLeaderboardSortBy } from '../../economy/types.js';
 
 config();
 
 export const apiRouter = Router();
+
+const LEADERBOARD_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
+const LEADERBOARD_PROFILE_FAILURE_CACHE_TTL_MS = 30 * 1000;
+const LEADERBOARD_PROFILE_CACHE_MAX_ENTRIES = 1500;
+const LEADERBOARD_PROFILE_CONCURRENCY_LIMIT = 5;
+const LEADERBOARD_PROFILE_LOOKUP_TIMEOUT_MS = 3_000;
+
+interface LeaderboardProfileCacheEntry {
+    displayName: string;
+    avatarUrl: string | null;
+    expiresAt: number;
+}
+
+const leaderboardProfileCache = new Map<string, LeaderboardProfileCacheEntry>();
+const leaderboardProfileInFlight = new Map<string, Promise<{ displayName: string; avatarUrl: string | null }>>();
 
 function isClientValidationError(error: unknown): boolean {
     if (!(error instanceof Error)) {
@@ -54,6 +82,227 @@ function isClientValidationError(error: unknown): boolean {
 
 function normalizeTrimmedString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
+}
+
+function parsePositiveIntQuery(value: unknown, fallback: number): number {
+    const parsed = Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return fallback;
+    }
+
+    return parsed;
+}
+
+function getLeaderboardProfileCacheKey(guildId: string, userId: string): string {
+    return `${guildId}:${userId}`;
+}
+
+function cleanupLeaderboardProfileCache(now: number): void {
+    for (const [cacheKey, cacheEntry] of leaderboardProfileCache.entries()) {
+        if (cacheEntry.expiresAt <= now) {
+            leaderboardProfileCache.delete(cacheKey);
+        }
+    }
+
+    if (leaderboardProfileCache.size <= LEADERBOARD_PROFILE_CACHE_MAX_ENTRIES) {
+        return;
+    }
+
+    const overflowEntries = [...leaderboardProfileCache.entries()]
+        .sort((left, right) => left[1].expiresAt - right[1].expiresAt)
+        .slice(0, leaderboardProfileCache.size - LEADERBOARD_PROFILE_CACHE_MAX_ENTRIES);
+
+    for (const [cacheKey] of overflowEntries) {
+        leaderboardProfileCache.delete(cacheKey);
+    }
+}
+
+function resolveDiscordAvatarUrl(userId: string, avatarHash: string | null | undefined): string | null {
+    const safeAvatarHash = normalizeTrimmedString(avatarHash);
+    if (!safeAvatarHash) {
+        return null;
+    }
+
+    return `https://cdn.discordapp.com/avatars/${encodeURIComponent(userId)}/${encodeURIComponent(safeAvatarHash)}.png?size=64`;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        timeoutHandle = setTimeout(() => {
+            reject(new Error(timeoutMessage));
+        }, timeoutMs);
+    });
+
+    try {
+        return await Promise.race([promise, timeoutPromise]);
+    } finally {
+        if (timeoutHandle) {
+            clearTimeout(timeoutHandle);
+        }
+    }
+}
+
+function resolveLeaderboardDisplayName(member: Awaited<ReturnType<typeof getGuildMember>>, userId: string): string {
+    const fallbackName = `Uzytkownik ${userId}`;
+
+    if (!member) {
+        return fallbackName;
+    }
+
+    const normalizedNick = normalizeTrimmedString(member.nick);
+    if (normalizedNick) {
+        return normalizedNick;
+    }
+
+    const normalizedGlobalName = normalizeTrimmedString(member.user?.global_name);
+    if (normalizedGlobalName) {
+        return normalizedGlobalName;
+    }
+
+    const normalizedUsername = normalizeTrimmedString(member.user?.username);
+    if (normalizedUsername) {
+        return normalizedUsername;
+    }
+
+    return fallbackName;
+}
+
+async function resolveLeaderboardProfile(guildId: string, userId: string): Promise<{ displayName: string; avatarUrl: string | null }> {
+    const cacheKey = getLeaderboardProfileCacheKey(guildId, userId);
+    const now = Date.now();
+    const cachedEntry = leaderboardProfileCache.get(cacheKey);
+
+    if (cachedEntry && cachedEntry.expiresAt > now) {
+        return {
+            displayName: cachedEntry.displayName,
+            avatarUrl: cachedEntry.avatarUrl,
+        };
+    }
+
+    const fallbackProfile = {
+        displayName: `Uzytkownik ${userId}`,
+        avatarUrl: null,
+    };
+
+    const inflight = leaderboardProfileInFlight.get(cacheKey);
+    if (inflight) {
+        return inflight;
+    }
+
+    const resolutionPromise = (async () => {
+        try {
+            const member = await withTimeout(
+                getGuildMember(userId, guildId),
+                LEADERBOARD_PROFILE_LOOKUP_TIMEOUT_MS,
+                `Timeout while loading leaderboard profile for user ${userId}`,
+            );
+            const resolvedProfile = {
+                displayName: resolveLeaderboardDisplayName(member, userId),
+                avatarUrl: resolveDiscordAvatarUrl(member?.user?.id ?? userId, member?.user?.avatar),
+            };
+
+            leaderboardProfileCache.set(cacheKey, {
+                ...resolvedProfile,
+                expiresAt: Date.now() + LEADERBOARD_PROFILE_CACHE_TTL_MS,
+            });
+
+            return resolvedProfile;
+        } catch (error) {
+            console.warn('Failed to resolve leaderboard profile:', {
+                guildId,
+                userId,
+                error,
+            });
+
+            leaderboardProfileCache.set(cacheKey, {
+                ...fallbackProfile,
+                expiresAt: Date.now() + LEADERBOARD_PROFILE_FAILURE_CACHE_TTL_MS,
+            });
+
+            return fallbackProfile;
+        } finally {
+            leaderboardProfileInFlight.delete(cacheKey);
+        }
+    })();
+
+    leaderboardProfileInFlight.set(cacheKey, resolutionPromise);
+
+    return resolutionPromise;
+}
+
+async function resolveLeaderboardProfilesWithLimit(
+    guildId: string,
+    userIds: string[],
+): Promise<Array<readonly [string, { displayName: string; avatarUrl: string | null }]>> {
+    cleanupLeaderboardProfileCache(Date.now());
+
+    const limitedConcurrency = Math.max(1, LEADERBOARD_PROFILE_CONCURRENCY_LIMIT);
+    const pairs: Array<readonly [string, { displayName: string; avatarUrl: string | null }]> = [];
+
+    for (let index = 0; index < userIds.length; index += limitedConcurrency) {
+        const chunk = userIds.slice(index, index + limitedConcurrency);
+        const chunkPairs = await Promise.all(chunk.map(async (userId) => {
+            const profile = await resolveLeaderboardProfile(guildId, userId);
+            return [userId, profile] as const;
+        }));
+
+        pairs.push(...chunkPairs);
+    }
+
+    return pairs;
+}
+
+async function enrichEconomyLeaderboard(
+    guildId: string,
+    leaderboard: EconomyLeaderboardPage,
+): Promise<EconomyLeaderboardPage> {
+    const uniqueUserIds = [...new Set(leaderboard.entries.map((entry) => entry.userId).filter((userId) => userId.length > 0))];
+    const profilePairs = await resolveLeaderboardProfilesWithLimit(guildId, uniqueUserIds);
+
+    const profileByUserId = new Map(profilePairs);
+    const enrichedEntries = leaderboard.entries.map((entry) => {
+        const profile = profileByUserId.get(entry.userId);
+
+        return {
+            ...entry,
+            displayName: profile?.displayName ?? `Uzytkownik ${entry.userId}`,
+            avatarUrl: profile?.avatarUrl ?? null,
+        };
+    });
+
+    return {
+        ...leaderboard,
+        entries: enrichedEntries,
+    };
+}
+
+async function requireCurrentDashboardRole(req: Request, res: Response, next: NextFunction): Promise<void> {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    const userId = req.session.user?.id;
+    if (!userId) {
+        res.status(401).json({ error: 'Brak autoryzacji.' });
+        return;
+    }
+
+    try {
+        const member = await getGuildMember(userId, guildId);
+        if (!member || !hasRequiredRole(member)) {
+            res.status(403).json({ error: 'Brak uprawnień do wykonania tej operacji.' });
+            return;
+        }
+
+        next();
+    } catch (error) {
+        console.error('Failed to verify dashboard role:', error);
+        res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień użytkownika.' });
+    }
 }
 
 function normalizeBoolean(value: unknown): boolean {
@@ -102,6 +351,21 @@ function sanitizeEventDraft(input: unknown): EventDraftFormData | undefined {
     };
 }
 
+function sanitizeWatchpartyDraft(input: unknown): WatchpartyDraftFormData | undefined {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+        return undefined;
+    }
+
+    const raw = input as Partial<WatchpartyDraftFormData>;
+
+    return {
+        enabled: normalizeBoolean(raw.enabled),
+        channelName: normalizeTrimmedString(raw.channelName),
+        startAtLocal: normalizeTrimmedString(raw.startAtLocal),
+        endAtLocal: normalizeTrimmedString(raw.endAtLocal),
+    };
+}
+
 function sanitizeEmbedPayload(rawBody: unknown): EmbedFormData {
     const body = (rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody))
         ? rawBody as Record<string, unknown>
@@ -124,6 +388,7 @@ function sanitizeEmbedPayload(rawBody: unknown): EmbedFormData {
         uploadBase64: normalizeTrimmedString(body.uploadBase64),
         matchInfo: sanitizeMatchInfo(body.matchInfo),
         eventDraft: sanitizeEventDraft(body.eventDraft),
+        watchpartyDraft: sanitizeWatchpartyDraft(body.watchpartyDraft),
     };
 }
 
@@ -371,6 +636,80 @@ apiRouter.get('/images', (_req, res) => {
     }
 });
 
+// GET /api/economy/settings — load economy configuration for dashboard
+apiRouter.get('/economy/settings', requireCurrentDashboardRole, async (_req, res) => {
+    try {
+        const config = await getEconomyConfig();
+        res.json({ config });
+    } catch (error) {
+        console.error('Failed to load economy settings:', error);
+        res.status(500).json({ error: 'Nie udało się pobrać ustawień ekonomii.' });
+    }
+});
+
+// PATCH /api/economy/settings — update economy configuration from dashboard
+apiRouter.patch('/economy/settings', requireCurrentDashboardRole, async (req, res) => {
+    const parsedBody = economyConfigSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    try {
+        const updatedConfig = await updateEconomyConfig(parsedBody.data, Date.now());
+        res.json({ success: true, config: updatedConfig });
+    } catch (error) {
+        console.error('Failed to update economy settings:', error);
+        res.status(500).json({ error: 'Nie udało się zapisać ustawień ekonomii.' });
+    }
+});
+
+// POST /api/economy/reset-users — reset economy state for all users in current guild
+apiRouter.post('/economy/reset-users', requireCurrentDashboardRole, async (_req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    try {
+        const resetCount = await resetEconomyUsers(guildId);
+        res.json({ success: true, resetCount });
+    } catch (error) {
+        console.error('Failed to reset economy users:', error);
+        res.status(500).json({ error: 'Nie udało się zresetować danych ekonomii.' });
+    }
+});
+
+// GET /api/economy/leaderboard — load paginated economy leaderboard for dashboard
+apiRouter.get('/economy/leaderboard', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    const sortByRaw = normalizeTrimmedString(req.query.sortBy).toLowerCase();
+    const sortBy: EconomyLeaderboardSortBy = sortByRaw === 'coins' ? 'coins' : 'xp';
+
+    if (sortByRaw && sortByRaw !== 'xp' && sortByRaw !== 'coins') {
+        res.status(400).json({ error: 'Nieprawidłowy parametr sortBy. Dozwolone: xp, coins.' });
+        return;
+    }
+
+    const page = parsePositiveIntQuery(req.query.page, 1);
+    const pageSize = Math.max(1, Math.min(25, parsePositiveIntQuery(req.query.pageSize, 10)));
+
+    try {
+        const rawLeaderboard = await getEconomyLeaderboardPage(guildId, sortBy, page, pageSize);
+        const leaderboard = await enrichEconomyLeaderboard(guildId, rawLeaderboard);
+        res.json({ leaderboard });
+    } catch (error) {
+        console.error('Failed to load economy leaderboard:', error);
+        res.status(500).json({ error: 'Nie udało się pobrać leaderboardu ekonomii.' });
+    }
+});
+
 // GET /api/events — list Discord scheduled events
 apiRouter.get('/events', async (_req, res) => {
     const guildId = process.env.GUILD_ID;
@@ -566,6 +905,20 @@ apiRouter.post('/embed', async (req, res) => {
         });
 
         const eventResult = await tryCreateDiscordEventFromPayload(data);
+        const initialWatchpartyStatus: ScheduledPost['watchpartyStatus'] = data.watchpartyDraft?.enabled
+            ? 'pending'
+            : 'not_requested';
+        let watchpartyResult: {
+            status: 'not_requested' | 'scheduled' | 'open' | 'closed' | 'failed';
+            channelId?: string;
+            watchpartyError?: string;
+            warnings: string[];
+        } = {
+            status: 'not_requested',
+            channelId: undefined,
+            watchpartyError: undefined,
+            warnings: [],
+        };
         const warnings = [...publishResult.warnings, ...eventResult.warnings];
 
         const now = Date.now();
@@ -586,14 +939,68 @@ apiRouter.post('/embed', async (req, res) => {
             eventStatus: eventResult.status,
             discordEventId: eventResult.eventId,
             eventLastError: eventResult.eventError,
+            watchpartyStatus: initialWatchpartyStatus,
+            watchpartyChannelId: watchpartyResult.channelId,
+            watchpartyLastError: watchpartyResult.watchpartyError,
             lastError: warnings.length > 0 ? warnings.join(' | ') : undefined,
         };
 
+        let insertedPost: ScheduledPost | null = null;
         try {
-            await insertScheduledPost(sentPost);
+            insertedPost = await insertScheduledPost(sentPost);
         } catch (persistError) {
             console.error('Failed to persist sent post history:', persistError);
             warnings.push('Post został wysłany, ale nie udało się zapisać go w historii wysłanych postów.');
+        }
+
+        if (insertedPost && data.watchpartyDraft?.enabled) {
+            watchpartyResult = await tryCreateWatchpartyChannelFromPayload(data);
+            warnings.push(...watchpartyResult.warnings);
+
+            let updatedPost: ScheduledPost | null = null;
+            try {
+                updatedPost = await updateScheduledPost(insertedPost.id, (post) => ({
+                    ...post,
+                    updatedAt: Date.now(),
+                    watchpartyStatus: watchpartyResult.status,
+                    watchpartyChannelId: watchpartyResult.channelId,
+                    watchpartyLastError: watchpartyResult.watchpartyError,
+                    lastError: warnings.length > 0 ? warnings.join(' | ') : undefined,
+                }));
+            } catch (persistWatchpartyError) {
+                console.error('Failed to persist watchparty status for sent post:', persistWatchpartyError);
+            }
+
+            if (updatedPost) {
+                registerWatchpartyLifecycle(updatedPost);
+            } else {
+                warnings.push('Nie udało się zaktualizować statusu watchparty w historii wysłanych postów. Uruchomiono rollback kanału.');
+
+                if (watchpartyResult.channelId) {
+                    try {
+                        await deleteWatchpartyChannel(watchpartyResult.channelId);
+                    } catch (watchpartyCleanupError) {
+                        console.error('Failed to rollback watchparty channel after persist error:', watchpartyCleanupError);
+                        warnings.push('Rollback kanału watchparty po błędzie zapisu nie powiódł się. Wymagane ręczne sprzątanie kanału.');
+                    }
+                }
+
+                watchpartyResult = {
+                    status: 'failed',
+                    channelId: undefined,
+                    watchpartyError: 'Nie utworzono kanału watchparty, bo nie udało się zapisać jego statusu.',
+                    warnings: [],
+                };
+            }
+        }
+
+        if (!insertedPost && data.watchpartyDraft?.enabled) {
+            watchpartyResult = {
+                status: 'failed',
+                channelId: undefined,
+                watchpartyError: 'Nie utworzono kanału watchparty, bo nie udało się zapisać wpisu historii.',
+                warnings: [],
+            };
         }
 
         res.json({
@@ -605,6 +1012,9 @@ apiRouter.post('/embed', async (req, res) => {
             eventStatus: eventResult.status,
             eventError: eventResult.eventError,
             discordEventId: eventResult.eventId,
+            watchpartyStatus: watchpartyResult.status,
+            watchpartyError: watchpartyResult.watchpartyError,
+            watchpartyChannelId: watchpartyResult.channelId,
             postId: sentPost.id,
         });
     } catch (err) {

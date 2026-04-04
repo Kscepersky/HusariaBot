@@ -9,6 +9,7 @@ function clonePayload(payload: EmbedFormData): EmbedFormData {
         ...payload,
         ...(payload.matchInfo ? { matchInfo: { ...payload.matchInfo } } : {}),
         ...(payload.eventDraft ? { eventDraft: { ...payload.eventDraft } } : {}),
+        ...(payload.watchpartyDraft ? { watchpartyDraft: { ...payload.watchpartyDraft } } : {}),
     };
 }
 
@@ -25,6 +26,15 @@ vi.mock('../publish-flow.js', () => ({
 
 vi.mock('../event-publisher.js', () => ({
     tryCreateDiscordEventFromPayload: vi.fn(),
+}));
+
+vi.mock('../watchparty-publisher.js', () => ({
+    tryCreateWatchpartyChannelFromPayload: vi.fn(),
+    deleteWatchpartyChannel: vi.fn(),
+}));
+
+vi.mock('../watchparty-lifecycle.js', () => ({
+    registerWatchpartyLifecycle: vi.fn(),
 }));
 
 vi.mock('./store.js', () => ({
@@ -48,6 +58,9 @@ vi.mock('./store.js', () => ({
 
 import { publishDashboardPost } from '../publish-flow.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
+import { registerWatchpartyLifecycle } from '../watchparty-lifecycle.js';
+import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
+import { updateScheduledPost } from './store.js';
 import { registerScheduledPost } from './service.js';
 
 function buildPayload(overrides: Partial<EmbedFormData> = {}): EmbedFormData {
@@ -122,19 +135,30 @@ describe('dashboard scheduler service', () => {
             warnings: ['warn-event'],
         });
 
+        vi.mocked(tryCreateWatchpartyChannelFromPayload).mockResolvedValue({
+            status: 'scheduled',
+            channelId: 'watchparty-1',
+            warnings: ['warn-watchparty'],
+        });
+
         registerScheduledPost(clonePost(post));
         await vi.advanceTimersByTimeAsync(2_000);
 
         const updated = postStore.get(post.id);
         expect(vi.mocked(publishDashboardPost)).toHaveBeenCalledTimes(1);
         expect(vi.mocked(tryCreateDiscordEventFromPayload)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(tryCreateWatchpartyChannelFromPayload)).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(registerWatchpartyLifecycle)).toHaveBeenCalledTimes(1);
         expect(updated?.status).toBe('sent');
         expect(updated?.messageId).toBe('msg-1');
         expect(updated?.eventStatus).toBe('created');
         expect(updated?.discordEventId).toBe('event-1');
+        expect(updated?.watchpartyStatus).toBe('scheduled');
+        expect(updated?.watchpartyChannelId).toBe('watchparty-1');
         expect(updated?.source).toBe('scheduled');
         expect(updated?.lastError).toContain('warn-publish');
         expect(updated?.lastError).toContain('warn-event');
+        expect(updated?.lastError).toContain('warn-watchparty');
     });
 
     it('oznacza pending post jako failed gdy publikacja rzuca wyjątek', async () => {
@@ -152,7 +176,87 @@ describe('dashboard scheduler service', () => {
         const updated = postStore.get(post.id);
         expect(vi.mocked(publishDashboardPost)).toHaveBeenCalledTimes(1);
         expect(vi.mocked(tryCreateDiscordEventFromPayload)).not.toHaveBeenCalled();
+        expect(vi.mocked(tryCreateWatchpartyChannelFromPayload)).not.toHaveBeenCalled();
+        expect(vi.mocked(registerWatchpartyLifecycle)).not.toHaveBeenCalled();
         expect(updated?.status).toBe('failed');
         expect(updated?.lastError).toBe('Nieudana publikacja');
+    });
+
+    it('cofa utworzenie kanału watchparty gdy zapis statusu posta się nie powiedzie', async () => {
+        const post = buildPendingPost({
+            id: 'pending-watchparty-persist-failure',
+            scheduledFor: Date.now() + 1_500,
+        });
+        postStore.set(post.id, clonePost(post));
+
+        vi.mocked(publishDashboardPost).mockResolvedValue({
+            messageId: 'msg-persist-failure',
+            pingMessageId: undefined,
+            imageMessageId: undefined,
+            warnings: [],
+        });
+        vi.mocked(tryCreateDiscordEventFromPayload).mockResolvedValue({
+            status: 'not_requested',
+            eventId: undefined,
+            eventError: undefined,
+            warnings: [],
+        });
+        vi.mocked(tryCreateWatchpartyChannelFromPayload).mockResolvedValue({
+            status: 'scheduled',
+            channelId: 'watchparty-persist-failure',
+            watchpartyError: undefined,
+            warnings: [],
+        });
+        vi.mocked(updateScheduledPost).mockResolvedValueOnce(null);
+        vi.mocked(deleteWatchpartyChannel).mockResolvedValue(undefined);
+
+        registerScheduledPost(clonePost(post));
+        await vi.advanceTimersByTimeAsync(1_500);
+
+        const updated = postStore.get(post.id);
+        expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledWith('watchparty-persist-failure');
+        expect(updated?.status).toBe('failed');
+        expect(updated?.watchpartyStatus).toBe('failed');
+        expect(updated?.watchpartyLastError).toContain('channelId=watchparty-persist-failure');
+    });
+
+    it('zapisuje kontekst bledu gdy rollback kanału watchparty też się nie powiedzie', async () => {
+        const post = buildPendingPost({
+            id: 'pending-watchparty-rollback-failure',
+            scheduledFor: Date.now() + 1_200,
+        });
+        postStore.set(post.id, clonePost(post));
+
+        vi.mocked(publishDashboardPost).mockResolvedValue({
+            messageId: 'msg-rollback-failure',
+            pingMessageId: undefined,
+            imageMessageId: undefined,
+            warnings: [],
+        });
+        vi.mocked(tryCreateDiscordEventFromPayload).mockResolvedValue({
+            status: 'not_requested',
+            eventId: undefined,
+            eventError: undefined,
+            warnings: [],
+        });
+        vi.mocked(tryCreateWatchpartyChannelFromPayload).mockResolvedValue({
+            status: 'scheduled',
+            channelId: 'watchparty-rollback-failure-channel',
+            watchpartyError: undefined,
+            warnings: [],
+        });
+        vi.mocked(updateScheduledPost).mockRejectedValueOnce(new Error('persist write failed'));
+        vi.mocked(deleteWatchpartyChannel).mockRejectedValueOnce(new Error('rollback delete failed'));
+
+        registerScheduledPost(clonePost(post));
+        await vi.advanceTimersByTimeAsync(1_200);
+
+        const updated = postStore.get(post.id);
+        expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledWith('watchparty-rollback-failure-channel');
+        expect(updated?.status).toBe('failed');
+        expect(updated?.watchpartyStatus).toBe('failed');
+        expect(updated?.watchpartyLastError).toContain('channelId=watchparty-rollback-failure-channel');
+        expect(updated?.lastError).toContain('persist write failed');
+        expect(updated?.lastError).toContain('channelId=watchparty-rollback-failure-channel');
     });
 });

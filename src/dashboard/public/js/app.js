@@ -43,6 +43,8 @@ let scheduledSectionBound = false
 let sentSectionBound = false
 let eventsSectionBound = false
 let g2SectionBound = false
+let economySectionBound = false
+let economyLeaderboardSectionBound = false
 let currentSection = 'embed-creator'
 let scheduledPosts = []
 let sentPosts = []
@@ -50,6 +52,16 @@ let dashboardEvents = []
 let editingScheduledPostId = null
 let editingSentPostId = null
 let editingEventId = null
+let economySettingsLastLoadedAt = null
+let economySettingsLoadSuccessful = false
+let economySettingsLoadRequestId = 0
+let economyLeaderboardSortBy = 'xp'
+let economyLeaderboardPage = 1
+let economyLeaderboardTotalPages = 1
+let economyLeaderboardTotalRows = 0
+let economyLeaderboardEntries = []
+let economyLeaderboardLoadError = null
+let economyLeaderboardLoadRequestId = 0
 
 let g2Matches = []
 let g2FilterOptions = {
@@ -76,6 +88,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initSentSection()
   await initEventsSection()
   await initG2Section()
+  await initEconomySection()
+  await initEconomyLeaderboardSection()
   await loadG2Matches({ silent: true })
   switchSection('embed-creator')
 })
@@ -237,6 +251,14 @@ function switchSection(section) {
     void loadG2Matches({ silent: true })
   }
 
+  if (section === 'economy-settings') {
+    void loadEconomySettings({ silent: true })
+  }
+
+  if (section === 'economy-leaderboard') {
+    void loadEconomyLeaderboard({ silent: false })
+  }
+
   if (typeof window.onDashboardSectionChanged === 'function') {
     window.onDashboardSectionChanged(section)
   }
@@ -303,6 +325,24 @@ async function initG2Section() {
   if (!g2SectionBound) {
     g2SectionBound = true
     bindG2SectionListeners()
+  }
+}
+
+async function initEconomySection() {
+  await loadEconomySettings({ silent: true })
+
+  if (!economySectionBound) {
+    economySectionBound = true
+    bindEconomySectionListeners()
+  }
+}
+
+async function initEconomyLeaderboardSection() {
+  renderEconomyLeaderboard()
+
+  if (!economyLeaderboardSectionBound) {
+    economyLeaderboardSectionBound = true
+    bindEconomyLeaderboardSectionListeners()
   }
 }
 
@@ -508,6 +548,11 @@ function bindEmbedSectionListeners() {
   const eventLocationInput = document.getElementById('event-location')
   const eventStartAtInput = document.getElementById('event-start-at')
   const eventEndAtInput = document.getElementById('event-end-at')
+  const watchpartyEnabledInput = document.getElementById('watchparty-enabled')
+  const watchpartyFields = document.getElementById('watchparty-fields')
+  const watchpartyChannelNameInput = document.getElementById('watchparty-channel-name')
+  const watchpartyStartAtInput = document.getElementById('watchparty-start-at')
+  const watchpartyEndAtInput = document.getElementById('watchparty-end-at')
   const timestampDateTimeInput = document.getElementById('timestamp-datetime')
   const timestampFormatList = document.getElementById('timestamp-format-list')
 
@@ -552,6 +597,7 @@ function bindEmbedSectionListeners() {
 
     renderMatchHelperOptions()
     updateEventDefaultsFromMatch()
+    updateWatchpartyDefaultsFromMatch()
     updatePreview()
     updateSendButton()
   })
@@ -564,6 +610,7 @@ function bindEmbedSectionListeners() {
     selectedMatchInfo = findMatchById(matchHelperSelectInput.value)
     renderMatchHelperChips(selectedMatchInfo)
     updateEventDefaultsFromMatch()
+    updateWatchpartyDefaultsFromMatch()
     updatePreview()
     updateSendButton()
   })
@@ -588,12 +635,25 @@ function bindEmbedSectionListeners() {
     updateSendButton()
   })
 
+  watchpartyEnabledInput?.addEventListener('change', () => {
+    if (watchpartyFields) {
+      watchpartyFields.hidden = !watchpartyEnabledInput.checked
+    }
+
+    updateWatchpartyDefaultsFromMatch()
+    updatePreview()
+    updateSendButton()
+  })
+
   ;[
     eventTitleInput,
     eventDescriptionInput,
     eventLocationInput,
     eventStartAtInput,
     eventEndAtInput,
+    watchpartyChannelNameInput,
+    watchpartyStartAtInput,
+    watchpartyEndAtInput,
   ].forEach((input) => {
     input?.addEventListener('input', updateHandler)
     input?.addEventListener('change', updateHandler)
@@ -869,11 +929,21 @@ function renderSentPosts() {
     const channelName = channels.find((channel) => channel.id === post?.payload?.channelId)?.name ?? 'nieznany-kanał'
     const sentAtLabel = post.sentAt ? formatTimestampInWarsaw(post.sentAt) : formatTimestampInWarsaw(post.updatedAt)
     const eventStatus = post.eventStatus ?? 'not_requested'
+    const watchpartyStatus = post.watchpartyStatus ?? 'not_requested'
     const eventLabelMap = {
       not_requested: 'Event: brak',
       pending: 'Event: oczekuje',
       created: 'Event: utworzono',
       failed: 'Event: błąd',
+    }
+    const watchpartyLabelMap = {
+      not_requested: 'Watchparty: brak',
+      pending: 'Watchparty: oczekuje',
+      scheduled: 'Watchparty: zaplanowane',
+      open: 'Watchparty: otwarte',
+      closed: 'Watchparty: zamknięte',
+      deleted: 'Watchparty: usunięte',
+      failed: 'Watchparty: błąd',
     }
 
     const previewHtml = post?.payload?.mode === 'embedded'
@@ -890,6 +960,7 @@ function renderSentPosts() {
           <span class="scheduled-chip">Kanał: #${escapeHtml(channelName)}</span>
           <span class="scheduled-chip">Wysłano: ${escapeHtml(sentAtLabel)}</span>
           <span class="scheduled-chip">${escapeHtml(eventLabelMap[eventStatus] ?? 'Event: brak')}</span>
+          <span class="scheduled-chip">${escapeHtml(watchpartyLabelMap[watchpartyStatus] ?? 'Watchparty: brak')}</span>
         </div>
         <div class="scheduled-preview">${previewHtml}</div>
         <div class="scheduled-actions">
@@ -1186,6 +1257,11 @@ function applyPostPayloadToCreator(payload) {
   const eventLocationInput = document.getElementById('event-location')
   const eventStartAtInput = document.getElementById('event-start-at')
   const eventEndAtInput = document.getElementById('event-end-at')
+  const watchpartyEnabledInput = document.getElementById('watchparty-enabled')
+  const watchpartyFields = document.getElementById('watchparty-fields')
+  const watchpartyChannelNameInput = document.getElementById('watchparty-channel-name')
+  const watchpartyStartAtInput = document.getElementById('watchparty-start-at')
+  const watchpartyEndAtInput = document.getElementById('watchparty-end-at')
 
   if (titleInput) {
     titleInput.value = payload.title ?? ''
@@ -1291,6 +1367,27 @@ function applyPostPayloadToCreator(payload) {
 
   if (eventEndAtInput) {
     eventEndAtInput.value = payload.eventDraft?.endAtLocal ?? ''
+  }
+
+  const watchpartyEnabled = Boolean(payload.watchpartyDraft?.enabled)
+  if (watchpartyEnabledInput) {
+    watchpartyEnabledInput.checked = watchpartyEnabled
+  }
+
+  if (watchpartyFields) {
+    watchpartyFields.hidden = !watchpartyEnabled
+  }
+
+  if (watchpartyChannelNameInput) {
+    watchpartyChannelNameInput.value = payload.watchpartyDraft?.channelName ?? ''
+  }
+
+  if (watchpartyStartAtInput) {
+    watchpartyStartAtInput.value = payload.watchpartyDraft?.startAtLocal ?? ''
+  }
+
+  if (watchpartyEndAtInput) {
+    watchpartyEndAtInput.value = payload.watchpartyDraft?.endAtLocal ?? ''
   }
 
   updateModeUI()
@@ -1459,6 +1556,479 @@ function bindG2SectionListeners() {
   tournamentFilter?.addEventListener('change', triggerFilterReload)
   statusFilter?.addEventListener('change', triggerFilterReload)
   opponentFilter?.addEventListener('input', triggerFilterReload)
+}
+
+function bindEconomySectionListeners() {
+  const reloadButton = document.getElementById('economy-settings-reload-btn')
+  const saveButton = document.getElementById('economy-settings-save-btn')
+  const resetUsersButton = document.getElementById('economy-settings-reset-users-btn')
+
+  reloadButton?.addEventListener('click', async () => {
+    await loadEconomySettings({ silent: false })
+  })
+
+  saveButton?.addEventListener('click', async () => {
+    await saveEconomySettings()
+  })
+
+  resetUsersButton?.addEventListener('click', async () => {
+    await resetAllEconomyUsers()
+  })
+}
+
+function bindEconomyLeaderboardSectionListeners() {
+  const refreshButton = document.getElementById('economy-leaderboard-refresh-btn')
+  const sortSelect = document.getElementById('economy-leaderboard-sort')
+  const prevButton = document.getElementById('economy-leaderboard-prev-btn')
+  const nextButton = document.getElementById('economy-leaderboard-next-btn')
+
+  refreshButton?.addEventListener('click', async () => {
+    await loadEconomyLeaderboard({ silent: false })
+  })
+
+  sortSelect?.addEventListener('change', async () => {
+    const nextSortBy = sortSelect.value === 'coins' ? 'coins' : 'xp'
+    await loadEconomyLeaderboard({
+      silent: false,
+      sortBy: nextSortBy,
+      page: 1,
+    })
+  })
+
+  prevButton?.addEventListener('click', async () => {
+    if (economyLeaderboardPage <= 1) {
+      return
+    }
+
+    await loadEconomyLeaderboard({
+      silent: false,
+      page: economyLeaderboardPage - 1,
+    })
+  })
+
+  nextButton?.addEventListener('click', async () => {
+    if (economyLeaderboardPage >= economyLeaderboardTotalPages) {
+      return
+    }
+
+    await loadEconomyLeaderboard({
+      silent: false,
+      page: economyLeaderboardPage + 1,
+    })
+  })
+}
+
+function renderEconomyLeaderboard() {
+  const list = document.getElementById('economy-leaderboard-list')
+  const countLabel = document.getElementById('economy-leaderboard-count-label')
+  const pageLabel = document.getElementById('economy-leaderboard-page-label')
+  const prevButton = document.getElementById('economy-leaderboard-prev-btn')
+  const nextButton = document.getElementById('economy-leaderboard-next-btn')
+  const sortSelect = document.getElementById('economy-leaderboard-sort')
+
+  if (!list || !countLabel || !pageLabel) {
+    return
+  }
+
+  if (sortSelect) {
+    sortSelect.value = economyLeaderboardSortBy
+  }
+
+  countLabel.textContent = `Uzytkownicy: ${economyLeaderboardTotalRows}`
+  pageLabel.textContent = `Strona ${economyLeaderboardPage}/${economyLeaderboardTotalPages}`
+
+  if (prevButton instanceof HTMLButtonElement) {
+    prevButton.disabled = economyLeaderboardPage <= 1
+  }
+
+  if (nextButton instanceof HTMLButtonElement) {
+    nextButton.disabled = economyLeaderboardPage >= economyLeaderboardTotalPages
+  }
+
+  const errorBlock = economyLeaderboardLoadError
+    ? `<div class="scheduled-empty scheduled-error">Nie udalo sie odswiezyc leaderboardu: ${escapeHtml(economyLeaderboardLoadError)}</div>`
+    : ''
+
+  if (economyLeaderboardEntries.length === 0) {
+    list.innerHTML = economyLeaderboardLoadError
+      ? errorBlock
+      : '<div class="scheduled-empty">Brak danych w leaderboardzie ekonomii.</div>'
+    return
+  }
+
+  list.innerHTML = `${errorBlock}${economyLeaderboardEntries.map((entry) => {
+    const displayName = typeof entry.displayName === 'string' && entry.displayName.trim().length > 0
+      ? entry.displayName.trim()
+      : `Uzytkownik ${entry.userId}`
+    const avatarUrl = typeof entry.avatarUrl === 'string' && entry.avatarUrl.trim().length > 0
+      ? entry.avatarUrl.trim()
+      : null
+    const avatarFallback = escapeHtml(displayName.slice(0, 1).toUpperCase() || '?')
+    const level = Number.isFinite(Number(entry.level)) ? Number(entry.level) : 0
+    const xp = Number.isFinite(Number(entry.xp)) ? Number(entry.xp) : 0
+    const coins = Number.isFinite(Number(entry.coins)) ? Number(entry.coins) : 0
+    const xpIntoLevel = Number.isFinite(Number(entry.xpIntoLevel)) ? Number(entry.xpIntoLevel) : 0
+    const xpForNextLevel = Number.isFinite(Number(entry.xpForNextLevel)) ? Math.max(1, Number(entry.xpForNextLevel)) : 1
+    const xpToNextLevel = Number.isFinite(Number(entry.xpToNextLevel)) ? Math.max(0, Number(entry.xpToNextLevel)) : 0
+    const progressLabel = `${xpIntoLevel}/${xpForNextLevel} XP`
+    const primaryLabel = economyLeaderboardSortBy === 'coins'
+      ? `Coins: ${coins}`
+      : `Level ${level} | ${progressLabel}`
+
+    return `
+      <article class="scheduled-card">
+        <div class="scheduled-card-header">
+          <div class="leaderboard-user-main">
+            ${avatarUrl
+      ? `<img class="leaderboard-avatar" src="${escapeHtml(avatarUrl)}" alt="Avatar ${escapeHtml(displayName)}" loading="lazy">`
+      : `<span class="leaderboard-avatar leaderboard-avatar-placeholder">${avatarFallback}</span>`}
+            <span class="scheduled-card-title">#${escapeHtml(String(entry.rank))} | ${escapeHtml(displayName)}</span>
+          </div>
+          <span class="scheduled-chip leaderboard-chip-primary">${escapeHtml(primaryLabel)}</span>
+        </div>
+        <div class="scheduled-card-meta">
+          <span class="scheduled-chip">ID: ${escapeHtml(String(entry.userId))}</span>
+          <span class="scheduled-chip leaderboard-chip-coins">Coins: ${escapeHtml(String(coins))}</span>
+          <span class="scheduled-chip">Level: ${escapeHtml(String(level))}</span>
+          <span class="scheduled-chip">Calkowity XP: ${escapeHtml(String(xp))}</span>
+          <span class="scheduled-chip">Postep: ${escapeHtml(progressLabel)}</span>
+          <span class="scheduled-chip">Brakujace XP: ${escapeHtml(String(xpToNextLevel))}</span>
+        </div>
+      </article>`
+  }).join('')}`
+}
+
+async function loadEconomyLeaderboard({
+  silent = false,
+  sortBy,
+  page,
+} = {}) {
+  economyLeaderboardLoadRequestId += 1
+  const requestId = economyLeaderboardLoadRequestId
+
+  const requestedSortBy = sortBy === 'coins' ? 'coins' : (sortBy === 'xp' ? 'xp' : economyLeaderboardSortBy)
+  const requestedPage = Number.isFinite(Number(page)) ? Math.max(1, Number(page)) : economyLeaderboardPage
+
+  const previousState = {
+    sortBy: economyLeaderboardSortBy,
+    page: economyLeaderboardPage,
+    totalPages: economyLeaderboardTotalPages,
+    totalRows: economyLeaderboardTotalRows,
+    entries: [...economyLeaderboardEntries],
+  }
+
+  try {
+    const params = new URLSearchParams({
+      sortBy: requestedSortBy,
+      page: String(requestedPage),
+      pageSize: '10',
+    })
+
+    const response = await fetch(`/api/economy/leaderboard?${params.toString()}`)
+    const payload = await parseApiResponse(response)
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie pobrac leaderboardu ekonomii.')
+    }
+
+    if (requestId !== economyLeaderboardLoadRequestId) {
+      return
+    }
+
+    if (!payload.leaderboard || typeof payload.leaderboard !== 'object') {
+      throw new Error('Nieprawidlowy format odpowiedzi leaderboardu ekonomii.')
+    }
+
+    const leaderboard = payload.leaderboard
+    economyLeaderboardSortBy = leaderboard.sortBy === 'coins' ? 'coins' : 'xp'
+    economyLeaderboardPage = Number.isFinite(Number(leaderboard.page)) ? Math.max(1, Number(leaderboard.page)) : 1
+    economyLeaderboardTotalPages = Number.isFinite(Number(leaderboard.totalPages))
+      ? Math.max(1, Number(leaderboard.totalPages))
+      : 1
+    economyLeaderboardTotalRows = Number.isFinite(Number(leaderboard.totalRows))
+      ? Math.max(0, Number(leaderboard.totalRows))
+      : 0
+    economyLeaderboardEntries = Array.isArray(leaderboard.entries) ? leaderboard.entries : []
+    economyLeaderboardLoadError = null
+
+    renderEconomyLeaderboard()
+  } catch (error) {
+    if (requestId !== economyLeaderboardLoadRequestId) {
+      return
+    }
+
+    economyLeaderboardSortBy = previousState.sortBy
+    economyLeaderboardPage = previousState.page
+    economyLeaderboardTotalPages = previousState.totalPages
+    economyLeaderboardTotalRows = previousState.totalRows
+    economyLeaderboardEntries = previousState.entries
+    economyLeaderboardLoadError = error instanceof Error ? error.message : 'Nieznany blad'
+    renderEconomyLeaderboard()
+
+    if (!silent) {
+      showToast(`❌ ${economyLeaderboardLoadError}`, 'error')
+    }
+  }
+}
+
+function setEconomySettingsLastLoadedLabel() {
+  const label = document.getElementById('economy-settings-last-loaded')
+  if (!label) {
+    return
+  }
+
+  if (!economySettingsLastLoadedAt) {
+    label.textContent = 'Brak danych.'
+    return
+  }
+
+  label.textContent = `Ostatnio odswiezono: ${formatTimestampInWarsaw(economySettingsLastLoadedAt)}`
+}
+
+function toFiniteNumber(value, fieldName) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    throw new Error(`Pole "${fieldName}" musi byc poprawna liczba.`)
+  }
+
+  return numeric
+}
+
+function readEconomyInputValue(inputId) {
+  const element = document.getElementById(inputId)
+  if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) {
+    throw new Error('Brakuje jednego z pol formularza ekonomii.')
+  }
+
+  return element.value
+}
+
+function readEconomyCheckboxValue(inputId) {
+  const element = document.getElementById(inputId)
+  if (!(element instanceof HTMLInputElement)) {
+    throw new Error('Brakuje jednego z pol formularza ekonomii.')
+  }
+
+  return element.checked
+}
+
+function collectEconomySettingsForm() {
+  const dailyMinCoins = Math.floor(toFiniteNumber(readEconomyInputValue('economy-daily-min'), 'Daily: min coins'))
+  const dailyMaxCoins = Math.floor(toFiniteNumber(readEconomyInputValue('economy-daily-max'), 'Daily: max coins'))
+  const dailyStreakIncrement = toFiniteNumber(readEconomyInputValue('economy-daily-streak-increment'), 'Daily: przyrost streak')
+  const dailyStreakMaxDays = Math.floor(toFiniteNumber(readEconomyInputValue('economy-daily-streak-max-days'), 'Daily: max dni streak'))
+  const dailyStreakGraceHours = Math.floor(toFiniteNumber(readEconomyInputValue('economy-daily-streak-grace-hours'), 'Daily: grace (godziny)'))
+  const dailyMessages = readEconomyInputValue('economy-daily-messages')
+    .split(/\r?\n/g)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+
+  const levelingMode = readEconomyInputValue('economy-leveling-mode')
+  const levelingBaseXp = Math.floor(toFiniteNumber(readEconomyInputValue('economy-leveling-base-xp'), 'Leveling: base XP'))
+  const levelingExponent = toFiniteNumber(readEconomyInputValue('economy-leveling-exponent'), 'Leveling: exponent')
+  const xpTextPerMessage = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-text-per-message'), 'XP text: za wiadomosc'))
+  const xpTextCooldownSeconds = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-text-cooldown-seconds'), 'XP text: cooldown'))
+  const xpVoicePerMinute = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-voice-per-minute'), 'XP voice: za minute'))
+  const watchpartyXpMultiplier = toFiniteNumber(readEconomyInputValue('economy-watchparty-xp-multiplier'), 'Watchparty: mnoznik XP')
+  const watchpartyCoinBonusPerMinute = Math.floor(toFiniteNumber(readEconomyInputValue('economy-watchparty-coin-bonus-per-minute'), 'Watchparty: bonus coin/min'))
+  const levelUpCoinsBase = Math.floor(toFiniteNumber(readEconomyInputValue('economy-level-up-coins-base'), 'Level-up: base coins'))
+  const levelUpCoinsPerLevel = Math.floor(toFiniteNumber(readEconomyInputValue('economy-level-up-coins-per-level'), 'Level-up: bonus per level'))
+
+  if (dailyMaxCoins < dailyMinCoins) {
+    throw new Error('Daily: max coins nie moze byc mniejsze niz min coins.')
+  }
+
+  if (dailyMessages.length === 0) {
+    throw new Error('Podaj co najmniej jedna wiadomosc daily.')
+  }
+
+  if (levelingMode !== 'progressive' && levelingMode !== 'linear') {
+    throw new Error('Nieprawidlowy tryb levelowania.')
+  }
+
+  return {
+    dailyMinCoins,
+    dailyMaxCoins,
+    dailyStreakIncrement,
+    dailyStreakMaxDays,
+    dailyStreakGraceHours,
+    dailyMessages,
+    levelingMode,
+    levelingBaseXp,
+    levelingExponent,
+    xpTextPerMessage,
+    xpTextCooldownSeconds,
+    xpVoicePerMinute,
+    xpVoiceRequireTwoUsers: readEconomyCheckboxValue('economy-xp-voice-require-two-users'),
+    xpVoiceAllowSelfMute: readEconomyCheckboxValue('economy-xp-voice-allow-self-mute'),
+    xpVoiceAllowSelfDeaf: readEconomyCheckboxValue('economy-xp-voice-allow-self-deaf'),
+    xpVoiceAllowAfk: readEconomyCheckboxValue('economy-xp-voice-allow-afk'),
+    watchpartyXpMultiplier,
+    watchpartyCoinBonusPerMinute,
+    levelUpCoinsBase,
+    levelUpCoinsPerLevel,
+  }
+}
+
+function setEconomySettingsForm(config) {
+  const setValue = (inputId, value) => {
+    const element = document.getElementById(inputId)
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+      element.value = String(value)
+    }
+  }
+
+  const setChecked = (inputId, value) => {
+    const element = document.getElementById(inputId)
+    if (element instanceof HTMLInputElement) {
+      element.checked = value === true
+    }
+  }
+
+  setValue('economy-daily-min', config.dailyMinCoins)
+  setValue('economy-daily-max', config.dailyMaxCoins)
+  setValue('economy-daily-streak-increment', config.dailyStreakIncrement)
+  setValue('economy-daily-streak-max-days', config.dailyStreakMaxDays)
+  setValue('economy-daily-streak-grace-hours', config.dailyStreakGraceHours)
+  setValue('economy-daily-messages', Array.isArray(config.dailyMessages) ? config.dailyMessages.join('\n') : '')
+  setValue('economy-leveling-mode', config.levelingMode)
+  setValue('economy-leveling-base-xp', config.levelingBaseXp)
+  setValue('economy-leveling-exponent', config.levelingExponent)
+  setValue('economy-xp-text-per-message', config.xpTextPerMessage)
+  setValue('economy-xp-text-cooldown-seconds', config.xpTextCooldownSeconds)
+  setValue('economy-xp-voice-per-minute', config.xpVoicePerMinute)
+  setValue('economy-watchparty-xp-multiplier', config.watchpartyXpMultiplier)
+  setValue('economy-watchparty-coin-bonus-per-minute', config.watchpartyCoinBonusPerMinute)
+  setChecked('economy-xp-voice-require-two-users', config.xpVoiceRequireTwoUsers)
+  setChecked('economy-xp-voice-allow-self-mute', config.xpVoiceAllowSelfMute)
+  setChecked('economy-xp-voice-allow-self-deaf', config.xpVoiceAllowSelfDeaf)
+  setChecked('economy-xp-voice-allow-afk', config.xpVoiceAllowAfk)
+  setValue('economy-level-up-coins-base', config.levelUpCoinsBase)
+  setValue('economy-level-up-coins-per-level', config.levelUpCoinsPerLevel)
+}
+
+async function loadEconomySettings({ silent } = { silent: false }) {
+  economySettingsLoadRequestId += 1
+  const requestId = economySettingsLoadRequestId
+
+  try {
+    const response = await fetch('/api/economy/settings')
+    const payload = await parseApiResponse(response)
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie pobrac ustawien ekonomii.')
+    }
+
+    if (requestId !== economySettingsLoadRequestId) {
+      return
+    }
+
+    if (!payload.config || typeof payload.config !== 'object') {
+      throw new Error('Nieprawidlowy format odpowiedzi ustawien ekonomii.')
+    }
+
+    setEconomySettingsForm(payload.config)
+    economySettingsLastLoadedAt = Date.now()
+    economySettingsLoadSuccessful = true
+    setEconomySettingsLastLoadedLabel()
+  } catch (error) {
+    if (requestId !== economySettingsLoadRequestId) {
+      return
+    }
+
+    economySettingsLoadSuccessful = false
+
+    if (!silent) {
+      const message = error instanceof Error ? error.message : 'Nieznany blad'
+      showToast(`❌ ${message}`, 'error')
+    }
+  }
+}
+
+async function saveEconomySettings() {
+  if (!economySettingsLoadSuccessful) {
+    showToast('❌ Najpierw odswiez ustawienia ekonomii i upewnij sie, ze ladowanie zakonczylo sie sukcesem.', 'error')
+    return
+  }
+
+  const saveButton = document.getElementById('economy-settings-save-btn')
+  if (saveButton instanceof HTMLButtonElement) {
+    saveButton.disabled = true
+  }
+
+  try {
+    const requestBody = collectEconomySettingsForm()
+    const response = await fetchWithCsrf('/api/economy/settings', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    })
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie zapisac ustawien ekonomii.')
+    }
+
+    if (!payload.config || typeof payload.config !== 'object') {
+      throw new Error('Brak konfiguracji ekonomii w odpowiedzi serwera.')
+    }
+
+    setEconomySettingsForm(payload.config)
+    economySettingsLastLoadedAt = Date.now()
+    setEconomySettingsLastLoadedLabel()
+    showToast('✅ Ustawienia ekonomii zostaly zapisane.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    showToast(`❌ ${message}`, 'error')
+  } finally {
+    if (saveButton instanceof HTMLButtonElement) {
+      saveButton.disabled = false
+    }
+  }
+}
+
+async function resetAllEconomyUsers() {
+  if (!economySettingsLoadSuccessful) {
+    showToast('❌ Najpierw odswiez ustawienia ekonomii i upewnij sie, ze ladowanie zakonczylo sie sukcesem.', 'error')
+    return
+  }
+
+  const confirmed = window.confirm('Czy na pewno zresetowac dane ekonomii wszystkich uzytkownikow na tym serwerze? Tej operacji nie da sie cofnac.')
+  if (!confirmed) {
+    return
+  }
+
+  const resetButton = document.getElementById('economy-settings-reset-users-btn')
+  if (resetButton instanceof HTMLButtonElement) {
+    resetButton.disabled = true
+  }
+
+  try {
+    const response = await fetchWithCsrf('/api/economy/reset-users', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    })
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie zresetowac danych ekonomii.')
+    }
+
+    const resetCount = Number(payload.resetCount ?? 0)
+    showToast(`✅ Zresetowano dane ekonomii dla ${resetCount} uzytkownikow.`, 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    showToast(`❌ ${message}`, 'error')
+  } finally {
+    if (resetButton instanceof HTMLButtonElement) {
+      resetButton.disabled = false
+    }
+  }
 }
 
 async function loadG2Matches({ silent } = { silent: false }) {
@@ -1834,6 +2404,36 @@ function updateEventDefaultsFromMatch() {
 
     if (eventEndAtInput && !eventEndAtInput.value.trim()) {
       eventEndAtInput.value = formatTimestampForDateTimeInput(beginAtTimestamp + (2 * 60 * 60 * 1000))
+    }
+  }
+}
+
+function updateWatchpartyDefaultsFromMatch() {
+  const watchpartyEnabled = document.getElementById('watchparty-enabled')?.checked ?? false
+  if (!watchpartyEnabled || !selectedMatchInfo) {
+    return
+  }
+
+  const watchpartyChannelNameInput = document.getElementById('watchparty-channel-name')
+  const watchpartyStartAtInput = document.getElementById('watchparty-start-at')
+  const watchpartyEndAtInput = document.getElementById('watchparty-end-at')
+
+  const beginAtTimestamp = Number(selectedMatchInfo.beginAtTimestamp)
+  const hasMatchTime = Number.isFinite(beginAtTimestamp)
+
+  if (watchpartyChannelNameInput && !watchpartyChannelNameInput.value.trim()) {
+    const teamName = selectedMatchInfo.g2TeamName ?? 'G2 Esports'
+    const opponent = selectedMatchInfo.opponent ?? 'TBD'
+    watchpartyChannelNameInput.value = `${teamName} vs ${opponent} | watchparty`
+  }
+
+  if (hasMatchTime) {
+    if (watchpartyStartAtInput && !watchpartyStartAtInput.value.trim()) {
+      watchpartyStartAtInput.value = formatTimestampForDateTimeInput(beginAtTimestamp - (10 * 60 * 1000))
+    }
+
+    if (watchpartyEndAtInput && !watchpartyEndAtInput.value.trim()) {
+      watchpartyEndAtInput.value = formatTimestampForDateTimeInput(beginAtTimestamp + (130 * 60 * 1000))
     }
   }
 }
@@ -2341,6 +2941,7 @@ function collectFormDataSync() {
   const scheduleAtLocal = document.getElementById('schedule-at')?.value ?? ''
   const matchHelperEnabled = document.getElementById('match-helper-enabled')?.checked ?? false
   const eventEnabled = document.getElementById('event-enabled')?.checked ?? false
+  const watchpartyEnabled = document.getElementById('watchparty-enabled')?.checked ?? false
 
   const matchInfo = matchHelperEnabled && selectedMatchInfo
     ? {
@@ -2365,6 +2966,13 @@ function collectFormDataSync() {
     endAtLocal: document.getElementById('event-end-at')?.value ?? '',
   }
 
+  const watchpartyDraft = {
+    enabled: watchpartyEnabled,
+    channelName: document.getElementById('watchparty-channel-name')?.value ?? '',
+    startAtLocal: document.getElementById('watchparty-start-at')?.value ?? '',
+    endAtLocal: document.getElementById('watchparty-end-at')?.value ?? '',
+  }
+
   return {
     mode: currentMode,
     channelId: document.getElementById('channel-select')?.value ?? '',
@@ -2378,6 +2986,7 @@ function collectFormDataSync() {
     imageFilename: imageMode === 'library' ? (selectedImageName ?? '') : '',
     matchInfo,
     eventDraft,
+    watchpartyDraft,
   }
 }
 
@@ -2443,7 +3052,17 @@ function updateSendButton() {
     && eventEndTimestamp > eventStartTimestamp
   )
 
-  button.disabled = !(hasChannel && hasContent && pingReady && imageReady && matchReady && eventReady)
+  const watchpartyDraftEnabled = data.watchpartyDraft?.enabled === true
+  const watchpartyStartTimestamp = data.watchpartyDraft?.startAtLocal ? Date.parse(data.watchpartyDraft.startAtLocal) : NaN
+  const watchpartyEndTimestamp = data.watchpartyDraft?.endAtLocal ? Date.parse(data.watchpartyDraft.endAtLocal) : NaN
+  const watchpartyReady = !watchpartyDraftEnabled || (
+    Boolean(data.watchpartyDraft?.channelName?.trim())
+    && Number.isFinite(watchpartyStartTimestamp)
+    && Number.isFinite(watchpartyEndTimestamp)
+    && watchpartyEndTimestamp > watchpartyStartTimestamp
+  )
+
+  button.disabled = !(hasChannel && hasContent && pingReady && imageReady && matchReady && eventReady && watchpartyReady)
 
   if (editingSentPostId) {
     buttonText.textContent = 'Zapisz zmiany wysłanego posta'

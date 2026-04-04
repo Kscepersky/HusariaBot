@@ -7,6 +7,9 @@ config();
 const DISCORD_API = 'https://discord.com/api/v10';
 const MANAGE_EVENTS_PERMISSION = 1n << 33n;
 const ADMINISTRATOR_PERMISSION = 1n << 3n;
+const VIEW_CHANNEL_PERMISSION = 1n << 10n;
+const CONNECT_PERMISSION = 1n << 20n;
+const SPEAK_PERMISSION = 1n << 21n;
 const SCHEDULED_EVENTS_CACHE_TTL_MS = 15_000;
 const SCHEDULED_EVENTS_DEFAULT_RETRY_MS = 1_000;
 const SCHEDULED_EVENTS_MAX_CACHE_ENTRIES = 20;
@@ -119,6 +122,12 @@ export interface DiscordScheduledEvent {
     } | null;
 }
 
+export interface CreateGuildVoiceChannelInput {
+    name: string;
+    categoryId?: string;
+    initiallyOpen?: boolean;
+}
+
 export interface UpdateExternalScheduledEventInput {
     name: string;
     description?: string;
@@ -148,6 +157,31 @@ export interface DiscordMentionUser {
     username: string;
     globalName: string | null;
     nick: string | null;
+}
+
+function buildWatchpartyPermissionOverwrite(guildId: string, initiallyOpen: boolean): {
+    id: string;
+    type: number;
+    allow: string;
+    deny: string;
+} {
+    const allow = initiallyOpen
+        ? (VIEW_CHANNEL_PERMISSION | CONNECT_PERMISSION | SPEAK_PERMISSION)
+        : VIEW_CHANNEL_PERMISSION;
+    const deny = initiallyOpen
+        ? 0n
+        : (CONNECT_PERMISSION | SPEAK_PERMISSION);
+
+    return {
+        id: guildId,
+        type: 0,
+        allow: allow.toString(),
+        deny: deny.toString(),
+    };
+}
+
+function isValidDiscordId(value: string): boolean {
+    return /^\d{17,20}$/.test(value);
 }
 
 export async function exchangeCode(code: string, redirectUri: string): Promise<string> {
@@ -571,6 +605,85 @@ export async function sendMessageToChannel(channelId: string, payload: DiscordMe
 
     const msg = await resp.json() as { id: string };
     return msg.id;
+}
+
+export async function createGuildVoiceChannel(
+    guildId: string,
+    input: CreateGuildVoiceChannelInput,
+): Promise<string> {
+    const channelName = input.name.trim();
+    if (!channelName) {
+        throw new Error('Nazwa kanału watchparty jest wymagana.');
+    }
+
+    const trimmedCategoryId = input.categoryId?.trim() ?? '';
+    const body = {
+        name: channelName,
+        type: 2,
+        ...(trimmedCategoryId && isValidDiscordId(trimmedCategoryId) ? { parent_id: trimmedCategoryId } : {}),
+        permission_overwrites: [buildWatchpartyPermissionOverwrite(guildId, input.initiallyOpen === true)],
+    };
+
+    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/channels`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to create voice channel: ${resp.status} — ${JSON.stringify(err)}`);
+    }
+
+    const created = await resp.json() as { id: string };
+    return created.id;
+}
+
+export async function updateChannelRolePermissions(
+    channelId: string,
+    roleId: string,
+    options: { open: boolean },
+): Promise<void> {
+    const overwrite = buildWatchpartyPermissionOverwrite(roleId, options.open);
+
+    const resp = await fetch(`${DISCORD_API}/channels/${channelId}/permissions/${roleId}`, {
+        method: 'PUT',
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            allow: overwrite.allow,
+            deny: overwrite.deny,
+            type: overwrite.type,
+        }),
+    });
+
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to update channel permissions: ${resp.status} — ${JSON.stringify(err)}`);
+    }
+}
+
+export async function deleteGuildChannel(channelId: string): Promise<void> {
+    const resp = await fetch(`${DISCORD_API}/channels/${channelId}`, {
+        method: 'DELETE',
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+        },
+    });
+
+    if (resp.status === 404) {
+        return;
+    }
+
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to delete channel: ${resp.status} — ${JSON.stringify(err)}`);
+    }
 }
 
 export async function editChannelMessage(

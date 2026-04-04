@@ -25,6 +25,13 @@ const eventDraftSchema = z.object({
     endAtLocal: optionalStringSchema,
 }).strip();
 
+const watchpartyDraftSchema = z.object({
+    enabled: booleanLikeSchema.optional(),
+    channelName: optionalStringSchema,
+    startAtLocal: optionalStringSchema,
+    endAtLocal: optionalStringSchema,
+}).strip();
+
 export const dashboardEventSchema = z.object({
     title: optionalStringSchema,
     description: optionalStringSchema,
@@ -32,6 +39,32 @@ export const dashboardEventSchema = z.object({
     startAtLocal: optionalStringSchema,
     endAtLocal: optionalStringSchema,
 }).strip();
+
+export const economyConfigSchema = z.object({
+    dailyMinCoins: z.number().int().min(0).max(1_000_000),
+    dailyMaxCoins: z.number().int().min(0).max(1_000_000),
+    dailyStreakIncrement: z.number().min(0).max(10),
+    dailyStreakMaxDays: z.number().int().min(1).max(365),
+    dailyStreakGraceHours: z.number().int().min(24).max(168),
+    dailyMessages: z.array(z.string().trim().min(1).max(500)).min(1).max(50),
+    levelingMode: z.union([z.literal('progressive'), z.literal('linear')]),
+    levelingBaseXp: z.number().int().min(1).max(1_000_000),
+    levelingExponent: z.number().min(1).max(8),
+    xpTextPerMessage: z.number().int().min(0).max(10_000),
+    xpTextCooldownSeconds: z.number().int().min(0).max(86_400),
+    xpVoicePerMinute: z.number().int().min(0).max(10_000),
+    xpVoiceRequireTwoUsers: z.boolean(),
+    xpVoiceAllowSelfMute: z.boolean(),
+    xpVoiceAllowSelfDeaf: z.boolean(),
+    xpVoiceAllowAfk: z.boolean(),
+    watchpartyXpMultiplier: z.number().min(0).max(10),
+    watchpartyCoinBonusPerMinute: z.number().int().min(0).max(10_000),
+    levelUpCoinsBase: z.number().int().min(0).max(1_000_000),
+    levelUpCoinsPerLevel: z.number().int().min(0).max(1_000_000),
+}).refine((value) => value.dailyMaxCoins >= value.dailyMinCoins, {
+    message: 'dailyMaxCoins musi byc wieksze lub rowne dailyMinCoins.',
+    path: ['dailyMaxCoins'],
+});
 
 export const sendImageSchema = z.object({
     filename: z.string().min(1).max(255),
@@ -53,6 +86,7 @@ export const embedPayloadSchema = z.object({
     uploadBase64: optionalStringSchema,
     matchInfo: matchInfoSchema.optional(),
     eventDraft: eventDraftSchema.optional(),
+    watchpartyDraft: watchpartyDraftSchema.optional(),
     scheduleAtLocal: optionalStringSchema,
 }).strip();
 

@@ -10,6 +10,7 @@ function clonePayload<T extends ScheduledPost['payload']>(payload: T): T {
         ...payload,
         ...(payload.matchInfo ? { matchInfo: { ...payload.matchInfo } } : {}),
         ...(payload.eventDraft ? { eventDraft: { ...payload.eventDraft } } : {}),
+        ...(payload.watchpartyDraft ? { watchpartyDraft: { ...payload.watchpartyDraft } } : {}),
     };
 }
 

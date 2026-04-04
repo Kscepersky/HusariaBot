@@ -4,11 +4,30 @@ import { pingCommand } from './commands/ping.js';
 import { sendImgCommand } from './commands/sendimg.js';
 import { ticketyConfigCommand } from './commands/ticketyconfig.js';
 import { dashboardLinkCommand } from './commands/dashboardlink.js';
+import { dailyCommand } from './commands/daily.js';
+import { streakDailyCommand } from './commands/streak-daily.js';
+import { dodajCoinsyCommand } from './commands/dodaj-coinsy.js';
+import { dodajXpCommand } from './commands/dodaj-xp.js';
+import { usunCoinsyCommand } from './commands/usun-coinsy.js';
+import { resetujLevelCommand } from './commands/resetuj-level.js';
+import { resetujCoinsyCommand } from './commands/resetuj-coinsy.js';
+import { leaderboardXpCommand } from './commands/leaderboard-xp.js';
+import { stankontaCommand } from './commands/stankonta.js';
+import { levelCommand } from './commands/level.js';
 
 config();
 
-const token = process.env.DISCORD_TOKEN!;
-const clientId = process.env.CLIENT_ID!;
+function requireEnv(name: string): string {
+    const value = process.env[name]?.trim();
+    if (!value) {
+        throw new Error(`Brakuje ${name}. Nie mozna zarejestrowac komend.`);
+    }
+
+    return value;
+}
+
+const token = requireEnv('DISCORD_TOKEN');
+const clientId = requireEnv('CLIENT_ID');
 const guildId = process.env.GUILD_ID;
 
 // Zbierz dane wszystkich komend
@@ -17,6 +36,16 @@ const commands = [
     sendImgCommand.data.toJSON(),
     ticketyConfigCommand.data.toJSON(),
     dashboardLinkCommand.data.toJSON(),
+    dailyCommand.data.toJSON(),
+    streakDailyCommand.data.toJSON(),
+    dodajCoinsyCommand.data.toJSON(),
+    dodajXpCommand.data.toJSON(),
+    usunCoinsyCommand.data.toJSON(),
+    resetujLevelCommand.data.toJSON(),
+    resetujCoinsyCommand.data.toJSON(),
+    leaderboardXpCommand.data.toJSON(),
+    stankontaCommand.data.toJSON(),
+    levelCommand.data.toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(token);
@@ -40,6 +69,7 @@ async function deploy() {
         }
     } catch (error) {
         console.error('❌  Błąd rejestracji komend:', error);
+        process.exitCode = 1;
     }
 }
 

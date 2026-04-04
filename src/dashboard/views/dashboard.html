@@ -42,6 +42,14 @@
         <span class="sidebar-icon">🏟️</span>
         <span>Baza meczów G2</span>
       </a>
+      <a href="#" class="sidebar-item" data-section="economy-settings">
+        <span class="sidebar-icon">🧅</span>
+        <span>Ustawienia ekonomii</span>
+      </a>
+      <a href="#" class="sidebar-item" data-section="economy-leaderboard">
+        <span class="sidebar-icon">🏆</span>
+        <span>Leaderboard ekonomii</span>
+      </a>
     </nav>
   </aside>
 
@@ -230,6 +238,24 @@
             </div>
           </details>
 
+          <details class="form-group form-disclosure" id="watchparty-group">
+            <summary class="disclosure-summary">Kanał Watchparty</summary>
+            <div class="disclosure-content">
+              <label class="form-checkbox">
+                <input type="checkbox" id="watchparty-enabled">
+                <span>Przygotuj ustawienia watchparty dla tego posta (kanał + okno czasu).</span>
+              </label>
+              <div id="watchparty-fields" class="watchparty-fields" hidden>
+                <label class="form-label" for="watchparty-channel-name">Nazwa kanału watchparty</label>
+                <input id="watchparty-channel-name" type="text" class="form-input" placeholder="np. G2 vs FNC | watchparty">
+                <label class="form-label" for="watchparty-start-at">Start watchparty (Europe/Warsaw)</label>
+                <input id="watchparty-start-at" type="datetime-local" class="form-input">
+                <label class="form-label" for="watchparty-end-at">Koniec watchparty (Europe/Warsaw)</label>
+                <input id="watchparty-end-at" type="datetime-local" class="form-input">
+              </div>
+            </div>
+          </details>
+
           <div class="form-group">
             <label class="form-label" for="channel-select">Kanał docelowy</label>
             <div class="select-wrapper">
@@ -382,6 +408,128 @@
         </div>
 
         <div id="g2-matches-list" class="scheduled-list"></div>
+      </div>
+    </div>
+
+    <div id="section-economy-settings" class="section-panel">
+      <div class="section-header">
+        <h2>🧅 Ustawienia ekonomii</h2>
+        <p>Konfiguruj daily, poziomy i XP. Komendy użyją zmian od razu, a runtime naliczania odświeża konfigurację cyklicznie.</p>
+      </div>
+
+      <div class="creator-form-card">
+        <div class="scheduled-toolbar">
+          <button id="economy-settings-reload-btn" class="btn-secondary" type="button">Odśwież ustawienia</button>
+          <span class="preview-note" id="economy-settings-last-loaded">Brak danych.</span>
+        </div>
+
+        <div class="events-form-grid">
+          <label class="form-label" for="economy-daily-min">Daily: min coins</label>
+          <input id="economy-daily-min" type="number" class="form-input" min="0" step="1">
+
+          <label class="form-label" for="economy-daily-max">Daily: max coins</label>
+          <input id="economy-daily-max" type="number" class="form-input" min="0" step="1">
+
+          <label class="form-label" for="economy-daily-streak-increment">Daily: przyrost streak (na dzień)</label>
+          <input id="economy-daily-streak-increment" type="number" class="form-input" min="0" step="0.01">
+
+          <label class="form-label" for="economy-daily-streak-max-days">Daily: max dni streak</label>
+          <input id="economy-daily-streak-max-days" type="number" class="form-input" min="1" step="1">
+
+          <label class="form-label" for="economy-daily-streak-grace-hours">Daily: grace (godziny)</label>
+          <input id="economy-daily-streak-grace-hours" type="number" class="form-input" min="24" step="1">
+
+          <label class="form-label" for="economy-daily-messages">Daily: wiadomości (1 linia = 1 szablon)</label>
+          <textarea id="economy-daily-messages" class="form-textarea" rows="4"></textarea>
+
+          <label class="form-label" for="economy-leveling-mode">Tryb levelowania</label>
+          <select id="economy-leveling-mode" class="form-select">
+            <option value="progressive">Progressive</option>
+            <option value="linear">Linear</option>
+          </select>
+
+          <label class="form-label" for="economy-leveling-base-xp">Leveling: base XP</label>
+          <input id="economy-leveling-base-xp" type="number" class="form-input" min="1" step="1">
+
+          <label class="form-label" for="economy-leveling-exponent">Leveling: exponent</label>
+          <input id="economy-leveling-exponent" type="number" class="form-input" min="1" step="0.01">
+
+          <label class="form-label" for="economy-xp-text-per-message">XP text: za wiadomość</label>
+          <input id="economy-xp-text-per-message" type="number" class="form-input" min="0" step="1">
+
+          <label class="form-label" for="economy-xp-text-cooldown-seconds">XP text: cooldown (sekundy)</label>
+          <input id="economy-xp-text-cooldown-seconds" type="number" class="form-input" min="0" step="1">
+
+          <label class="form-label" for="economy-xp-voice-per-minute">XP voice: za minutę</label>
+          <input id="economy-xp-voice-per-minute" type="number" class="form-input" min="0" step="1">
+
+          <label class="form-label" for="economy-watchparty-xp-multiplier">Watchparty: mnożnik XP voice</label>
+          <input id="economy-watchparty-xp-multiplier" type="number" class="form-input" min="0" step="0.01">
+
+          <label class="form-label" for="economy-watchparty-coin-bonus-per-minute">Watchparty: bonus coin/min</label>
+          <input id="economy-watchparty-coin-bonus-per-minute" type="number" class="form-input" min="0" step="1">
+
+          <label class="form-checkbox">
+            <input id="economy-xp-voice-require-two-users" type="checkbox">
+            <span>XP voice wymaga min. 2 użytkowników na kanale.</span>
+          </label>
+
+          <label class="form-checkbox">
+            <input id="economy-xp-voice-allow-self-mute" type="checkbox">
+            <span>Przyznawaj XP voice dla self-muted.</span>
+          </label>
+
+          <label class="form-checkbox">
+            <input id="economy-xp-voice-allow-self-deaf" type="checkbox">
+            <span>Przyznawaj XP voice dla self-deaf.</span>
+          </label>
+
+          <label class="form-checkbox">
+            <input id="economy-xp-voice-allow-afk" type="checkbox">
+            <span>Przyznawaj XP voice na kanale AFK.</span>
+          </label>
+
+          <label class="form-label" for="economy-level-up-coins-base">Level-up: base coins</label>
+          <input id="economy-level-up-coins-base" type="number" class="form-input" min="0" step="1">
+
+          <label class="form-label" for="economy-level-up-coins-per-level">Level-up: bonus per level</label>
+          <input id="economy-level-up-coins-per-level" type="number" class="form-input" min="0" step="1">
+        </div>
+
+        <div class="scheduled-actions">
+          <button id="economy-settings-save-btn" class="btn-primary" type="button">Zapisz ustawienia ekonomii</button>
+          <button id="economy-settings-reset-users-btn" class="btn-secondary" type="button">Resetuj wszystkich użytkowników ekonomii</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="section-economy-leaderboard" class="section-panel">
+      <div class="section-header">
+        <h2>🏆 Leaderboard ekonomii</h2>
+        <p>Przeglądaj ranking użytkowników po XP lub cebulionach z paginacją po 10 pozycji.</p>
+      </div>
+
+      <div class="creator-form-card">
+        <div class="scheduled-toolbar">
+          <div class="economy-leaderboard-controls">
+            <select id="economy-leaderboard-sort" class="form-select">
+              <option value="xp">Sortowanie: XP / Level</option>
+              <option value="coins">Sortowanie: Cebuliony</option>
+            </select>
+            <button id="economy-leaderboard-refresh-btn" class="btn-secondary" type="button">Odśwież leaderboard</button>
+          </div>
+          <span class="preview-note" id="economy-leaderboard-count-label">Ładowanie...</span>
+        </div>
+
+        <div class="scheduled-toolbar">
+          <div class="economy-leaderboard-pagination">
+            <button id="economy-leaderboard-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
+            <span class="preview-note" id="economy-leaderboard-page-label">Strona 1/1</span>
+            <button id="economy-leaderboard-next-btn" class="btn-secondary" type="button">Następna ➡</button>
+          </div>
+        </div>
+
+        <div id="economy-leaderboard-list" class="scheduled-list"></div>
       </div>
     </div>
 

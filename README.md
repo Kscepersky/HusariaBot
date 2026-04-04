@@ -1,241 +1,254 @@
 ﻿# HusariaBot
 
-Nowoczesny bot Discord napisany w TypeScript z panelem administracyjnym, systemem ticketów, kreatorem publikacji oraz bazą meczów G2 opartą o PandaScore + SQLite.
+Modern Discord bot written in TypeScript with an admin dashboard, ticket system, post publisher, and G2 matches integration (PandaScore + SQLite).
 
-## Spis treści
+## Table of Contents
 
-1. Co to jest
-2. Najważniejsze funkcje
-3. Architektura
-4. Wymagania
-5. Szybki start
-6. Konfiguracja środowiska
-7. Komendy bota
+1. Overview
+2. Key Features
+3. Architecture
+4. Requirements
+5. Quick Start
+6. Environment Configuration
+7. Bot Commands
 8. Dashboard
-9. Skrypty deweloperskie
-10. Bezpieczeństwo i publikacja na GitHub
+9. Development Scripts
+10. Security and GitHub Commit Checklist
 11. Troubleshooting
-12. Licencja
+12. License
 
-## Co to jest
+## Overview
 
-Projekt składa się z dwóch procesów:
+The project runs as two processes:
 
-1. Bot Discord
-2. Dashboard webowy (Express + OAuth2 Discord)
+1. Discord bot
+2. Web dashboard (Express + Discord OAuth2)
 
-Dzięki temu możesz oddzielić operacje moderatorskie i publikacyjne od pracy bezpośrednio w Discordzie.
+This separates moderation/publishing workflows from in-Discord operations.
 
-## Najważniejsze funkcje
+## Key Features
 
-- Slash-komendy dla administracji i moderatorów.
-- System ticketów z trwałym licznikiem.
-- Tymczasowe kanały voice: wejście na kanał trigger tworzy kanal nick-voice i przenosi użytkownika.
-- Grace period 10 sekund: pusty kanał voice jest usuwany z opóźnieniem, dzięki czemu użytkownik może wrócić po rozłączeniu.
-- Kreator publikacji (Embedded i Wiadomość) z podglądem.
-- Planowanie publikacji i edycja zaplanowanych postów.
-- Historia wysłanych postów: edycja, retry eventu oraz usuwanie z historii.
-- Zakładka Wydarzenia: szybkie tworzenie, edycja i usuwanie wydarzeń Discord.
-- Baza meczów G2 z PandaScore (lokalnie w SQLite).
-- Opcjonalne dodawanie podpowiedzi meczowych i tworzenie wydarzeń Discord w głównym kreatorze.
-- Retry dla eventów Discord, gdy tworzenie się nie powiedzie + bezpieczny lifecycle przy edycji wysłanych postów.
-- Testy jednostkowe/integracyjne w Vitest.
+- Slash commands for staff and members.
+- Ticket system with persistent counter.
+- Temporary voice channels with reconnect grace period.
+- Dashboard post creator (embedded and plain message modes) with preview.
+- Scheduled posting with edit support.
+- Sent-post history with edit, retry, and delete flows.
+- Discord Scheduled Events management.
+- Optional watchparty voice channel lifecycle (scheduled/open/closed/deleted).
+- Economy module (daily, streak, XP, level, admin mutations, leaderboard in dashboard).
+- G2 matches database based on PandaScore + SQLite.
+- Unit/integration tests with Vitest.
 
-## Architektura
+## Architecture
 
 ```text
 src/
-  commands/                 Slash komendy bota
-  tickets/                  Logika ticketów
-  voice-channels/           Tymczasowe kanały voice (create/move/cleanup)
-  embeds/                   Szablony i budowanie embedów
+  commands/                 Slash commands
+  tickets/                  Ticket logic
+  voice-channels/           Temporary voice channels (create/move/cleanup)
+  economy/                  Economy domain (repo/runtime/admin/leaderboard)
+  embeds/                   Embed templates and builders
   dashboard/
-    routes/                 API dashboardu
-    scheduler/              Scheduler postów
-    g2-matches/             Integracja PandaScore + SQLite
-    event-publisher.ts      Tworzenie wydarzeń Discord (wspólny flow)
-    public/                 Frontend dashboardu
-data/                       Dane lokalne (SQLite/JSON)
-img/                        Biblioteka obrazów
+    routes/                 Dashboard API routes
+    scheduler/              Post scheduler
+    g2-matches/             PandaScore + SQLite integration
+    public/                 Dashboard frontend assets
+data/                       Local data (SQLite/JSON)
+img/                        Image library
 ```
 
-## Wymagania
+## Requirements
 
-- Node.js 20.17+ (zalecane Node.js 22 LTS)
+- Node.js 20.17+ (Node.js 22 LTS recommended)
 - npm 9+
-- Bot i aplikacja Discord w Developer Portal
+- Discord application + bot configured in Discord Developer Portal
 
-## Szybki start
+## Quick Start
 
-1. Instalacja zależności:
+1. Install dependencies:
 
 ```bash
 npm install
 ```
 
-2. Skopiuj plik środowiskowy:
+2. Copy environment template:
 
 ```bash
 copy .env.example .env
 ```
 
-3. Uzupełnij wartości w .env.
+3. Fill values in `.env`.
 
-4. Zarejestruj komendy:
+4. Register slash commands:
 
 ```bash
 npm run deploy
 ```
 
-5. Uruchom bota:
+5. Start the bot:
 
 ```bash
 npm run dev
 ```
 
-6. Uruchom dashboard (opcjonalnie):
+6. Start the dashboard (optional):
 
 ```bash
 npm run dashboard
 ```
 
-## Konfiguracja środowiska
+## Environment Configuration
 
-Źródłem prawdy jest plik .env.example.
+Source of truth: `.env.example`.
 
-Najważniejsze zmienne:
+Most important variables:
 
-| Zmienna | Wymagana | Opis |
+| Variable | Required | Description |
 | --- | --- | --- |
-| DISCORD_TOKEN | tak | Token bota |
-| CLIENT_ID | tak | Application ID |
-| GUILD_ID | zalecane | Guild testowy (szybsza propagacja komend) |
-| ADMIN_ROLE_ID | tak | Rola admina |
-| MODERATOR_ROLE_ID | tak | Rola moderatora |
-| SUPPORT_CATEGORY_ID | tak | Kategoria ticketów |
-| VOICE_TRIGGER_CHANNEL_ID | tak (temp voice) | ID kanału voice trigger |
-| VOICE_CATEGORY_ID | tak (temp voice) | ID kategorii dla tymczasowych kanałów voice |
-| DISCORD_CLIENT_SECRET | tak (dashboard) | OAuth2 Client Secret |
-| DISCORD_REDIRECT_URI | tak (dashboard) | OAuth redirect URI |
-| DASHBOARD_SESSION_SECRET | tak (dashboard) | Secret sesji Express |
-| DASHBOARD_SESSION_DB_PATH | nie | Ścieżka do SQLite store sesji dashboardu |
-| DASHBOARD_SESSION_TTL_HOURS | nie | Czas życia sesji dashboardu (h) |
-| DASHBOARD_TRUST_PROXY | nie | Zaufanie nagłówkom proxy (1/0) |
-| DASHBOARD_PORT | nie | Port dashboardu (domyślnie 3000) |
-| DASHBOARD_BASE_URL | tak (dashboard) | Publiczny URL do komendy /dashboard |
-| PANDASCORE_API_KEY | tak (moduł G2) | API key PandaScore |
-| DEV_LOGS | nie | Logi developerskie dashboardu (1/0) |
-| BOT_DEV_LOGS | nie | Heartbeat i logi developerskie bota (1/0) |
-| DASHBOARD_RATE_LIMIT_WINDOW_MS | nie | Okno limitu globalnego dashboardu (ms) |
-| DASHBOARD_RATE_LIMIT_MAX | nie | Maksymalna liczba requestów globalnie na okno |
-| DASHBOARD_AUTH_RATE_LIMIT_WINDOW_MS | nie | Okno limitu callbacku OAuth (ms) |
-| DASHBOARD_AUTH_RATE_LIMIT_MAX | nie | Maksymalna liczba callbacków OAuth na okno |
-| DASHBOARD_MUTATION_RATE_LIMIT_WINDOW_MS | nie | Okno limitu mutacji API (ms) |
-| DASHBOARD_MUTATION_RATE_LIMIT_MAX | nie | Maksymalna liczba mutacji API na okno |
+| DISCORD_TOKEN | yes | Bot token |
+| CLIENT_ID | yes | Discord application ID |
+| GUILD_ID | recommended | Test guild for instant command propagation |
+| ADMIN_ROLE_ID | yes | Admin role ID |
+| MODERATOR_ROLE_ID | yes | Moderator role ID |
+| SUPPORT_CATEGORY_ID | yes | Tickets category ID |
+| VOICE_TRIGGER_CHANNEL_ID | yes (temp voice) | Trigger voice channel ID |
+| VOICE_CATEGORY_ID | yes (temp voice) | Category ID for temporary voice channels |
+| WATCHPARTY_CATEGORY_ID | no (watchparty) | Category ID for watchparty voice channels |
+| DISCORD_CLIENT_SECRET | yes (dashboard) | OAuth2 client secret |
+| DISCORD_REDIRECT_URI | yes (dashboard) | OAuth redirect URI |
+| DASHBOARD_SESSION_SECRET | yes (dashboard) | Express session secret |
+| DASHBOARD_SESSION_DB_PATH | no | Dashboard session SQLite path |
+| ECONOMY_DB_PATH | no | Economy SQLite path |
+| DASHBOARD_SESSION_TTL_HOURS | no | Dashboard session TTL in hours |
+| DASHBOARD_TRUST_PROXY | no | Proxy trust setting (1/0) |
+| DASHBOARD_PORT | no | Dashboard port (default: 3000) |
+| DASHBOARD_BASE_URL | yes (dashboard) | Public dashboard URL used by `/dashboard` command |
+| PANDASCORE_API_KEY | yes (G2 module) | PandaScore API key |
+| DEV_LOGS | no | Dashboard developer logs (1/0) |
+| BOT_DEV_LOGS | no | Bot heartbeat/dev logs (1/0) |
+| DASHBOARD_RATE_LIMIT_WINDOW_MS | no | Global dashboard rate-limit window (ms) |
+| DASHBOARD_RATE_LIMIT_MAX | no | Max global dashboard requests per window |
+| DASHBOARD_AUTH_RATE_LIMIT_WINDOW_MS | no | OAuth callback rate-limit window (ms) |
+| DASHBOARD_AUTH_RATE_LIMIT_MAX | no | Max OAuth callbacks per window |
+| DASHBOARD_MUTATION_RATE_LIMIT_WINDOW_MS | no | Dashboard mutation rate-limit window (ms) |
+| DASHBOARD_MUTATION_RATE_LIMIT_MAX | no | Max dashboard mutations per window |
 
-Zachowanie modułu temp voice:
+Temporary voice flow:
 
-1. Użytkownik wchodzi na VOICE_TRIGGER_CHANNEL_ID.
-2. Bot tworzy kanał nazwa-uzytkownika-voice w VOICE_CATEGORY_ID i przenosi użytkownika.
-3. Jeśli użytkownik miał już aktywny kanał tymczasowy, bot przenosi go do istniejącego kanału zamiast tworzyć nowy.
-4. Gdy kanał opustoszeje, bot czeka 10 sekund i dopiero usuwa kanał (grace period na reconnect po rozłączeniu).
+1. User joins `VOICE_TRIGGER_CHANNEL_ID`.
+2. Bot creates `username-voice` in `VOICE_CATEGORY_ID` and moves the user.
+3. If user already has an active temp channel, bot moves user to it instead of creating another.
+4. Empty temp channels are removed after 10 seconds (grace period for reconnect).
 
-## Komendy bota
+## Bot Commands
 
-| Komenda | Opis | Dostęp |
+| Command | Description | Access |
 | --- | --- | --- |
-| /ping | Health check i latency | Admin/Moderator |
-| /dashboard | Link do dashboardu | Admin/Moderator |
-| /sendimg | Wysyłka obrazu z img | Admin/Moderator |
-| /ticketyconfig | Konfiguracja panelu ticketów | Admin/Moderator |
+| /ping | Health check and latency | Admin/Moderator |
+| /dashboard | Dashboard link | Admin/Moderator |
+| /sendimg | Send image from `img` library | Admin/Moderator |
+| /ticketyconfig | Configure ticket panel | Admin/Moderator |
+| /daily | Claim daily coin reward | All guild members |
+| /streak-daily | Show daily streak and multiplier | All guild members |
+| /leaderboard-xp | XP/level leaderboard | All guild members |
+| /stankonta | Private coin balance summary | All guild members |
+| /level | Public level progress summary | All guild members |
+| /dodaj-coinsy | Add coins to target user | Admin/Moderator |
+| /dodaj-xp | Add XP to target user | Admin/Moderator |
+| /usun-coinsy | Remove coins from target user | Admin/Moderator |
+| /resetuj-level | Reset target user level and XP | Admin/Moderator |
+| /resetuj-coinsy | Reset target user coins | Admin/Moderator |
 
 ## Dashboard
 
-Domyślny adres: http://localhost:3000
+Default URL: `http://localhost:3000`
 
-Moduły dashboardu:
+Dashboard modules:
 
-- Kreator publikacji (embedded/message).
-- Zaplanowane posty.
-- Wysłane posty (edycja, retry eventu, usuwanie wpisów z historii).
-- Wydarzenia (Discord Scheduled Events: CRUD z poziomu panelu).
-- Baza meczów G2 (PandaScore, filtry, odświeżanie + automatyczny refresh widoku po udanej synchronizacji).
+- Post creator (embedded/message).
+- Scheduled posts.
+- Sent posts (edit, retry, delete).
+- Discord Scheduled Events management (CRUD).
+- G2 matches (PandaScore sync, filters, refresh).
+- Economy settings (daily, leveling, text/voice XP, reset users).
+- Economy leaderboard (XP/coins sorting, pagination, Discord display names/avatars).
 
-Skrypty dashboardu:
+Dashboard scripts:
 
-- npm run dashboard
-- npm run dashboard:dev
+- `npm run dashboard`
+- `npm run dashboard:dev`
 
-## Skrypty deweloperskie
+## Development Scripts
 
-- npm run dev
-- npm run build
-- npm start
-- npm run deploy
-- npm run clear-global
-- npm test
-- npm run test:watch
+- `npm run dev`
+- `npm run build`
+- `npm start`
+- `npm run deploy`
+- `npm run clear-global`
+- `npm test`
+- `npm run test:watch`
 
-## Bezpieczeństwo i publikacja na GitHub
+## Security and GitHub Commit Checklist
 
-Przed commitem:
+Before committing:
 
-1. Nigdy nie commituj .env i .env.* z realnymi danymi.
-2. Upewnij się, że do repo trafia tylko .env.example z placeholderami.
-3. Sprawdź staged files:
+1. Never commit `.env` or any environment file with real secrets.
+2. Commit only `.env.example` with placeholders.
+3. Verify staged files:
 
 ```bash
 git diff --cached --name-only
 ```
 
-4. Jeśli sekret mógł wyciec, zrotuj natychmiast:
-   - DISCORD_TOKEN
-   - DISCORD_CLIENT_SECRET
-   - PANDASCORE_API_KEY
-   - DASHBOARD_SESSION_SECRET
+4. If any secret might have leaked, rotate immediately:
+   - `DISCORD_TOKEN`
+   - `DISCORD_CLIENT_SECRET`
+   - `PANDASCORE_API_KEY`
+   - `DASHBOARD_SESSION_SECRET`
 
-Dodatkowe zasady:
+Additional security rules:
 
-- Operacje staff-only są chronione rolami.
-- Dashboard waliduje payloady i grafiki przed publikacją.
-- Dashboard używa tokenów CSRF dla mutacji API.
-- Dashboard ma wielowarstwowy rate limiting (globalny + auth callback + mutacje API).
-- Sesje dashboardu są trzymane w SQLite store zamiast domyślnego MemoryStore.
-- Nie publikuj logów z danymi środowiskowymi.
+- Staff operations are role-protected.
+- Dashboard validates mutation payloads.
+- CSRF tokens are required for mutating API endpoints.
+- Multi-layer rate limiting is enabled (global + OAuth callback + API mutations).
+- Dashboard sessions are stored in SQLite (not MemoryStore).
+- Do not publish logs containing environment data.
 
 ## Troubleshooting
 
-### Komendy nie pojawiają się na serwerze
+### Commands do not appear in Discord
 
-1. Sprawdź CLIENT_ID i token.
-2. Uruchom npm run deploy.
-3. Przy komendach globalnych poczekaj na propagację.
+1. Verify `CLIENT_ID` and token.
+2. Run `npm run deploy`.
+3. If using global commands, wait for propagation.
 
-### Logowanie do dashboardu nie działa
+### Dashboard login fails
 
-1. Redirect URI musi być identyczny jak w Discord Developer Portal.
-2. Sprawdź DISCORD_CLIENT_SECRET.
-3. Upewnij się, że użytkownik ma właściwą rolę staff.
+1. Redirect URI must exactly match Discord Developer Portal.
+2. Verify `DISCORD_CLIENT_SECRET`.
+3. Confirm the user has required staff role.
 
-### Baza meczów G2 nie odświeża się
+### G2 matches are not syncing
 
-1. Sprawdź PANDASCORE_API_KEY.
-2. Zweryfikuj limity/rate limit po stronie PandaScore.
-3. Sprawdź logi dashboardu (DEV_LOGS=1).
+1. Verify `PANDASCORE_API_KEY`.
+2. Check PandaScore rate limits.
+3. Enable dashboard dev logs (`DEV_LOGS=1`).
 
-### Event Discord nie tworzy się
+### Discord event creation fails
 
-1. Bot musi mieć uprawnienie Manage Events.
-2. Sprawdź GUILD_ID i obecność bota na serwerze.
-3. Upewnij się, że data meczu jest w przyszłości.
+1. Bot must have `Manage Events` permission.
+2. Verify `GUILD_ID` and bot membership in guild.
+3. Ensure event date/time is in the future.
 
-### Build/test fail
+### Build/tests fail
 
 ```bash
 npm run build
 npm test
 ```
 
-## Licencja
+## License
 
 MIT

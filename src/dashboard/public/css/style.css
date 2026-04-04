@@ -647,6 +647,12 @@ body {
   margin-top: 10px;
 }
 
+.watchparty-fields {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .events-form-grid {
   display: grid;
   gap: 10px;
@@ -994,6 +1000,24 @@ input[name="colorName"] { display: none }
   margin-bottom: 16px;
 }
 
+.economy-leaderboard-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.economy-leaderboard-controls .form-select {
+  min-width: 240px;
+}
+
+.economy-leaderboard-pagination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .match-filters {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1025,6 +1049,12 @@ input[name="colorName"] { display: none }
   color: var(--text-secondary);
 }
 
+.scheduled-error {
+  border-color: rgba(237, 66, 69, 0.45);
+  color: #ffd6d6;
+  background: rgba(237, 66, 69, 0.12);
+}
+
 .scheduled-card {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1047,6 +1077,32 @@ input[name="colorName"] { display: none }
   color: var(--text-primary);
 }
 
+.leaderboard-user-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.leaderboard-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.leaderboard-avatar-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .scheduled-card-meta {
   display: flex;
   gap: 8px;
@@ -1059,6 +1115,18 @@ input[name="colorName"] { display: none }
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 2px 8px;
+}
+
+.leaderboard-chip-primary {
+  border-color: rgba(87, 242, 135, 0.45);
+  color: #d8ffde;
+  background: rgba(87, 242, 135, 0.12);
+}
+
+.leaderboard-chip-coins {
+  border-color: rgba(255, 215, 0, 0.45);
+  color: #ffe58b;
+  background: rgba(255, 215, 0, 0.12);
 }
 
 .scheduled-preview {
@@ -1075,6 +1143,15 @@ input[name="colorName"] { display: none }
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+#section-economy-settings .scheduled-actions {
+  margin-top: 20px;
+}
+
+#section-economy-settings .scheduled-actions .btn-primary {
+  width: auto;
+  margin-top: 0;
 }
 
 .image-grid {

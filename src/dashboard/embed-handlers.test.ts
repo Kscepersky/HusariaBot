@@ -100,6 +100,40 @@ describe('validateEmbedForm', () => {
 
         expect(validateEmbedForm(data)).toBe('Data zakończenia wydarzenia musi być późniejsza od startu.');
     });
+
+    it('wymaga nazwy kanału watchparty gdy opcja jest wlaczona', () => {
+        const data: EmbedFormData = {
+            mode: 'embedded',
+            channelId: '123456789012345678',
+            title: 'Tytul',
+            content: 'Tresc',
+            watchpartyDraft: {
+                enabled: true,
+                channelName: '  ',
+                startAtLocal: '2026-04-05T20:00',
+                endAtLocal: '2026-04-05T22:00',
+            },
+        };
+
+        expect(validateEmbedForm(data)).toBe('Nazwa kanału watchparty jest wymagana.');
+    });
+
+    it('wymaga poprawnego zakresu czasu watchparty', () => {
+        const data: EmbedFormData = {
+            mode: 'embedded',
+            channelId: '123456789012345678',
+            title: 'Tytul',
+            content: 'Tresc',
+            watchpartyDraft: {
+                enabled: true,
+                channelName: 'G2 vs FNC | watchparty',
+                startAtLocal: '2026-04-05T22:00',
+                endAtLocal: '2026-04-05T20:00',
+            },
+        };
+
+        expect(validateEmbedForm(data)).toBe('Data zakończenia watchparty musi być późniejsza od startu.');
+    });
 });
 
 describe('buildDashboardMessagePayload', () => {

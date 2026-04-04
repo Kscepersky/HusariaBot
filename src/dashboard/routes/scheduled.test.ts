@@ -13,6 +13,7 @@ function clonePayload(payload: EmbedFormData): EmbedFormData {
         ...payload,
         ...(payload.matchInfo ? { matchInfo: { ...payload.matchInfo } } : {}),
         ...(payload.eventDraft ? { eventDraft: { ...payload.eventDraft } } : {}),
+        ...(payload.watchpartyDraft ? { watchpartyDraft: { ...payload.watchpartyDraft } } : {}),
     };
 }
 
@@ -87,6 +88,16 @@ vi.mock('../event-publisher.js', () => ({
     tryCreateDiscordEventFromPayload: vi.fn(),
 }));
 
+vi.mock('../watchparty-lifecycle.js', () => ({
+    registerWatchpartyLifecycle: vi.fn(),
+    unregisterWatchpartyLifecycle: vi.fn(),
+}));
+
+vi.mock('../watchparty-publisher.js', () => ({
+    tryCreateWatchpartyChannelFromPayload: vi.fn(),
+    deleteWatchpartyChannel: vi.fn(),
+}));
+
 vi.mock('../discord-api.js', () => ({
     editChannelMessage: vi.fn(),
     deleteChannelMessage: vi.fn(),
@@ -96,6 +107,9 @@ vi.mock('../discord-api.js', () => ({
 import { publishDashboardPost } from '../publish-flow.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
 import { deleteChannelMessage, deleteGuildScheduledEvent, editChannelMessage } from '../discord-api.js';
+import { updateScheduledPost } from '../scheduler/store.js';
+import { registerWatchpartyLifecycle, unregisterWatchpartyLifecycle } from '../watchparty-lifecycle.js';
+import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
 import { scheduledRouter } from './scheduled.js';
 
 function buildPayload(overrides: Partial<EmbedFormData> = {}): EmbedFormData {
@@ -251,6 +265,7 @@ describe('scheduled routes - sent posts', () => {
             expect(vi.mocked(publishDashboardPost)).not.toHaveBeenCalled();
             expect(vi.mocked(tryCreateDiscordEventFromPayload)).not.toHaveBeenCalled();
             expect(vi.mocked(editChannelMessage)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(registerWatchpartyLifecycle)).toHaveBeenCalledTimes(1);
             expect(vi.mocked(editChannelMessage)).toHaveBeenCalledWith(
                 existingPost.payload.channelId,
                 'msg-old',
@@ -364,6 +379,279 @@ describe('scheduled routes - sent posts', () => {
             expect(response.status).toBe(400);
             expect(body.error).toBe('W edycji opublikowanego posta nie można zmieniać ustawień pingu ani grafiki.');
             expect(vi.mocked(editChannelMessage)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('zwraca ostrzezenie gdy usuniecie starego kanału watchparty po zapisie się nie powiedzie', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-watchparty-rollback',
+            payload: buildPayload({
+                watchpartyDraft: {
+                    enabled: true,
+                    channelName: 'old watchparty',
+                    startAtLocal: '2099-05-01T20:00',
+                    endAtLocal: '2099-05-01T22:00',
+                },
+            }),
+            watchpartyStatus: 'scheduled',
+            watchpartyChannelId: 'watchparty-old',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        vi.mocked(editChannelMessage).mockResolvedValue(undefined);
+        vi.mocked(tryCreateWatchpartyChannelFromPayload).mockResolvedValue({
+            status: 'scheduled',
+            channelId: 'watchparty-new',
+            warnings: [],
+        });
+        vi.mocked(deleteWatchpartyChannel).mockRejectedValueOnce(new Error('old delete failed'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload({
+                    content: 'Edycja z nowym watchparty',
+                    watchpartyDraft: {
+                        enabled: true,
+                        channelName: 'new watchparty',
+                        startAtLocal: '2099-05-01T21:00',
+                        endAtLocal: '2099-05-01T23:00',
+                    },
+                })),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(tryCreateWatchpartyChannelFromPayload)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledWith('watchparty-old');
+            expect((body.warnings as string[]).some((warning) => warning.includes('Wymagane ręczne sprzątanie'))).toBe(true);
+
+            const updated = postStore.get(existingPost.id);
+            expect(updated?.watchpartyChannelId).toBe('watchparty-new');
+            expect(updated?.watchpartyStatus).toBe('scheduled');
+            expect(updated?.watchpartyLastError).toContain('Nie udało się usunąć poprzedniego kanału watchparty po zapisaniu zmian.');
+            expect(updated?.lastError).toContain('Nie udało się usunąć poprzedniego kanału watchparty po zapisaniu zmian.');
+        });
+    });
+
+    it('rollbackuje nowy kanał watchparty gdy zapis edycji posta się nie powiedzie', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-watchparty-persist-failure',
+            payload: buildPayload({
+                watchpartyDraft: {
+                    enabled: true,
+                    channelName: 'watchparty existing',
+                    startAtLocal: '2099-05-01T20:00',
+                    endAtLocal: '2099-05-01T22:00',
+                },
+            }),
+            watchpartyStatus: 'scheduled',
+            watchpartyChannelId: 'watchparty-existing',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        vi.mocked(editChannelMessage).mockResolvedValue(undefined);
+        vi.mocked(tryCreateWatchpartyChannelFromPayload).mockResolvedValue({
+            status: 'scheduled',
+            channelId: 'watchparty-created-before-failure',
+            warnings: [],
+        });
+        vi.mocked(deleteWatchpartyChannel).mockResolvedValue(undefined);
+        vi.mocked(updateScheduledPost).mockResolvedValueOnce(null);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload({
+                    content: 'Edycja, która wywali się na persist',
+                    watchpartyDraft: {
+                        enabled: true,
+                        channelName: 'watchparty new after edit',
+                        startAtLocal: '2099-05-01T21:00',
+                        endAtLocal: '2099-05-01T23:00',
+                    },
+                })),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(404);
+            expect(body.error).toBe('Nie znaleziono wysłanego posta po zapisie.');
+            expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledWith('watchparty-created-before-failure');
+            expect(vi.mocked(deleteWatchpartyChannel)).not.toHaveBeenCalledWith('watchparty-existing');
+        });
+    });
+
+    it('rollbackuje nowy kanał watchparty gdy zapis edycji posta rzuci wyjątek', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-watchparty-persist-throw',
+            payload: buildPayload({
+                watchpartyDraft: {
+                    enabled: true,
+                    channelName: 'watchparty existing throw',
+                    startAtLocal: '2099-05-01T20:00',
+                    endAtLocal: '2099-05-01T22:00',
+                },
+            }),
+            watchpartyStatus: 'scheduled',
+            watchpartyChannelId: 'watchparty-existing-throw',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        vi.mocked(editChannelMessage).mockResolvedValue(undefined);
+        vi.mocked(tryCreateWatchpartyChannelFromPayload).mockResolvedValue({
+            status: 'scheduled',
+            channelId: 'watchparty-created-before-throw',
+            warnings: [],
+        });
+        vi.mocked(deleteWatchpartyChannel).mockResolvedValue(undefined);
+        vi.mocked(updateScheduledPost).mockRejectedValueOnce(new Error('persist exception'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload({
+                    content: 'Edycja, która rzuci wyjątek persistu',
+                    watchpartyDraft: {
+                        enabled: true,
+                        channelName: 'watchparty throw path',
+                        startAtLocal: '2099-05-01T21:00',
+                        endAtLocal: '2099-05-01T23:00',
+                    },
+                })),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(500);
+            expect(body.error).toBe('Nie udało się zaktualizować wysłanego posta.');
+            expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledWith('watchparty-created-before-throw');
+            expect(vi.mocked(deleteWatchpartyChannel)).not.toHaveBeenCalledWith('watchparty-existing-throw');
+        });
+    });
+
+    it('zwraca 502 z rollbackChannelId gdy rollback nowego kanału watchparty po błędzie zapisu się nie powiedzie', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-watchparty-persist-throw-rollback-failure',
+            payload: buildPayload({
+                watchpartyDraft: {
+                    enabled: true,
+                    channelName: 'watchparty existing rollback fail',
+                    startAtLocal: '2099-05-01T20:00',
+                    endAtLocal: '2099-05-01T22:00',
+                },
+            }),
+            watchpartyStatus: 'scheduled',
+            watchpartyChannelId: 'watchparty-existing-rollback-fail',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        vi.mocked(editChannelMessage).mockResolvedValue(undefined);
+        vi.mocked(tryCreateWatchpartyChannelFromPayload).mockResolvedValue({
+            status: 'scheduled',
+            channelId: 'watchparty-created-before-rollback-failure',
+            warnings: [],
+        });
+        vi.mocked(deleteWatchpartyChannel).mockRejectedValueOnce(new Error('rollback cleanup failed'));
+        vi.mocked(updateScheduledPost).mockRejectedValueOnce(new Error('persist exception'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload({
+                    content: 'Edycja, która wywali rollback',
+                    watchpartyDraft: {
+                        enabled: true,
+                        channelName: 'watchparty rollback fail',
+                        startAtLocal: '2099-05-01T21:00',
+                        endAtLocal: '2099-05-01T23:00',
+                    },
+                })),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(502);
+            expect(body.error).toBe('Nie udało się zapisać zmian i wycofać nowego kanału watchparty. Wymagane ręczne sprzątanie kanału.');
+            expect(body.rollbackChannelId).toBe('watchparty-created-before-rollback-failure');
+            expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledWith('watchparty-created-before-rollback-failure');
+            expect(vi.mocked(deleteWatchpartyChannel)).not.toHaveBeenCalledWith('watchparty-existing-rollback-fail');
+        });
+    });
+
+    it('utrzymuje 200 gdy dodatkowy zapis ostrzezenia cleanup po sukcesie rzuci wyjątek', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-watchparty-warning-persist-failure',
+            payload: buildPayload({
+                watchpartyDraft: {
+                    enabled: true,
+                    channelName: 'watchparty warning persist',
+                    startAtLocal: '2099-05-01T20:00',
+                    endAtLocal: '2099-05-01T22:00',
+                },
+            }),
+            watchpartyStatus: 'scheduled',
+            watchpartyChannelId: 'watchparty-old-warning-persist',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        vi.mocked(editChannelMessage).mockResolvedValue(undefined);
+        vi.mocked(tryCreateWatchpartyChannelFromPayload).mockResolvedValue({
+            status: 'scheduled',
+            channelId: 'watchparty-new-warning-persist',
+            warnings: [],
+        });
+        vi.mocked(deleteWatchpartyChannel).mockRejectedValueOnce(new Error('old delete failed after persist'));
+
+        const storeUpdateImpl = vi.mocked(updateScheduledPost).getMockImplementation();
+        vi.mocked(updateScheduledPost).mockImplementationOnce(async (id, updater) => {
+            if (!storeUpdateImpl) {
+                return null;
+            }
+
+            return storeUpdateImpl(id, updater);
+        });
+        vi.mocked(updateScheduledPost).mockRejectedValueOnce(new Error('warning persist failed'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(buildPayload({
+                    content: 'Edycja z warning persistence failure',
+                    watchpartyDraft: {
+                        enabled: true,
+                        channelName: 'watchparty new warning persist',
+                        startAtLocal: '2099-05-01T21:00',
+                        endAtLocal: '2099-05-01T23:00',
+                    },
+                })),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(Array.isArray(body.warnings)).toBe(true);
+            expect((body.warnings as string[]).some((warning) => warning.includes('Wymagane ręczne sprzątanie'))).toBe(true);
+            expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledWith('watchparty-old-warning-persist');
         });
     });
 
@@ -606,6 +894,55 @@ describe('scheduled routes - sent posts', () => {
         });
     });
 
+    it('usuwa kanał watchparty przy kasowaniu wysłanego posta', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-delete-watchparty',
+            watchpartyStatus: 'scheduled',
+            watchpartyChannelId: 'watchparty-123',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        vi.mocked(deleteWatchpartyChannel).mockResolvedValue(undefined);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'DELETE',
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledWith('watchparty-123');
+            expect(vi.mocked(unregisterWatchpartyLifecycle)).toHaveBeenCalledWith(existingPost.id);
+            expect(postStore.has(existingPost.id)).toBe(false);
+        });
+    });
+
+    it('nie usuwa wysłanego posta gdy cleanup kanału watchparty się nie powiedzie', async () => {
+        const existingPost = buildSentPost({
+            id: 'post-delete-watchparty-failure',
+            watchpartyStatus: 'scheduled',
+            watchpartyChannelId: 'watchparty-failed-123',
+        });
+        postStore.set(existingPost.id, clonePost(existingPost));
+
+        vi.mocked(deleteWatchpartyChannel).mockRejectedValue(new Error('discord failure'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled/sent/${existingPost.id}`, {
+                method: 'DELETE',
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(502);
+            expect(body.error).toBe('Nie udało się usunąć kanału watchparty powiązanego z tym postem. Spróbuj ponownie.');
+            expect(postStore.has(existingPost.id)).toBe(true);
+            expect(vi.mocked(unregisterWatchpartyLifecycle)).not.toHaveBeenCalledWith(existingPost.id);
+        });
+    });
+
     it('usuwa wysłany post z historii', async () => {
         const existingPost = buildSentPost({
             id: 'post-delete-sent',
@@ -622,6 +959,7 @@ describe('scheduled routes - sent posts', () => {
 
             expect(response.status).toBe(200);
             expect(body.success).toBe(true);
+            expect(vi.mocked(unregisterWatchpartyLifecycle)).toHaveBeenCalledWith(existingPost.id);
             expect(postStore.has(existingPost.id)).toBe(false);
         });
     });

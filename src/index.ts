@@ -4,6 +4,16 @@ import { pingCommand } from './commands/ping.js';
 import { sendImgCommand } from './commands/sendimg.js';
 import { ticketyConfigCommand } from './commands/ticketyconfig.js';
 import { dashboardLinkCommand } from './commands/dashboardlink.js';
+import { dailyCommand } from './commands/daily.js';
+import { streakDailyCommand } from './commands/streak-daily.js';
+import { dodajCoinsyCommand } from './commands/dodaj-coinsy.js';
+import { dodajXpCommand } from './commands/dodaj-xp.js';
+import { usunCoinsyCommand } from './commands/usun-coinsy.js';
+import { resetujLevelCommand } from './commands/resetuj-level.js';
+import { resetujCoinsyCommand } from './commands/resetuj-coinsy.js';
+import { leaderboardXpCommand } from './commands/leaderboard-xp.js';
+import { stankontaCommand } from './commands/stankonta.js';
+import { levelCommand } from './commands/level.js';
 import {
     handleAdminCloseReasonModalSubmit,
     handleAdminCloseTicketButton,
@@ -34,10 +44,14 @@ import {
 } from './tickets/constants.js';
 import { handleVoiceStateUpdate } from './voice-channels/flow.js';
 import { cleanupOrphanedTemporaryVoiceRecords } from './voice-channels/service.js';
+import { handleEconomyResetButton } from './economy/admin-reset-buttons.js';
+import { handleEconomyLeaderboardButton } from './economy/leaderboard-buttons.js';
+import { handleEconomyMessageCreate, startEconomyVoiceXpTicker } from './economy/runtime.js';
 // Załaduj zmienne środowiskowe z .env
 config();
 
 const BOT_HEARTBEAT_INTERVAL_MS = 60_000;
+let stopEconomyVoiceTicker: (() => void) | null = null;
 
 function isBotDevLogsEnabled(): boolean {
     const forceDisabled = process.env.BOT_DEV_LOGS === '0';
@@ -70,6 +84,7 @@ declare module 'discord.js' {
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
         GatewayIntentBits.GuildVoiceStates,
     ],
 });
@@ -80,6 +95,16 @@ client.commands.set(pingCommand.data.name, pingCommand);
 client.commands.set(sendImgCommand.data.name, sendImgCommand);
 client.commands.set(ticketyConfigCommand.data.name, ticketyConfigCommand);
 client.commands.set(dashboardLinkCommand.data.name, dashboardLinkCommand);
+client.commands.set(dailyCommand.data.name, dailyCommand);
+client.commands.set(streakDailyCommand.data.name, streakDailyCommand);
+client.commands.set(dodajCoinsyCommand.data.name, dodajCoinsyCommand);
+client.commands.set(dodajXpCommand.data.name, dodajXpCommand);
+client.commands.set(usunCoinsyCommand.data.name, usunCoinsyCommand);
+client.commands.set(resetujLevelCommand.data.name, resetujLevelCommand);
+client.commands.set(resetujCoinsyCommand.data.name, resetujCoinsyCommand);
+client.commands.set(leaderboardXpCommand.data.name, leaderboardXpCommand);
+client.commands.set(stankontaCommand.data.name, stankontaCommand);
+client.commands.set(levelCommand.data.name, levelCommand);
 
 // Event: Bot jest gotowy
 client.on('clientReady', () => {
@@ -98,6 +123,9 @@ client.on('clientReady', () => {
     void cleanupOrphanedTemporaryVoiceRecords(client).catch((error) => {
         console.error('❌  [BOT] Nie udało się posprzątać osieroconych rekordów kanałów voice:', error);
     });
+
+    stopEconomyVoiceTicker?.();
+    stopEconomyVoiceTicker = startEconomyVoiceXpTicker(client);
 
     console.log('──────────────────────────────────────');
 });
@@ -177,6 +205,14 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton()) {
         try {
+            if (await handleEconomyResetButton(interaction)) {
+                return;
+            }
+
+            if (await handleEconomyLeaderboardButton(interaction)) {
+                return;
+            }
+
             if (interaction.customId === TICKETS_OPEN_BUTTON_ID) {
                 await handleOpenTicketButton(interaction);
             } else if (interaction.customId.startsWith(`${TICKET_CLOSE_USER_DM_BUTTON_PREFIX}:`)) {
@@ -211,6 +247,14 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         await handleVoiceStateUpdate(oldState, newState);
     } catch (error) {
         console.error('❌  Błąd obsługi tymczasowych kanałów voice:', error);
+    }
+});
+
+client.on('messageCreate', async (message) => {
+    try {
+        await handleEconomyMessageCreate(message);
+    } catch (error) {
+        console.error('❌  Blad naliczania XP za wiadomosc:', error);
     }
 });
 
