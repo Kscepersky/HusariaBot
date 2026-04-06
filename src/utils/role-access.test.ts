@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
     ADMIN_ROLE_ID,
+    COMMUNITY_MANAGER_ROLE_ID,
+    DEV_ROLE_ID,
     MODERATOR_ROLE_ID,
     hasRequiredRoleIds,
+    hasSupportRoleIds,
     interactionHasSupportRole,
 } from './role-access.js';
 
@@ -13,6 +16,26 @@ describe('hasRequiredRoleIds', () => {
 
     it('zwraca true dla roli Moderator', () => {
         expect(hasRequiredRoleIds([MODERATOR_ROLE_ID])).toBe(true);
+    });
+
+    it('zwraca true dla roli Community Manager gdy jest skonfigurowana', () => {
+        if (!COMMUNITY_MANAGER_ROLE_ID) {
+            expect(hasRequiredRoleIds(['1234567890'])).toBe(false);
+            return;
+        }
+
+        expect(hasRequiredRoleIds([COMMUNITY_MANAGER_ROLE_ID])).toBe(true);
+        expect(hasSupportRoleIds([COMMUNITY_MANAGER_ROLE_ID])).toBe(true);
+    });
+
+    it('zwraca true dla roli Dev gdy jest skonfigurowana', () => {
+        if (!DEV_ROLE_ID) {
+            expect(hasRequiredRoleIds(['1234567890'])).toBe(false);
+            return;
+        }
+
+        expect(hasRequiredRoleIds([DEV_ROLE_ID])).toBe(true);
+        expect(hasSupportRoleIds([DEV_ROLE_ID])).toBe(false);
     });
 
     it('zwraca false dla innych ról', () => {

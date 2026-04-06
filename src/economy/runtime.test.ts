@@ -10,6 +10,7 @@ const baseConfig: EconomyConfig = {
     dailyStreakGraceHours: 48,
     dailyMessages: ['test'],
     levelingMode: 'progressive',
+    levelingCurve: 'default',
     levelingBaseXp: 100,
     levelingExponent: 1.5,
     xpTextPerMessage: 1,

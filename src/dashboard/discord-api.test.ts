@@ -228,3 +228,46 @@ describe('listGuildScheduledEvents', () => {
     nowSpy.mockRestore()
   })
 })
+
+describe('updateGuildMemberRoles', () => {
+  it('patches guild member with deduplicated role list', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    const fetchMock = vi.fn(async () => jsonResponse({}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { updateGuildMemberRoles } = await import('./discord-api.js')
+
+    await expect(updateGuildMemberRoles(
+      '123456789012345678',
+      '987654321098765432',
+      ['111111111111111111', '111111111111111111', 'bad-role-id'],
+    )).resolves.toBe('updated')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://discord.com/api/v10/guilds/123456789012345678/members/987654321098765432',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({
+          Authorization: 'Bot test-token',
+          'Content-Type': 'application/json',
+        }),
+        body: JSON.stringify({ roles: ['111111111111111111'] }),
+      }),
+    )
+  })
+
+  it('returns without error when member is missing (404)', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({}, 404)))
+
+    const { updateGuildMemberRoles } = await import('./discord-api.js')
+    await expect(updateGuildMemberRoles(
+      '123456789012345678',
+      '987654321098765432',
+      ['111111111111111111'],
+    )).resolves.toBe('not_found')
+  })
+})

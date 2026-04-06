@@ -14,8 +14,8 @@ import {
     TextInputStyle,
 } from 'discord.js';
 import {
-    ADMIN_ROLE_ID,
-    MODERATOR_ROLE_ID,
+    DEV_ROLE_ID,
+    SUPPORT_ROLE_IDS,
     SUPPORT_ACCESS_DENIED_MESSAGE,
     ensureSupportRole,
 } from '../utils/role-access.js';
@@ -237,25 +237,28 @@ export async function handleOpenTicketButton(interaction: ButtonInteraction): Pr
                     PermissionFlagsBits.EmbedLinks,
                 ],
             },
-            {
-                id: ADMIN_ROLE_ID,
+            ...SUPPORT_ROLE_IDS.map((roleId) => ({
+                id: roleId,
                 allow: [
                     PermissionFlagsBits.ViewChannel,
                     PermissionFlagsBits.SendMessages,
                     PermissionFlagsBits.ReadMessageHistory,
                     PermissionFlagsBits.ManageMessages,
                 ],
-            },
-            {
-                id: MODERATOR_ROLE_ID,
-                allow: [
-                    PermissionFlagsBits.ViewChannel,
-                    PermissionFlagsBits.SendMessages,
-                    PermissionFlagsBits.ReadMessageHistory,
-                    PermissionFlagsBits.ManageMessages,
-                ],
-            },
+            })),
         ];
+
+        if (DEV_ROLE_ID && !SUPPORT_ROLE_IDS.includes(DEV_ROLE_ID)) {
+            permissionOverwrites.push({
+                id: DEV_ROLE_ID,
+                allow: [
+                    PermissionFlagsBits.ViewChannel,
+                    PermissionFlagsBits.SendMessages,
+                    PermissionFlagsBits.ReadMessageHistory,
+                    PermissionFlagsBits.ManageMessages,
+                ],
+            });
+        }
 
         const botMemberId = interaction.guild!.members.me?.id;
         if (botMemberId) {
@@ -288,13 +291,15 @@ export async function handleOpenTicketButton(interaction: ButtonInteraction): Pr
 
         const ticketEmbed = new EmbedBuilder()
             .setColor(HusariaColors.RED)
-            .setDescription(
-                `Witaj, **${interaction.user.username}**. Opisz swój problem, niedługo skontaktuje się z tobą zespół administracyjny.\n\n<@&${ADMIN_ROLE_ID}> <@&${MODERATOR_ROLE_ID}>`,
-            );
+            .setDescription((() => {
+                const supportMentions = SUPPORT_ROLE_IDS.map((roleId) => `<@&${roleId}>`).join(' ');
+                const mentionSuffix = supportMentions.length > 0 ? `\n\n${supportMentions}` : '';
+                return `Witaj, **${interaction.user.username}**. Opisz swój problem, niedługo skontaktuje się z tobą zespół administracyjny.${mentionSuffix}`;
+            })());
 
         await createdChannel.send({
             embeds: [ticketEmbed],
-            allowedMentions: { roles: [ADMIN_ROLE_ID, MODERATOR_ROLE_ID] },
+            allowedMentions: { roles: SUPPORT_ROLE_IDS },
             components: [
                 new ActionRowBuilder<ButtonBuilder>().addComponents(
                     new ButtonBuilder()

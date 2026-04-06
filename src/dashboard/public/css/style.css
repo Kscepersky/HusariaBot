@@ -1154,6 +1154,20 @@ input[name="colorName"] { display: none }
   margin-top: 0;
 }
 
+#economy-level-roles-list {
+  margin-top: 12px;
+}
+
+.economy-access-notice {
+  margin-bottom: 16px;
+}
+
+.section-divider {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 20px 0 16px;
+}
+
 .image-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));

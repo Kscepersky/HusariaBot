@@ -17,20 +17,45 @@ function requireEnv(name: string): string {
     return value;
 }
 
+function readOptionalEnv(name: string): string | null {
+    const value = process.env[name]?.trim();
+    return value && value.length > 0 ? value : null;
+}
+
+function toUniqueRoleIds(roleIds: Array<string | null | undefined>): string[] {
+    return [...new Set(roleIds.filter((roleId): roleId is string => typeof roleId === 'string' && roleId.length > 0))];
+}
+
 export const ADMIN_ROLE_ID = requireEnv('ADMIN_ROLE_ID');
 export const MODERATOR_ROLE_ID = requireEnv('MODERATOR_ROLE_ID');
-export const SUPPORT_ROLE_IDS = [ADMIN_ROLE_ID, MODERATOR_ROLE_ID] as const;
+export const COMMUNITY_MANAGER_ROLE_ID = readOptionalEnv('COMMUNITY_MANAGER_ROLE_ID');
+export const DEV_ROLE_ID = readOptionalEnv('DEV_ROLE_ID');
+
+export const SUPPORT_ROLE_IDS = toUniqueRoleIds([
+    ADMIN_ROLE_ID,
+    MODERATOR_ROLE_ID,
+    COMMUNITY_MANAGER_ROLE_ID,
+]);
+
+export const SUPPORT_AND_DEV_ROLE_IDS = toUniqueRoleIds([
+    ...SUPPORT_ROLE_IDS,
+    DEV_ROLE_ID,
+]);
 
 export const SUPPORT_ACCESS_DENIED_MESSAGE =
-    '🚫 Ta funkcja jest dostępna tylko dla ról **Zarząd** i **Moderator**.';
+    '🚫 Ta funkcja jest dostępna tylko dla ról **Zarząd**, **Moderator**, **Community Manager** i **Dev**.';
 
 export type SecuredInteraction =
     | ChatInputCommandInteraction
     | ModalSubmitInteraction
     | ButtonInteraction;
 
-export function hasRequiredRoleIds(roleIds: readonly string[]): boolean {
+export function hasSupportRoleIds(roleIds: readonly string[]): boolean {
     return SUPPORT_ROLE_IDS.some((requiredRoleId) => roleIds.includes(requiredRoleId));
+}
+
+export function hasRequiredRoleIds(roleIds: readonly string[]): boolean {
+    return SUPPORT_AND_DEV_ROLE_IDS.some((requiredRoleId) => roleIds.includes(requiredRoleId));
 }
 
 function extractRoleIds(member: unknown): string[] {
@@ -54,11 +79,11 @@ function extractRoleIds(member: unknown): string[] {
         };
 
         if (typeof roleManager.has === 'function') {
-            return SUPPORT_ROLE_IDS.filter((roleId) => roleManager.has?.(roleId));
+            return SUPPORT_AND_DEV_ROLE_IDS.filter((roleId) => roleManager.has?.(roleId));
         }
 
         if (roleManager.cache && typeof roleManager.cache.has === 'function') {
-            return SUPPORT_ROLE_IDS.filter((roleId) => roleManager.cache?.has?.(roleId));
+            return SUPPORT_AND_DEV_ROLE_IDS.filter((roleId) => roleManager.cache?.has?.(roleId));
         }
 
         if (roleManager.cache && typeof roleManager.cache.keys === 'function') {

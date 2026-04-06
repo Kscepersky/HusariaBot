@@ -48,6 +48,7 @@ export const economyConfigSchema = z.object({
     dailyStreakGraceHours: z.number().int().min(24).max(168),
     dailyMessages: z.array(z.string().trim().min(1).max(500)).min(1).max(50),
     levelingMode: z.union([z.literal('progressive'), z.literal('linear')]),
+    levelingCurve: z.union([z.literal('default'), z.literal('formula_v2')]),
     levelingBaseXp: z.number().int().min(1).max(1_000_000),
     levelingExponent: z.number().min(1).max(8),
     xpTextPerMessage: z.number().int().min(0).max(10_000),
@@ -65,6 +66,36 @@ export const economyConfigSchema = z.object({
     message: 'dailyMaxCoins musi byc wieksze lub rowne dailyMinCoins.',
     path: ['dailyMaxCoins'],
 });
+
+const economyUserMutationBaseSchema = z.object({
+    targetUserId: z.string().regex(/^\d{17,20}$/),
+});
+
+export const economyUserMutationSchema = z.discriminatedUnion('operation', [
+    economyUserMutationBaseSchema.extend({
+        operation: z.literal('add_coins'),
+        amount: z.number().int().min(1).max(1_000_000),
+    }).strip(),
+    economyUserMutationBaseSchema.extend({
+        operation: z.literal('add_xp'),
+        amount: z.number().int().min(1).max(1_000_000),
+    }).strip(),
+    economyUserMutationBaseSchema.extend({
+        operation: z.literal('add_levels'),
+        amount: z.number().int().min(1).max(1_000),
+    }).strip(),
+]);
+
+export const economyCsvImportSchema = z.object({
+    csvContent: z.string().min(1).max(2_000_000),
+}).strip();
+
+export const economyLevelRoleMappingsSchema = z.object({
+    mappings: z.array(z.object({
+        roleId: z.string().regex(/^\d{17,20}$/),
+        minLevel: z.number().int().min(1).max(10_000),
+    }).strip()).max(250),
+}).strip();
 
 export const sendImageSchema = z.object({
     filename: z.string().min(1).max(255),

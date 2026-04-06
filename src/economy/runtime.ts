@@ -1,7 +1,15 @@
-import type { Client, GuildMember, Message, VoiceBasedChannel } from 'discord.js';
+import type { Client, Guild, GuildMember, Message, VoiceBasedChannel } from 'discord.js';
 import { listScheduledPosts } from '../dashboard/scheduler/store.js';
-import { awardMessageXp, awardVoiceXp, awardWatchpartyVoiceActivity, getEconomyConfig } from './repository.js';
-import type { EconomyConfig } from './types.js';
+import {
+    awardMessageXp,
+    awardVoiceXp,
+    awardWatchpartyVoiceActivity,
+    getEconomyConfig,
+    getEconomyLevelRoleMappings,
+    incrementMessageCount,
+    incrementVoiceMinutes,
+} from './repository.js';
+import type { EconomyConfig, EconomyLevelRoleMapping, EconomyXpAwardResult } from './types.js';
 
 const VOICE_TICK_INTERVAL_MS = 60_000;
 const CONFIG_CACHE_TTL_MS = 60_000;
@@ -35,6 +43,26 @@ function resolveMessageCooldownKey(guildId: string, userId: string): string {
     return `${guildId}:${userId}`;
 }
 
+function resolveLevelUpAnnouncementChannelId(): string | null {
+    const channelId = process.env.LEVEL_UP_ANNOUNCE_CHANNEL_ID?.trim();
+    return channelId && channelId.length > 0 ? channelId : null;
+}
+
+function resolveProtectedStaffRoleIds(): Set<string> {
+    const roleIds = [
+        process.env.ADMIN_ROLE_ID,
+        process.env.MODERATOR_ROLE_ID,
+        process.env.COMMUNITY_MANAGER_ROLE_ID,
+        process.env.DEV_ROLE_ID,
+    ];
+
+    return new Set(
+        roleIds
+            .map((roleId) => String(roleId ?? '').trim())
+            .filter((roleId) => /^\d{17,20}$/.test(roleId)),
+    );
+}
+
 async function getCachedEconomyConfig(nowTimestamp: number): Promise<EconomyConfig> {
     if (cachedConfig && (nowTimestamp - cachedConfigAt) <= CONFIG_CACHE_TTL_MS) {
         return cachedConfig;
@@ -64,6 +92,128 @@ function isVoiceChannelMemberEligible(member: GuildMember, config: EconomyConfig
     }
 
     return true;
+}
+
+async function applyLevelRoleForMember(
+    guild: Guild,
+    userId: string,
+    level: number,
+    mappings: EconomyLevelRoleMapping[],
+): Promise<void> {
+    if (mappings.length === 0) {
+        return;
+    }
+
+    let member: GuildMember | null = null;
+    try {
+        member = await guild.members.fetch(userId);
+    } catch (error) {
+        console.warn('Nie udalo sie pobrac czlonka do mapowania roli levelowej:', {
+            guildId: guild.id,
+            userId,
+            error,
+        });
+        return;
+    }
+
+    const mappedRoleIds = new Set(mappings.map((mapping) => mapping.roleId));
+    const matchingMappings = mappings
+        .filter((mapping) => mapping.minLevel <= level)
+        .sort((left, right) => right.minLevel - left.minLevel || left.roleId.localeCompare(right.roleId));
+
+    const targetRoleId = matchingMappings[0]?.roleId ?? null;
+    const rolesToRemove = member.roles.cache
+        .filter((role) => mappedRoleIds.has(role.id) && role.id !== targetRoleId)
+        .map((role) => role.id);
+
+    if (rolesToRemove.length > 0) {
+        try {
+            await member.roles.remove(rolesToRemove, 'Economy level role remap');
+        } catch (error) {
+            console.warn('Nie udalo sie usunac starych ról levelowych:', {
+                guildId: guild.id,
+                userId,
+                rolesToRemove,
+                error,
+            });
+        }
+    }
+
+    if (!targetRoleId || member.roles.cache.has(targetRoleId)) {
+        return;
+    }
+
+    try {
+        await member.roles.add(targetRoleId, 'Economy level reward');
+    } catch (error) {
+        console.warn('Nie udalo sie nadac roli levelowej:', {
+            guildId: guild.id,
+            userId,
+            roleId: targetRoleId,
+            error,
+        });
+    }
+}
+
+async function announceNaturalLevelUp(
+    guild: Guild,
+    awardResult: EconomyXpAwardResult,
+): Promise<void> {
+    const channelId = resolveLevelUpAnnouncementChannelId();
+    if (!channelId || awardResult.levelsGained <= 0) {
+        return;
+    }
+
+    try {
+        const channel = await guild.channels.fetch(channelId);
+        if (!channel?.isTextBased()) {
+            return;
+        }
+
+        await channel.send({
+            content: `<@${awardResult.userId}> wbija level **${awardResult.currentLevel}**!`,
+        });
+    } catch (error) {
+        console.warn('Nie udalo sie wyslac ogloszenia level-up:', {
+            guildId: guild.id,
+            userId: awardResult.userId,
+            channelId,
+            error,
+        });
+    }
+}
+
+async function applyNaturalLevelUpSideEffects(
+    guild: Guild,
+    awardResult: EconomyXpAwardResult,
+    mappingsOverride?: EconomyLevelRoleMapping[],
+): Promise<void> {
+    if (!awardResult || !Number.isFinite(Number(awardResult.levelsGained)) || awardResult.levelsGained <= 0) {
+        return;
+    }
+
+    try {
+        const mappings = mappingsOverride ?? await getEconomyLevelRoleMappings(guild.id);
+        const protectedRoleIds = resolveProtectedStaffRoleIds();
+        const safeMappings = mappings.filter((mapping) => !protectedRoleIds.has(mapping.roleId));
+
+        if (safeMappings.length === 0) {
+            await announceNaturalLevelUp(guild, awardResult);
+            return;
+        }
+
+        await Promise.all([
+            applyLevelRoleForMember(guild, awardResult.userId, awardResult.currentLevel, safeMappings),
+            announceNaturalLevelUp(guild, awardResult),
+        ]);
+    } catch (error) {
+        console.warn('Nie udalo sie wykonac side-effectow level-up:', {
+            guildId: guild.id,
+            userId: awardResult.userId,
+            currentLevel: awardResult.currentLevel,
+            error,
+        });
+    }
 }
 
 async function getOpenWatchpartyChannelIds(): Promise<Set<string>> {
@@ -112,6 +262,13 @@ export async function handleEconomyMessageCreate(message: Message): Promise<void
 
     const nowTimestamp = Date.now();
     const config = await getCachedEconomyConfig(nowTimestamp);
+
+    try {
+        await incrementMessageCount(message.guildId, message.author.id, nowTimestamp);
+    } catch (error) {
+        console.error('❌  Nie udalo sie zwiekszyc licznika wiadomosci:', error);
+    }
+
     const cooldownKey = resolveMessageCooldownKey(message.guildId, message.author.id);
     const previousTimestamp = messageCooldownByUser.get(cooldownKey) ?? 0;
     const cooldownWindowMs = config.xpTextCooldownSeconds * 1000;
@@ -125,7 +282,8 @@ export async function handleEconomyMessageCreate(message: Message): Promise<void
     messageCooldownByUser.set(cooldownKey, nowTimestamp);
 
     try {
-        await awardMessageXp(message.guildId, message.author.id, nowTimestamp);
+        const awardResult = await awardMessageXp(message.guildId, message.author.id, nowTimestamp);
+        await applyNaturalLevelUpSideEffects(message.guild, awardResult);
     } catch (error) {
         messageCooldownByUser.delete(cooldownKey);
         console.error('❌  Nie udalo sie naliczyc XP za wiadomosc:', error);
@@ -136,6 +294,18 @@ async function processVoiceChannelXpTick(client: Client): Promise<void> {
     const nowTimestamp = Date.now();
     const config = await getCachedEconomyConfig(nowTimestamp);
     const openWatchpartyChannelIds = await getOpenWatchpartyChannelIds();
+    const levelRoleMappingsByGuild = new Map<string, Promise<EconomyLevelRoleMapping[]>>();
+
+    const getLevelRoleMappingsForGuild = (guildId: string): Promise<EconomyLevelRoleMapping[]> => {
+        const existingPromise = levelRoleMappingsByGuild.get(guildId);
+        if (existingPromise) {
+            return existingPromise;
+        }
+
+        const mappingPromise = getEconomyLevelRoleMappings(guildId);
+        levelRoleMappingsByGuild.set(guildId, mappingPromise);
+        return mappingPromise;
+    };
 
     for (const guild of client.guilds.cache.values()) {
         const afkChannelId = guild.afkChannelId;
@@ -151,6 +321,15 @@ async function processVoiceChannelXpTick(client: Client): Promise<void> {
             }
 
             const isOpenWatchpartyChannel = openWatchpartyChannelIds.has(voiceChannel.id);
+
+            const activeMembers = voiceChannel.members.filter((member) => !member.user.bot);
+            await Promise.all(activeMembers.map(async (member) => {
+                try {
+                    await incrementVoiceMinutes(guild.id, member.id, 1, nowTimestamp);
+                } catch (error) {
+                    console.error(`❌  Nie udalo sie zwiekszyc liczby minut VC dla ${member.id}:`, error);
+                }
+            }));
 
             const eligibleMembers = voiceChannel.members.filter((member) => {
                 return isVoiceChannelMemberEligible(member, config, afkChannelId);
@@ -175,10 +354,15 @@ async function processVoiceChannelXpTick(client: Client): Promise<void> {
                 }
 
                 try {
-                    if (isOpenWatchpartyChannel) {
-                        await awardWatchpartyVoiceActivity(guild.id, member.id, nowTimestamp, config);
-                    } else {
-                        await awardVoiceXp(guild.id, member.id, nowTimestamp);
+                    const awardResult = isOpenWatchpartyChannel
+                        ? await awardWatchpartyVoiceActivity(guild.id, member.id, nowTimestamp, config)
+                        : await awardVoiceXp(guild.id, member.id, nowTimestamp);
+
+                    try {
+                        const levelRoleMappings = await getLevelRoleMappingsForGuild(guild.id);
+                        await applyNaturalLevelUpSideEffects(guild, awardResult, levelRoleMappings);
+                    } catch (sideEffectError) {
+                        console.warn(`⚠️  Nie udalo sie wykonac side-effectow level-up VC dla ${member.id}:`, sideEffectError);
                     }
                 } catch (error) {
                     console.error(`❌  Nie udalo sie naliczyc XP VC dla ${member.id}:`, error);

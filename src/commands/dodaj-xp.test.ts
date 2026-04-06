@@ -86,7 +86,8 @@ describe('dodajXpCommand', () => {
 
             const state = await getEconomyUserState('guild-1', 'user-1', Date.now());
             expect(state.xp).toBe(100);
-            expect(state.level).toBe(1);
+            expect(state.level).toBe(2);
         });
     });
 });
+ 

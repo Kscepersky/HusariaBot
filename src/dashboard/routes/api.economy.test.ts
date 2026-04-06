@@ -32,8 +32,16 @@ vi.mock('../middleware/require-auth.js', () => ({
 }));
 
 vi.mock('../../economy/repository.js', () => ({
+    EconomyCsvImportValidationError: class EconomyCsvImportValidationError extends Error {},
+    EconomyInputValidationError: class EconomyInputValidationError extends Error {},
+    addCoinsByAdmin: vi.fn(),
+    addLevelsByAdmin: vi.fn(),
+    addXpByAdmin: vi.fn(),
     getEconomyConfig: vi.fn(),
     getEconomyLeaderboardPage: vi.fn(),
+    getEconomyLevelRoleMappings: vi.fn(),
+    importEconomyCsvSnapshot: vi.fn(),
+    replaceEconomyLevelRoleMappings: vi.fn(),
     updateEconomyConfig: vi.fn(),
     resetEconomyUsers: vi.fn(),
 }));
@@ -45,6 +53,8 @@ vi.mock('../discord-api.js', () => ({
     getGuildRoles: vi.fn(),
     getGuildEmojis: vi.fn(),
     getGuildMember: vi.fn(),
+    updateGuildMemberRoles: vi.fn(),
+    hasDevRole: vi.fn(() => true),
     hasRequiredRole: vi.fn(() => true),
     listGuildScheduledEvents: vi.fn(),
     searchGuildMembers: vi.fn(),
@@ -88,12 +98,18 @@ vi.mock('../scheduler/store.js', () => ({
 }));
 
 import {
+    addCoinsByAdmin,
+    addLevelsByAdmin,
+    addXpByAdmin,
     getEconomyConfig,
     getEconomyLeaderboardPage,
+    getEconomyLevelRoleMappings,
+    importEconomyCsvSnapshot,
+    replaceEconomyLevelRoleMappings,
     resetEconomyUsers,
     updateEconomyConfig,
 } from '../../economy/repository.js';
-import { getGuildMember, hasRequiredRole } from '../discord-api.js';
+import { getGuildMember, hasDevRole, hasRequiredRole, updateGuildMemberRoles } from '../discord-api.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
 import { publishDashboardPost } from '../publish-flow.js';
 import { insertScheduledPost, updateScheduledPost } from '../scheduler/store.js';
@@ -109,6 +125,7 @@ function buildConfig(overrides: Partial<EconomyConfig> = {}): EconomyConfig {
         dailyStreakGraceHours: 48,
         dailyMessages: ['{user} odbiera dzienne cebuliony i zgarnia {coins} monet!'],
         levelingMode: 'progressive',
+        levelingCurve: 'default',
         levelingBaseXp: 100,
         levelingExponent: 1.5,
         xpTextPerMessage: 1,
@@ -199,7 +216,12 @@ describe('api economy settings routes', () => {
     beforeEach(() => {
         vi.resetAllMocks();
         process.env.GUILD_ID = '123456789012345678';
+        process.env.ADMIN_ROLE_ID = '910000000000000001';
+        process.env.MODERATOR_ROLE_ID = '910000000000000002';
+        process.env.COMMUNITY_MANAGER_ROLE_ID = '910000000000000003';
+        process.env.DEV_ROLE_ID = '910000000000000004';
         vi.mocked(getGuildMember).mockResolvedValue({ roles: ['admin-role'] } as any);
+        vi.mocked(hasDevRole).mockReturnValue(true);
         vi.mocked(hasRequiredRole).mockReturnValue(true);
     });
 
@@ -297,10 +319,265 @@ describe('api economy settings routes', () => {
         });
     });
 
+    it('dodaje coinsy uzytkownikowi przez endpoint recznej mutacji', async () => {
+        vi.mocked(addCoinsByAdmin).mockResolvedValue({
+            guildId: '123456789012345678',
+            userId: '999999999999999999',
+            operation: 'add_coins',
+            amount: 1500,
+            previousCoins: 100,
+            currentCoins: 1600,
+            previousXp: 500,
+            currentXp: 500,
+            previousLevel: 3,
+            currentLevel: 3,
+            createdAt: Date.now(),
+        });
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/user-mutation`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '999999999999999999',
+                    operation: 'add_coins',
+                    amount: 1500,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(addCoinsByAdmin)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(addCoinsByAdmin)).toHaveBeenCalledWith(expect.objectContaining({
+                guildId: '123456789012345678',
+                targetUserId: '999999999999999999',
+                adminUserId: 'user-1',
+                amount: 1500,
+            }));
+            expect(vi.mocked(addXpByAdmin)).not.toHaveBeenCalled();
+            expect(vi.mocked(addLevelsByAdmin)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('dodaje levele uzytkownikowi przez endpoint recznej mutacji', async () => {
+        vi.mocked(addLevelsByAdmin).mockResolvedValue({
+            guildId: '123456789012345678',
+            userId: '777777777777777777',
+            operation: 'add_levels',
+            amount: 3,
+            previousCoins: 100,
+            currentCoins: 220,
+            previousXp: 500,
+            currentXp: 920,
+            previousLevel: 4,
+            currentLevel: 7,
+            createdAt: Date.now(),
+        });
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/user-mutation`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '777777777777777777',
+                    operation: 'add_levels',
+                    amount: 3,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(addLevelsByAdmin)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(addLevelsByAdmin)).toHaveBeenCalledWith(expect.objectContaining({
+                guildId: '123456789012345678',
+                targetUserId: '777777777777777777',
+                adminUserId: 'user-1',
+                amount: 3,
+            }));
+            expect(vi.mocked(addCoinsByAdmin)).not.toHaveBeenCalled();
+            expect(vi.mocked(addXpByAdmin)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('dodaje XP uzytkownikowi przez endpoint recznej mutacji', async () => {
+        vi.mocked(addXpByAdmin).mockResolvedValue({
+            guildId: '123456789012345678',
+            userId: '888888888888888888',
+            operation: 'add_xp',
+            amount: 2500,
+            previousCoins: 80,
+            currentCoins: 120,
+            previousXp: 900,
+            currentXp: 3400,
+            previousLevel: 4,
+            currentLevel: 6,
+            createdAt: Date.now(),
+        });
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/user-mutation`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '888888888888888888',
+                    operation: 'add_xp',
+                    amount: 2500,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(addXpByAdmin)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(addXpByAdmin)).toHaveBeenCalledWith(expect.objectContaining({
+                guildId: '123456789012345678',
+                targetUserId: '888888888888888888',
+                adminUserId: 'user-1',
+                amount: 2500,
+            }));
+            expect(vi.mocked(addCoinsByAdmin)).not.toHaveBeenCalled();
+            expect(vi.mocked(addLevelsByAdmin)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('odrzuca add_levels powyzej limitu', async () => {
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/user-mutation`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '777777777777777777',
+                    operation: 'add_levels',
+                    amount: 1001,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(typeof body.error).toBe('string');
+            expect(vi.mocked(addLevelsByAdmin)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('odrzuca nieprawidlowy payload recznej mutacji ekonomii', async () => {
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/user-mutation`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: 'not-a-user-id',
+                    operation: 'add_coins',
+                    amount: 0,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(typeof body.error).toBe('string');
+            expect(vi.mocked(addCoinsByAdmin)).not.toHaveBeenCalled();
+            expect(vi.mocked(addXpByAdmin)).not.toHaveBeenCalled();
+            expect(vi.mocked(addLevelsByAdmin)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('zwraca 403 dla recznej mutacji gdy uzytkownik utracil role', async () => {
+        vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
+        vi.mocked(hasDevRole).mockReturnValue(false);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/user-mutation`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '999999999999999999',
+                    operation: 'add_coins',
+                    amount: 100,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(403);
+            expect(body.error).toBe('Brak uprawnień do wykonania tej operacji.');
+            expect(vi.mocked(addCoinsByAdmin)).not.toHaveBeenCalled();
+            expect(vi.mocked(addXpByAdmin)).not.toHaveBeenCalled();
+            expect(vi.mocked(addLevelsByAdmin)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('zwraca blad 500 przy braku GUILD_ID dla recznej mutacji', async () => {
+        delete process.env.GUILD_ID;
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/user-mutation`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '999999999999999999',
+                    operation: 'add_coins',
+                    amount: 100,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(500);
+            expect(body.error).toBe('Brakuje GUILD_ID.');
+            expect(vi.mocked(addCoinsByAdmin)).not.toHaveBeenCalled();
+            expect(vi.mocked(addXpByAdmin)).not.toHaveBeenCalled();
+            expect(vi.mocked(addLevelsByAdmin)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('zwraca 500 przy bledzie zapisu recznej mutacji', async () => {
+        vi.mocked(addCoinsByAdmin).mockRejectedValue(new Error('mutation failed'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/user-mutation`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '999999999999999999',
+                    operation: 'add_coins',
+                    amount: 100,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(500);
+            expect(body.error).toBe('Nie udało się wykonać ręcznej mutacji użytkownika.');
+            expect(vi.mocked(addCoinsByAdmin)).toHaveBeenCalledTimes(1);
+        });
+    });
+
     it('zwraca 403 dla aktualizacji ekonomii gdy uzytkownik utracil role', async () => {
         const payload = buildConfig();
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
-        vi.mocked(hasRequiredRole).mockReturnValue(false);
+        vi.mocked(hasDevRole).mockReturnValue(false);
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/settings`, {
@@ -388,9 +665,232 @@ describe('api economy settings routes', () => {
         });
     });
 
+    it('zwraca mapowania rol levelowych', async () => {
+        vi.mocked(getEconomyLevelRoleMappings).mockResolvedValue([
+            {
+                guildId: '123456789012345678',
+                roleId: '111111111111111111',
+                minLevel: 5,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+            },
+        ] as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/level-roles`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(Array.isArray(body.mappings)).toBe(true);
+            expect(vi.mocked(getEconomyLevelRoleMappings)).toHaveBeenCalledWith('123456789012345678');
+        });
+    });
+
+    it('zapisuje mapowania rol levelowych', async () => {
+        vi.mocked(replaceEconomyLevelRoleMappings).mockResolvedValue([
+            {
+                guildId: '123456789012345678',
+                roleId: '111111111111111111',
+                minLevel: 10,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+            },
+        ] as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/level-roles`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    mappings: [
+                        {
+                            roleId: '111111111111111111',
+                            minLevel: 10,
+                        },
+                    ],
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(replaceEconomyLevelRoleMappings)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(replaceEconomyLevelRoleMappings)).toHaveBeenCalledWith(
+                '123456789012345678',
+                [{ roleId: '111111111111111111', minLevel: 10 }],
+                expect.any(Number),
+            );
+        });
+    });
+
+    it('odrzuca mapowanie levelowe dla roli staff', async () => {
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/level-roles`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    mappings: [
+                        {
+                            roleId: process.env.ADMIN_ROLE_ID,
+                            minLevel: 10,
+                        },
+                    ],
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(body.error).toBe('Mapowania leveli nie moga zawierac ról staff (Admin, Moderator, Community Manager, Dev).');
+            expect(vi.mocked(replaceEconomyLevelRoleMappings)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('importuje snapshot CSV ekonomii', async () => {
+        vi.mocked(importEconomyCsvSnapshot).mockResolvedValue({
+            importedRows: 2,
+            insertedRows: 1,
+            updatedRows: 1,
+        });
+        vi.mocked(getEconomyLevelRoleMappings).mockResolvedValue([
+            {
+                guildId: '123456789012345678',
+                roleId: '111111111111111111',
+                minLevel: 1,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+            },
+            {
+                guildId: '123456789012345678',
+                roleId: '222222222222222222',
+                minLevel: 2,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+            },
+        ] as any);
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return { roles: ['admin-role'] } as any;
+            }
+
+            if (userId === '123456789012345678') {
+                return { roles: ['333333333333333333'] } as any;
+            }
+
+            if (userId === '987654321098765432') {
+                return { roles: ['111111111111111111'] } as any;
+            }
+
+            return null;
+        });
+        vi.mocked(updateGuildMemberRoles).mockResolvedValue('updated' as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/import-csv`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    csvContent: '123456789012345678,1,20,5,3\n987654321098765432,2,10,4,1',
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(body.result).toEqual({
+                importedRows: 2,
+                insertedRows: 1,
+                updatedRows: 1,
+            });
+            expect(body.roleSync).toEqual({
+                attemptedUsers: 2,
+                updatedUsers: 2,
+                skippedUsers: 0,
+                failedUsers: 0,
+            });
+            expect(vi.mocked(importEconomyCsvSnapshot)).toHaveBeenCalledWith({
+                guildId: '123456789012345678',
+                csvContent: '123456789012345678,1,20,5,3\n987654321098765432,2,10,4,1',
+                nowTimestamp: expect.any(Number),
+            });
+            expect(vi.mocked(updateGuildMemberRoles)).toHaveBeenCalledTimes(2);
+            expect(vi.mocked(updateGuildMemberRoles)).toHaveBeenNthCalledWith(
+                1,
+                '123456789012345678',
+                '123456789012345678',
+                ['333333333333333333', '111111111111111111'],
+            );
+            expect(vi.mocked(updateGuildMemberRoles)).toHaveBeenNthCalledWith(
+                2,
+                '123456789012345678',
+                '987654321098765432',
+                ['222222222222222222'],
+            );
+        });
+    });
+
+    it('liczy roleSync jako skipped gdy member zniknie przy patchowaniu rol (404)', async () => {
+        vi.mocked(importEconomyCsvSnapshot).mockResolvedValue({
+            importedRows: 1,
+            insertedRows: 1,
+            updatedRows: 0,
+        });
+        vi.mocked(getEconomyLevelRoleMappings).mockResolvedValue([
+            {
+                guildId: '123456789012345678',
+                roleId: '999999999999999999',
+                minLevel: 1,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+            },
+        ] as any);
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return { roles: ['admin-role'] } as any;
+            }
+
+            if (userId === '123456789012345678') {
+                return { roles: [] } as any;
+            }
+
+            return null;
+        });
+        vi.mocked(updateGuildMemberRoles).mockResolvedValue('not_found' as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/import-csv`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    csvContent: '123456789012345678,1,20,5,3',
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.roleSync).toEqual({
+                attemptedUsers: 1,
+                updatedUsers: 0,
+                skippedUsers: 1,
+                failedUsers: 0,
+            });
+        });
+    });
+
     it('zwraca 403 gdy uzytkownik utracil role dashboardu', async () => {
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
-        vi.mocked(hasRequiredRole).mockReturnValue(false);
+        vi.mocked(hasDevRole).mockReturnValue(false);
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/reset-users`, {
@@ -604,6 +1104,48 @@ describe('api economy settings routes', () => {
             expect(response.status).toBe(502);
             expect(body.error).toBe('Nie udało się zweryfikować uprawnień użytkownika.');
             expect(vi.mocked(getEconomyLeaderboardPage)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('blokuje ustawienia ekonomii dla support role bez roli Dev', async () => {
+        vi.mocked(hasRequiredRole).mockReturnValue(true);
+        vi.mocked(hasDevRole).mockReturnValue(false);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/settings`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(403);
+            expect(body.error).toBe('Brak uprawnień do wykonania tej operacji.');
+            expect(vi.mocked(getEconomyConfig)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('pozwala support role pobrac leaderboard bez roli Dev', async () => {
+        vi.mocked(hasRequiredRole).mockReturnValue(true);
+        vi.mocked(hasDevRole).mockReturnValue(false);
+        vi.mocked(getEconomyLeaderboardPage).mockResolvedValue({
+            sortBy: 'xp',
+            page: 1,
+            pageSize: 10,
+            totalRows: 0,
+            totalPages: 1,
+            entries: [],
+        } as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/leaderboard`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.leaderboard).toEqual({
+                sortBy: 'xp',
+                page: 1,
+                pageSize: 10,
+                totalRows: 0,
+                totalPages: 1,
+                entries: [],
+            });
         });
     });
 

@@ -5,14 +5,23 @@ vi.mock('./repository.js', () => ({
     awardMessageXp: vi.fn(),
     awardVoiceXp: vi.fn(),
     awardWatchpartyVoiceActivity: vi.fn(),
+    getEconomyLevelRoleMappings: vi.fn(),
     getEconomyConfig: vi.fn(),
+    incrementMessageCount: vi.fn(),
+    incrementVoiceMinutes: vi.fn(),
 }));
 
 vi.mock('../dashboard/scheduler/store.js', () => ({
     listScheduledPosts: vi.fn(),
 }));
 
-import { awardVoiceXp, awardWatchpartyVoiceActivity, getEconomyConfig } from './repository.js';
+import {
+    awardVoiceXp,
+    awardWatchpartyVoiceActivity,
+    getEconomyConfig,
+    getEconomyLevelRoleMappings,
+    incrementVoiceMinutes,
+} from './repository.js';
 import { listScheduledPosts } from '../dashboard/scheduler/store.js';
 import { startEconomyVoiceXpTicker, resetEconomyRuntimeForTests } from './runtime.js';
 
@@ -69,6 +78,7 @@ describe('economy runtime watchparty voice awards', () => {
             dailyStreakGraceHours: 48,
             dailyMessages: ['test'],
             levelingMode: 'progressive',
+            levelingCurve: 'default',
             levelingBaseXp: 100,
             levelingExponent: 1.5,
             xpTextPerMessage: 1,
@@ -82,6 +92,33 @@ describe('economy runtime watchparty voice awards', () => {
             watchpartyCoinBonusPerMinute: 2,
             levelUpCoinsBase: 25,
             levelUpCoinsPerLevel: 10,
+        });
+        vi.mocked(getEconomyLevelRoleMappings).mockResolvedValue([]);
+        vi.mocked(awardVoiceXp).mockResolvedValue({
+            guildId: 'guild-1',
+            userId: 'user-1',
+            awardedXp: 5,
+            previousXp: 0,
+            currentXp: 5,
+            previousLevel: 1,
+            currentLevel: 1,
+            levelsGained: 0,
+            coinsAwarded: 0,
+            currentCoins: 0,
+            createdAt: Date.now(),
+        });
+        vi.mocked(awardWatchpartyVoiceActivity).mockResolvedValue({
+            guildId: 'guild-1',
+            userId: 'user-1',
+            awardedXp: 7,
+            previousXp: 0,
+            currentXp: 7,
+            previousLevel: 1,
+            currentLevel: 1,
+            levelsGained: 0,
+            coinsAwarded: 2,
+            currentCoins: 2,
+            createdAt: Date.now(),
         });
     });
 
@@ -106,6 +143,7 @@ describe('economy runtime watchparty voice awards', () => {
 
         expect(vi.mocked(awardWatchpartyVoiceActivity)).toHaveBeenCalledTimes(1);
         expect(vi.mocked(awardVoiceXp)).not.toHaveBeenCalled();
+        expect(vi.mocked(incrementVoiceMinutes)).toHaveBeenCalledTimes(1);
     });
 
     it('dla zwyklego VC nalicza standardowy VC XP', async () => {
@@ -118,5 +156,6 @@ describe('economy runtime watchparty voice awards', () => {
 
         expect(vi.mocked(awardVoiceXp)).toHaveBeenCalledTimes(1);
         expect(vi.mocked(awardWatchpartyVoiceActivity)).not.toHaveBeenCalled();
+        expect(vi.mocked(incrementVoiceMinutes)).toHaveBeenCalledTimes(1);
     });
 });

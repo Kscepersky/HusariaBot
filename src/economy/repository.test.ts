@@ -5,14 +5,21 @@ import { tmpdir } from 'node:os';
 import { resetEconomyDatabaseForTests } from './database.js';
 import {
     addCoinsByAdmin,
+    addLevelsByAdmin,
     addXpByAdmin,
     awardMessageXp,
     claimDailyReward,
     getEconomyConfig,
     getEconomyLeaderboardPage,
+    getEconomyLevelRoleMappings,
+    getEconomyUserRankByXp,
     getEconomyUserState,
     getDailyStreakSummary,
+    importEconomyCsvSnapshot,
+    incrementMessageCount,
+    incrementVoiceMinutes,
     removeCoinsByAdmin,
+    replaceEconomyLevelRoleMappings,
     resetEconomyUsers,
     resetCoinsByAdmin,
     resetLevelByAdmin,
@@ -271,8 +278,37 @@ describe('economy daily repository', () => {
             expect(mutation.operation).toBe('add_xp');
             expect(mutation.previousXp).toBe(0);
             expect(mutation.currentXp).toBe(100);
-            expect(mutation.currentLevel).toBe(1);
-            expect(mutation.currentCoins).toBe(35);
+            expect(mutation.currentLevel).toBe(2);
+            expect(mutation.currentCoins).toBe(45);
+        });
+    });
+
+    it('dodaje levele przez operacje admina i zachowuje postep XP wewnatrz poziomu', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 10, 0, 0, 0);
+
+            await addXpByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: USER_ID,
+                adminUserId: 'admin-1',
+                reason: 'Seed XP',
+                amount: 120,
+                nowTimestamp,
+            });
+
+            const mutation = await addLevelsByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: USER_ID,
+                adminUserId: 'admin-1',
+                reason: 'Migracja leveli',
+                amount: 2,
+                nowTimestamp: nowTimestamp + 1_000,
+            });
+
+            expect(mutation.operation).toBe('add_levels');
+            expect(mutation.previousLevel).toBe(2);
+            expect(mutation.currentLevel).toBe(4);
+            expect(mutation.currentXp).toBeGreaterThan(mutation.previousXp);
         });
     });
 
@@ -351,7 +387,7 @@ describe('economy daily repository', () => {
                 nowTimestamp: nowTimestamp + 2_000,
             });
 
-            expect(resetLevelResult.currentLevel).toBe(0);
+            expect(resetLevelResult.currentLevel).toBe(1);
             expect(resetLevelResult.currentXp).toBe(0);
         });
     });
@@ -410,8 +446,8 @@ describe('economy daily repository', () => {
 
             const state = await getEconomyUserState(GUILD_ID, USER_ID, nowTimestamp + 1_000);
             expect(state.xp).toBe(100);
-            expect(state.level).toBe(1);
-            expect(state.coins).toBe(35);
+            expect(state.level).toBe(2);
+            expect(state.coins).toBe(45);
         });
     });
 
@@ -459,6 +495,42 @@ describe('economy daily repository', () => {
         });
     });
 
+    it('dla krzywej formula_v2 poprawnie przelicza progi leveli', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 10, 0, 0, 0);
+            const currentConfig = await getEconomyConfig();
+
+            await updateEconomyConfig({
+                ...currentConfig,
+                levelingCurve: 'formula_v2',
+            }, nowTimestamp);
+
+            const firstMutation = await addXpByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: USER_ID,
+                adminUserId: 'admin-1',
+                reason: 'Test formula_v2 #1',
+                amount: 202,
+                nowTimestamp: nowTimestamp + 1_000,
+            });
+
+            expect(firstMutation.currentXp).toBe(202);
+            expect(firstMutation.currentLevel).toBe(2);
+
+            const secondMutation = await addXpByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: USER_ID,
+                adminUserId: 'admin-1',
+                reason: 'Test formula_v2 #2',
+                amount: 1,
+                nowTimestamp: nowTimestamp + 2_000,
+            });
+
+            expect(secondMutation.currentXp).toBe(203);
+            expect(secondMutation.currentLevel).toBe(3);
+        });
+    });
+
     it('resetuje dane ekonomii tylko dla wskazanego guild', async () => {
         await withTempEconomyDb(async () => {
             const nowTimestamp = Date.UTC(2026, 3, 3, 10, 0, 0, 0);
@@ -496,10 +568,165 @@ describe('economy daily repository', () => {
             const guild1User = await getEconomyUserState('guild-1', 'user-a', nowTimestamp + 1_000);
             expect(guild1User.coins).toBe(0);
             expect(guild1User.xp).toBe(0);
-            expect(guild1User.level).toBe(0);
+            expect(guild1User.level).toBe(1);
 
             const guild2User = await getEconomyUserState('guild-2', 'user-c', nowTimestamp + 2_000);
             expect(guild2User.coins).toBe(400);
+        });
+    });
+
+    it('zlicza wiadomosci i minuty VC niezaleznie od XP', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 12, 0, 0, 0);
+
+            await incrementMessageCount(GUILD_ID, USER_ID, nowTimestamp);
+            await incrementMessageCount(GUILD_ID, USER_ID, nowTimestamp + 1_000);
+            await incrementVoiceMinutes(GUILD_ID, USER_ID, 3, nowTimestamp + 2_000);
+
+            const state = await getEconomyUserState(GUILD_ID, USER_ID, nowTimestamp + 3_000);
+            expect(state.messageCount).toBe(2);
+            expect(state.voiceMinutes).toBe(3);
+        });
+    });
+
+    it('importuje CSV jako snapshot i przelicza XP z level + xp_w_levelu', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 12, 0, 0, 0);
+            const importResult = await importEconomyCsvSnapshot({
+                guildId: GUILD_ID,
+                csvContent: [
+                    '111111111111111111,1,5,10,15',
+                    '222222222222222222,2,10,4,6',
+                ].join('\n'),
+                nowTimestamp,
+            });
+
+            expect(importResult).toEqual({
+                importedRows: 2,
+                insertedRows: 2,
+                updatedRows: 0,
+            });
+
+            const userOne = await getEconomyUserState(GUILD_ID, '111111111111111111', nowTimestamp + 1_000);
+            const userTwo = await getEconomyUserState(GUILD_ID, '222222222222222222', nowTimestamp + 2_000);
+
+            expect(userOne.level).toBe(1);
+            expect(userOne.xp).toBe(5);
+            expect(userOne.messageCount).toBe(10);
+            expect(userOne.voiceMinutes).toBe(15);
+
+            expect(userTwo.level).toBe(2);
+            expect(userTwo.xp).toBe(110);
+            expect(userTwo.messageCount).toBe(4);
+            expect(userTwo.voiceMinutes).toBe(6);
+
+            const updateResult = await importEconomyCsvSnapshot({
+                guildId: GUILD_ID,
+                csvContent: '111111111111111111,1,8,12,17',
+                nowTimestamp: nowTimestamp + 3_000,
+            });
+
+            expect(updateResult).toEqual({
+                importedRows: 1,
+                insertedRows: 0,
+                updatedRows: 1,
+            });
+
+            const updatedUserOne = await getEconomyUserState(GUILD_ID, '111111111111111111', nowTimestamp + 4_000);
+            expect(updatedUserOne.xp).toBe(8);
+            expect(updatedUserOne.messageCount).toBe(12);
+            expect(updatedUserOne.voiceMinutes).toBe(17);
+        });
+    });
+
+    it('rollbackuje caly import CSV gdy jeden z wierszy jest bledny', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 12, 0, 0, 0);
+
+            const beforeMutation = await addXpByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: USER_ID,
+                adminUserId: 'admin-1',
+                reason: 'seed',
+                amount: 200,
+                nowTimestamp,
+            });
+
+            await expect(importEconomyCsvSnapshot({
+                guildId: GUILD_ID,
+                csvContent: [
+                    `${USER_ID},5,50,99,77`,
+                    'invalid-row-without-required-columns',
+                ].join('\n'),
+                nowTimestamp: nowTimestamp + 1_000,
+            })).rejects.toThrow();
+
+            const stateAfterFailedImport = await getEconomyUserState(GUILD_ID, USER_ID, nowTimestamp + 2_000);
+            expect(stateAfterFailedImport.xp).toBe(beforeMutation.currentXp);
+            expect(stateAfterFailedImport.level).toBe(beforeMutation.currentLevel);
+            expect(stateAfterFailedImport.messageCount).toBe(0);
+            expect(stateAfterFailedImport.voiceMinutes).toBe(0);
+        });
+    });
+
+    it('odrzuca import CSV gdy ten sam userId pojawi sie wielokrotnie', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 12, 0, 0, 0);
+
+            await expect(importEconomyCsvSnapshot({
+                guildId: GUILD_ID,
+                csvContent: [
+                    '111111111111111111,1,10,1,1',
+                    '111111111111111111,2,10,2,2',
+                ].join('\n'),
+                nowTimestamp,
+            })).rejects.toThrow('wystepuje wielokrotnie');
+        });
+    });
+
+    it('zwraca rank po XP i zapisuje mapowania rol levelowych', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 12, 0, 0, 0);
+
+            const mappings = await replaceEconomyLevelRoleMappings(
+                GUILD_ID,
+                [
+                    { roleId: '333333333333333333', minLevel: 10 },
+                    { roleId: '111111111111111111', minLevel: 2 },
+                ],
+                nowTimestamp,
+            );
+
+            expect(mappings).toHaveLength(2);
+            expect(mappings[0]).toMatchObject({ roleId: '111111111111111111', minLevel: 2 });
+            expect(mappings[1]).toMatchObject({ roleId: '333333333333333333', minLevel: 10 });
+
+            const loadedMappings = await getEconomyLevelRoleMappings(GUILD_ID);
+            expect(loadedMappings).toEqual(mappings);
+
+            await addXpByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: 'rank-user-a',
+                adminUserId: 'admin-1',
+                reason: 'rank seed',
+                amount: 100,
+                nowTimestamp: nowTimestamp + 1_000,
+            });
+
+            await addXpByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: 'rank-user-b',
+                adminUserId: 'admin-1',
+                reason: 'rank seed',
+                amount: 450,
+                nowTimestamp: nowTimestamp + 2_000,
+            });
+
+            const userARank = await getEconomyUserRankByXp(GUILD_ID, 'rank-user-a', nowTimestamp + 3_000);
+            const userBRank = await getEconomyUserRankByXp(GUILD_ID, 'rank-user-b', nowTimestamp + 4_000);
+
+            expect(userARank).toBe(2);
+            expect(userBRank).toBe(1);
         });
     });
 });

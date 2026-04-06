@@ -6,6 +6,7 @@ const COLOR_MAP = {
 }
 
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+const MAX_ECONOMY_CSV_IMPORT_BYTES = 2_000_000
 const ALLOWED_UPLOAD_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif'])
 const ALLOWED_UPLOAD_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif'])
 const UPLOAD_MIME_BY_EXT = {
@@ -62,6 +63,10 @@ let economyLeaderboardTotalRows = 0
 let economyLeaderboardEntries = []
 let economyLeaderboardLoadError = null
 let economyLeaderboardLoadRequestId = 0
+let economyLevelRoleMappings = []
+let economyLevelRoleMappingsLoaded = false
+let economyHasDevAccess = null
+let economyAccessRetryTimerId = null
 
 let g2Matches = []
 let g2FilterOptions = {
@@ -83,6 +88,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadUserInfo()
   await ensureCsrfToken().catch(() => undefined)
   initSidebarNav()
+  applyEconomySettingsAccessState()
   await initEmbedSection()
   await initScheduledSection()
   await initSentSection()
@@ -225,6 +231,16 @@ function initSidebarNav() {
 }
 
 function switchSection(section) {
+  if (section === 'economy-settings' && economyHasDevAccess !== true) {
+    if (economyHasDevAccess === false) {
+      showToast('ℹ️ Ustawienia ekonomii są dostępne tylko dla roli Dev.', 'info')
+    } else {
+      showToast('ℹ️ Trwa weryfikacja uprawnień do ustawień ekonomii. Spróbuj ponownie za chwilę.', 'info')
+    }
+
+    section = 'economy-leaderboard'
+  }
+
   currentSection = section
 
   document.querySelectorAll('.sidebar-item[data-section]').forEach((item) => {
@@ -329,12 +345,22 @@ async function initG2Section() {
 }
 
 async function initEconomySection() {
-  await loadEconomySettings({ silent: true })
+  const hasEconomyDevAccess = await loadEconomySettings({ silent: true })
+  if (hasEconomyDevAccess) {
+    await loadEconomyLevelRoleMappings({ silent: true })
+  } else {
+    economyLevelRoleMappingsLoaded = false
+    economyLevelRoleMappings = []
+    renderEconomyLevelRoleOptions()
+    renderEconomyLevelRoleMappings()
+  }
 
   if (!economySectionBound) {
     economySectionBound = true
     bindEconomySectionListeners()
   }
+
+  applyEconomySettingsAccessState()
 }
 
 async function initEconomyLeaderboardSection() {
@@ -1562,6 +1588,13 @@ function bindEconomySectionListeners() {
   const reloadButton = document.getElementById('economy-settings-reload-btn')
   const saveButton = document.getElementById('economy-settings-save-btn')
   const resetUsersButton = document.getElementById('economy-settings-reset-users-btn')
+  const addCoinsButton = document.getElementById('economy-mutation-add-coins-btn')
+  const addXpButton = document.getElementById('economy-mutation-add-xp-btn')
+  const addLevelsButton = document.getElementById('economy-mutation-add-levels-btn')
+  const importCsvButton = document.getElementById('economy-csv-import-btn')
+  const addLevelRoleButton = document.getElementById('economy-level-role-add-btn')
+  const levelRolesList = document.getElementById('economy-level-roles-list')
+  const levelingCurveSelect = document.getElementById('economy-leveling-curve')
 
   reloadButton?.addEventListener('click', async () => {
     await loadEconomySettings({ silent: false })
@@ -1574,6 +1607,49 @@ function bindEconomySectionListeners() {
   resetUsersButton?.addEventListener('click', async () => {
     await resetAllEconomyUsers()
   })
+
+  addCoinsButton?.addEventListener('click', async () => {
+    await applyEconomyUserMutation('add_coins')
+  })
+
+  addXpButton?.addEventListener('click', async () => {
+    await applyEconomyUserMutation('add_xp')
+  })
+
+  addLevelsButton?.addEventListener('click', async () => {
+    await applyEconomyUserMutation('add_levels')
+  })
+
+  importCsvButton?.addEventListener('click', async () => {
+    await importEconomyCsvSnapshot()
+  })
+
+  addLevelRoleButton?.addEventListener('click', async () => {
+    await addEconomyLevelRoleMapping()
+  })
+
+  levelRolesList?.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-role-id]')
+    if (!button) {
+      return
+    }
+
+    const roleId = button.getAttribute('data-role-id')?.trim() ?? ''
+    if (!/^\d{17,20}$/.test(roleId)) {
+      showToast('❌ Nieprawidlowe roleId w mapowaniu.', 'error')
+      return
+    }
+
+    await removeEconomyLevelRoleMapping(roleId)
+  })
+
+  levelingCurveSelect?.addEventListener('change', () => {
+    syncLevelingCurveUiState()
+  })
+
+  renderEconomyLevelRoleOptions()
+  renderEconomyLevelRoleMappings()
+  syncLevelingCurveUiState()
 }
 
 function bindEconomyLeaderboardSectionListeners() {
@@ -1667,6 +1743,8 @@ function renderEconomyLeaderboard() {
     const level = Number.isFinite(Number(entry.level)) ? Number(entry.level) : 0
     const xp = Number.isFinite(Number(entry.xp)) ? Number(entry.xp) : 0
     const coins = Number.isFinite(Number(entry.coins)) ? Number(entry.coins) : 0
+    const messageCount = Number.isFinite(Number(entry.messageCount)) ? Math.max(0, Number(entry.messageCount)) : 0
+    const voiceMinutes = Number.isFinite(Number(entry.voiceMinutes)) ? Math.max(0, Number(entry.voiceMinutes)) : 0
     const xpIntoLevel = Number.isFinite(Number(entry.xpIntoLevel)) ? Number(entry.xpIntoLevel) : 0
     const xpForNextLevel = Number.isFinite(Number(entry.xpForNextLevel)) ? Math.max(1, Number(entry.xpForNextLevel)) : 1
     const xpToNextLevel = Number.isFinite(Number(entry.xpToNextLevel)) ? Math.max(0, Number(entry.xpToNextLevel)) : 0
@@ -1693,6 +1771,8 @@ function renderEconomyLeaderboard() {
           <span class="scheduled-chip">Calkowity XP: ${escapeHtml(String(xp))}</span>
           <span class="scheduled-chip">Postep: ${escapeHtml(progressLabel)}</span>
           <span class="scheduled-chip">Brakujace XP: ${escapeHtml(String(xpToNextLevel))}</span>
+          <span class="scheduled-chip">Wiadomosci: ${escapeHtml(String(messageCount))}</span>
+          <span class="scheduled-chip">Minuty VC: ${escapeHtml(String(voiceMinutes))}</span>
         </div>
       </article>`
   }).join('')}`
@@ -1785,6 +1865,50 @@ function setEconomySettingsLastLoadedLabel() {
   label.textContent = `Ostatnio odswiezono: ${formatTimestampInWarsaw(economySettingsLastLoadedAt)}`
 }
 
+function applyEconomySettingsAccessState() {
+  const devControls = document.getElementById('economy-dev-controls')
+  const accessNotice = document.getElementById('economy-dev-only-notice')
+  const settingsNavItem = document.getElementById('economy-settings-nav-item')
+    ?? document.querySelector('.sidebar-item[data-section="economy-settings"]')
+  const hasDevAccess = economyHasDevAccess === true
+  const isAccessDenied = economyHasDevAccess !== true
+  const shouldShowDeniedNotice = economyHasDevAccess === false
+
+  if (devControls instanceof HTMLElement) {
+    devControls.style.display = hasDevAccess ? '' : 'none'
+  }
+
+  if (accessNotice instanceof HTMLElement) {
+    accessNotice.hidden = !shouldShowDeniedNotice
+  }
+
+  if (settingsNavItem instanceof HTMLElement) {
+    settingsNavItem.style.display = isAccessDenied ? 'none' : ''
+  }
+
+  if (isAccessDenied && currentSection === 'economy-settings') {
+    switchSection('economy-leaderboard')
+  }
+}
+
+function clearEconomyAccessRetryTimer() {
+  if (economyAccessRetryTimerId) {
+    clearTimeout(economyAccessRetryTimerId)
+    economyAccessRetryTimerId = null
+  }
+}
+
+function scheduleEconomyAccessRetry() {
+  if (economyHasDevAccess !== null || economyAccessRetryTimerId) {
+    return
+  }
+
+  economyAccessRetryTimerId = setTimeout(() => {
+    economyAccessRetryTimerId = null
+    void loadEconomySettings({ silent: true })
+  }, 5000)
+}
+
 function toFiniteNumber(value, fieldName) {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) {
@@ -1824,8 +1948,15 @@ function collectEconomySettingsForm() {
     .filter((entry) => entry.length > 0)
 
   const levelingMode = readEconomyInputValue('economy-leveling-mode')
-  const levelingBaseXp = Math.floor(toFiniteNumber(readEconomyInputValue('economy-leveling-base-xp'), 'Leveling: base XP'))
-  const levelingExponent = toFiniteNumber(readEconomyInputValue('economy-leveling-exponent'), 'Leveling: exponent')
+  const levelingCurve = readEconomyInputValue('economy-leveling-curve')
+  const levelingBaseXpRaw = readEconomyInputValue('economy-leveling-base-xp')
+  const levelingExponentRaw = readEconomyInputValue('economy-leveling-exponent')
+  const levelingBaseXp = levelingCurve === 'formula_v2'
+    ? Math.max(1, Math.floor(Number(levelingBaseXpRaw) || 100))
+    : Math.floor(toFiniteNumber(levelingBaseXpRaw, 'Leveling: base XP'))
+  const levelingExponent = levelingCurve === 'formula_v2'
+    ? Math.max(1, Number(levelingExponentRaw) || 1.5)
+    : toFiniteNumber(levelingExponentRaw, 'Leveling: exponent')
   const xpTextPerMessage = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-text-per-message'), 'XP text: za wiadomosc'))
   const xpTextCooldownSeconds = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-text-cooldown-seconds'), 'XP text: cooldown'))
   const xpVoicePerMinute = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-voice-per-minute'), 'XP voice: za minute'))
@@ -1846,6 +1977,10 @@ function collectEconomySettingsForm() {
     throw new Error('Nieprawidlowy tryb levelowania.')
   }
 
+  if (levelingCurve !== 'default' && levelingCurve !== 'formula_v2') {
+    throw new Error('Nieprawidlowa krzywa levelowania.')
+  }
+
   return {
     dailyMinCoins,
     dailyMaxCoins,
@@ -1854,6 +1989,7 @@ function collectEconomySettingsForm() {
     dailyStreakGraceHours,
     dailyMessages,
     levelingMode,
+    levelingCurve,
     levelingBaseXp,
     levelingExponent,
     xpTextPerMessage,
@@ -1892,6 +2028,7 @@ function setEconomySettingsForm(config) {
   setValue('economy-daily-streak-grace-hours', config.dailyStreakGraceHours)
   setValue('economy-daily-messages', Array.isArray(config.dailyMessages) ? config.dailyMessages.join('\n') : '')
   setValue('economy-leveling-mode', config.levelingMode)
+  setValue('economy-leveling-curve', config.levelingCurve === 'formula_v2' ? 'formula_v2' : 'default')
   setValue('economy-leveling-base-xp', config.levelingBaseXp)
   setValue('economy-leveling-exponent', config.levelingExponent)
   setValue('economy-xp-text-per-message', config.xpTextPerMessage)
@@ -1905,6 +2042,391 @@ function setEconomySettingsForm(config) {
   setChecked('economy-xp-voice-allow-afk', config.xpVoiceAllowAfk)
   setValue('economy-level-up-coins-base', config.levelUpCoinsBase)
   setValue('economy-level-up-coins-per-level', config.levelUpCoinsPerLevel)
+  syncLevelingCurveUiState()
+}
+
+function syncLevelingCurveUiState() {
+  const curveSelect = document.getElementById('economy-leveling-curve')
+  const baseXpInput = document.getElementById('economy-leveling-base-xp')
+  const exponentInput = document.getElementById('economy-leveling-exponent')
+
+  if (!(curveSelect instanceof HTMLSelectElement)) {
+    return
+  }
+
+  const useFormulaV2 = curveSelect.value === 'formula_v2'
+
+  if (baseXpInput instanceof HTMLInputElement) {
+    baseXpInput.disabled = useFormulaV2
+    baseXpInput.title = useFormulaV2
+      ? 'Dla Formula v2 pole base XP nie jest używane.'
+      : ''
+  }
+
+  if (exponentInput instanceof HTMLInputElement) {
+    exponentInput.disabled = useFormulaV2
+    exponentInput.title = useFormulaV2
+      ? 'Dla Formula v2 pole exponent nie jest używane.'
+      : ''
+  }
+}
+
+function resolveEconomyMutationAmount(operation) {
+  if (operation === 'add_coins') {
+    return Math.floor(toFiniteNumber(readEconomyInputValue('economy-mutation-coins-amount'), 'Coins do dodania'))
+  }
+
+  if (operation === 'add_levels') {
+    return Math.floor(toFiniteNumber(readEconomyInputValue('economy-mutation-levels-amount'), 'Levele do dodania'))
+  }
+
+  return Math.floor(toFiniteNumber(readEconomyInputValue('economy-mutation-xp-amount'), 'XP do dodania'))
+}
+
+function resolveEconomyMutationRequestBody(operation) {
+  const targetUserId = readEconomyInputValue('economy-mutation-user-id').trim()
+  if (!/^\d{17,20}$/.test(targetUserId)) {
+    throw new Error('Podaj poprawne ID użytkownika Discord (17-20 cyfr).')
+  }
+
+  const amount = resolveEconomyMutationAmount(operation)
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Kwota mutacji musi być większa od zera.')
+  }
+
+  if (operation === 'add_levels' && amount > 1000) {
+    throw new Error('Levele do dodania musza byc z zakresu 1-1000.')
+  }
+
+  const requestBody = {
+    targetUserId,
+    operation,
+    amount,
+  }
+
+  return requestBody
+}
+
+async function applyEconomyUserMutation(operation) {
+  const buttonId = operation === 'add_coins'
+    ? 'economy-mutation-add-coins-btn'
+    : operation === 'add_levels'
+      ? 'economy-mutation-add-levels-btn'
+      : 'economy-mutation-add-xp-btn'
+
+  const actionLabel = operation === 'add_coins'
+    ? 'coins'
+    : operation === 'add_levels'
+      ? 'leveli'
+      : 'XP'
+  const button = document.getElementById(buttonId)
+  if (button instanceof HTMLButtonElement) {
+    button.disabled = true
+  }
+
+  try {
+    const requestBody = resolveEconomyMutationRequestBody(operation)
+    const response = await fetchWithCsrf('/api/economy/user-mutation', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    })
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udało się wykonać ręcznej mutacji ekonomii.')
+    }
+
+    const mutation = payload.mutation
+    if (!mutation || typeof mutation !== 'object') {
+      throw new Error('Brak danych mutacji ekonomii w odpowiedzi serwera.')
+    }
+
+    const appliedAmount = Number.isFinite(Number(mutation.amount))
+      ? Math.max(1, Math.floor(Number(mutation.amount)))
+      : requestBody.amount
+
+    showToast(
+      `✅ Dodano ${appliedAmount} ${actionLabel} użytkownikowi ${requestBody.targetUserId}. Aktualnie: ${mutation.currentCoins} coins, ${mutation.currentXp} XP, level ${mutation.currentLevel}.`,
+      'success',
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    showToast(`❌ ${message}`, 'error')
+  } finally {
+    if (button instanceof HTMLButtonElement) {
+      button.disabled = false
+    }
+  }
+}
+
+function resolveRoleNameById(roleId) {
+  const role = roles.find((candidate) => String(candidate?.id ?? '') === roleId)
+  const roleName = typeof role?.name === 'string' ? role.name.trim() : ''
+  return roleName.length > 0 ? roleName : roleId
+}
+
+function renderEconomyLevelRoleOptions() {
+  const select = document.getElementById('economy-level-role-id')
+  if (!(select instanceof HTMLSelectElement)) {
+    return
+  }
+
+  const roleOptions = roles
+    .map((role) => {
+      return {
+        id: String(role?.id ?? '').trim(),
+        name: String(role?.name ?? '').trim(),
+      }
+    })
+    .filter((role) => /^\d{17,20}$/.test(role.id) && role.name.length > 0)
+    .sort((left, right) => left.name.localeCompare(right.name, 'pl'))
+
+  const previousValue = select.value
+  select.innerHTML = [
+    '<option value="">Wybierz rolę</option>',
+    ...roleOptions.map((role) => `<option value="${escapeHtml(role.id)}">${escapeHtml(role.name)}</option>`),
+  ].join('')
+
+  if (roleOptions.some((role) => role.id === previousValue)) {
+    select.value = previousValue
+  }
+}
+
+function renderEconomyLevelRoleMappings() {
+  const list = document.getElementById('economy-level-roles-list')
+  if (!list) {
+    return
+  }
+
+  if (!Array.isArray(economyLevelRoleMappings) || economyLevelRoleMappings.length === 0) {
+    list.innerHTML = '<div class="scheduled-empty">Brak mapowan rol levelowych.</div>'
+    return
+  }
+
+  const sortedMappings = [...economyLevelRoleMappings].sort((left, right) => {
+    if (left.minLevel !== right.minLevel) {
+      return left.minLevel - right.minLevel
+    }
+
+    return String(left.roleId).localeCompare(String(right.roleId), 'pl')
+  })
+
+  list.innerHTML = sortedMappings.map((mapping) => {
+    return `
+      <article class="scheduled-card">
+        <div class="scheduled-card-header">
+          <span class="scheduled-card-title">${escapeHtml(resolveRoleNameById(String(mapping.roleId)))} (ID: ${escapeHtml(String(mapping.roleId))})</span>
+          <span class="scheduled-chip leaderboard-chip-primary">Level >= ${escapeHtml(String(mapping.minLevel))}</span>
+        </div>
+        <div class="scheduled-actions">
+          <button class="btn-secondary" type="button" data-role-id="${escapeHtml(String(mapping.roleId))}">Usun mapowanie</button>
+        </div>
+      </article>`
+  }).join('')
+}
+
+async function loadEconomyLevelRoleMappings({ silent } = { silent: false }) {
+  try {
+    const response = await fetch('/api/economy/level-roles')
+    const payload = await parseApiResponse(response)
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie pobrac mapowan rol levelowych.')
+    }
+
+    const mappings = Array.isArray(payload.mappings) ? payload.mappings : []
+    economyLevelRoleMappings = mappings.map((mapping) => {
+      return {
+        roleId: String(mapping.roleId ?? '').trim(),
+        minLevel: Number.isFinite(Number(mapping.minLevel)) ? Math.max(1, Number(mapping.minLevel)) : 1,
+      }
+    }).filter((mapping) => /^\d{17,20}$/.test(mapping.roleId))
+    economyLevelRoleMappingsLoaded = true
+
+    renderEconomyLevelRoleOptions()
+    renderEconomyLevelRoleMappings()
+  } catch (error) {
+    economyLevelRoleMappingsLoaded = false
+    economyLevelRoleMappings = []
+
+    if (!silent) {
+      const message = error instanceof Error ? error.message : 'Nieznany blad'
+      showToast(`❌ ${message}`, 'error')
+    }
+
+    renderEconomyLevelRoleOptions()
+    renderEconomyLevelRoleMappings()
+  }
+}
+
+async function saveEconomyLevelRoleMappings(nextMappings) {
+  if (!economyLevelRoleMappingsLoaded) {
+    throw new Error('Najpierw odswiez mapowania rol levelowych i upewnij sie, ze zostaly poprawnie zaladowane.')
+  }
+
+  const response = await fetchWithCsrf('/api/economy/level-roles', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ mappings: nextMappings }),
+  })
+
+  const payload = await parseApiResponse(response)
+  if (!response.ok) {
+    throw new Error(payload.error ?? 'Nie udalo sie zapisac mapowan rol levelowych.')
+  }
+
+  const mappings = Array.isArray(payload.mappings) ? payload.mappings : []
+  economyLevelRoleMappings = mappings.map((mapping) => {
+    return {
+      roleId: String(mapping.roleId ?? '').trim(),
+      minLevel: Number.isFinite(Number(mapping.minLevel)) ? Math.max(1, Number(mapping.minLevel)) : 1,
+    }
+  }).filter((mapping) => /^\d{17,20}$/.test(mapping.roleId))
+  economyLevelRoleMappingsLoaded = true
+
+  renderEconomyLevelRoleMappings()
+}
+
+async function addEconomyLevelRoleMapping() {
+  if (!economyLevelRoleMappingsLoaded) {
+    showToast('❌ Najpierw odswiez mapowania rol levelowych.', 'error')
+    return
+  }
+
+  const roleSelect = document.getElementById('economy-level-role-id')
+  const minLevelInput = document.getElementById('economy-level-role-min-level')
+  const addButton = document.getElementById('economy-level-role-add-btn')
+
+  if (!(roleSelect instanceof HTMLSelectElement) || !(minLevelInput instanceof HTMLInputElement)) {
+    showToast('❌ Brakuje pol mapowania roli levelowej.', 'error')
+    return
+  }
+
+  const roleId = roleSelect.value.trim()
+  if (!/^\d{17,20}$/.test(roleId)) {
+    showToast('❌ Wybierz poprawna role.', 'error')
+    return
+  }
+
+  const minLevel = Math.floor(toFiniteNumber(minLevelInput.value, 'Minimalny level mapowania roli'))
+  if (minLevel < 1) {
+    showToast('❌ Minimalny level mapowania musi byc >= 1.', 'error')
+    return
+  }
+
+  if (addButton instanceof HTMLButtonElement) {
+    addButton.disabled = true
+  }
+
+  try {
+    const existingWithoutCurrentRole = economyLevelRoleMappings.filter((mapping) => mapping.roleId !== roleId)
+    const nextMappings = [
+      ...existingWithoutCurrentRole,
+      {
+        roleId,
+        minLevel,
+      },
+    ]
+
+    await saveEconomyLevelRoleMappings(nextMappings)
+    showToast('✅ Zapisano mapowanie roli levelowej.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    showToast(`❌ ${message}`, 'error')
+  } finally {
+    if (addButton instanceof HTMLButtonElement) {
+      addButton.disabled = false
+    }
+  }
+}
+
+async function removeEconomyLevelRoleMapping(roleId) {
+  if (!economyLevelRoleMappingsLoaded) {
+    showToast('❌ Najpierw odswiez mapowania rol levelowych.', 'error')
+    return
+  }
+
+  const nextMappings = economyLevelRoleMappings.filter((mapping) => String(mapping.roleId) !== roleId)
+
+  try {
+    await saveEconomyLevelRoleMappings(nextMappings)
+    showToast('✅ Usunieto mapowanie roli levelowej.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
+async function importEconomyCsvSnapshot() {
+  const fileInput = document.getElementById('economy-csv-import-file')
+  const importButton = document.getElementById('economy-csv-import-btn')
+
+  if (!(fileInput instanceof HTMLInputElement)) {
+    showToast('❌ Brakuje pola pliku CSV.', 'error')
+    return
+  }
+
+  const selectedFile = fileInput.files?.[0]
+  if (!selectedFile) {
+    showToast('❌ Wybierz plik CSV do importu.', 'error')
+    return
+  }
+
+  if (importButton instanceof HTMLButtonElement) {
+    importButton.disabled = true
+  }
+
+  try {
+    if (selectedFile.size > MAX_ECONOMY_CSV_IMPORT_BYTES) {
+      throw new Error('Plik CSV jest za duzy. Maksymalny rozmiar to 2 MB.')
+    }
+
+    const csvContent = await selectedFile.text()
+    if (csvContent.trim().length === 0) {
+      throw new Error('Wybrany plik CSV jest pusty.')
+    }
+
+    const response = await fetchWithCsrf('/api/economy/import-csv', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ csvContent }),
+    })
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie zaimportowac CSV ekonomii.')
+    }
+
+    const result = payload.result ?? {}
+    const roleSync = payload.roleSync ?? {}
+    const importedRows = Number.isFinite(Number(result.importedRows)) ? Number(result.importedRows) : 0
+    const insertedRows = Number.isFinite(Number(result.insertedRows)) ? Number(result.insertedRows) : 0
+    const updatedRows = Number.isFinite(Number(result.updatedRows)) ? Number(result.updatedRows) : 0
+    const roleUpdatedUsers = Number.isFinite(Number(roleSync.updatedUsers)) ? Number(roleSync.updatedUsers) : 0
+    const roleFailedUsers = Number.isFinite(Number(roleSync.failedUsers)) ? Number(roleSync.failedUsers) : 0
+
+    const roleSyncSuffix = roleFailedUsers > 0
+      ? ` Synchronizacja rol: zaktualizowano ${roleUpdatedUsers}, bledy ${roleFailedUsers}.`
+      : ` Synchronizacja rol: zaktualizowano ${roleUpdatedUsers}.`
+
+    showToast(`✅ Import zakonczony: ${importedRows} wierszy (dodano ${insertedRows}, zaktualizowano ${updatedRows}).${roleSyncSuffix}`, 'success')
+    fileInput.value = ''
+    await loadEconomyLeaderboard({ silent: true })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    showToast(`❌ ${message}`, 'error')
+  } finally {
+    if (importButton instanceof HTMLButtonElement) {
+      importButton.disabled = false
+    }
+  }
 }
 
 async function loadEconomySettings({ silent } = { silent: false }) {
@@ -1916,11 +2438,19 @@ async function loadEconomySettings({ silent } = { silent: false }) {
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
+      if (response.status === 403 && requestId === economySettingsLoadRequestId) {
+        clearEconomyAccessRetryTimer()
+        economyHasDevAccess = false
+        economySettingsLastLoadedAt = null
+        setEconomySettingsLastLoadedLabel()
+        applyEconomySettingsAccessState()
+      }
+
       throw new Error(payload.error ?? 'Nie udalo sie pobrac ustawien ekonomii.')
     }
 
     if (requestId !== economySettingsLoadRequestId) {
-      return
+      return false
     }
 
     if (!payload.config || typeof payload.config !== 'object') {
@@ -1930,10 +2460,14 @@ async function loadEconomySettings({ silent } = { silent: false }) {
     setEconomySettingsForm(payload.config)
     economySettingsLastLoadedAt = Date.now()
     economySettingsLoadSuccessful = true
+    clearEconomyAccessRetryTimer()
+    economyHasDevAccess = true
     setEconomySettingsLastLoadedLabel()
+    applyEconomySettingsAccessState()
+    return true
   } catch (error) {
     if (requestId !== economySettingsLoadRequestId) {
-      return
+      return false
     }
 
     economySettingsLoadSuccessful = false
@@ -1942,6 +2476,10 @@ async function loadEconomySettings({ silent } = { silent: false }) {
       const message = error instanceof Error ? error.message : 'Nieznany blad'
       showToast(`❌ ${message}`, 'error')
     }
+
+    scheduleEconomyAccessRetry()
+    applyEconomySettingsAccessState()
+    return false
   }
 }
 

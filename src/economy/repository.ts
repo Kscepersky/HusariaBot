@@ -2,8 +2,11 @@ import type { Database } from 'sqlite';
 import { getEconomyDatabase } from './database.js';
 import type {
     EconomyAdminMutationResult,
+    EconomyCsvImportResult,
     EconomyLeaderboardPage,
     EconomyLeaderboardSortBy,
+    EconomyLevelRoleMapping,
+    EconomyLevelRoleMappingInput,
     EconomyXpAwardResult,
     EconomyAdminOperation,
     DailyClaimContext,
@@ -19,6 +22,8 @@ interface EconomyUserRow {
     xp: number;
     level: number;
     coins: number;
+    message_count: number;
+    voice_minutes: number;
     daily_streak: number;
     last_daily_claim_at: number | null;
     created_at: number;
@@ -33,6 +38,7 @@ interface EconomyConfigRow {
     daily_streak_grace_hours: number;
     daily_messages_json: string;
     leveling_mode: 'progressive' | 'linear';
+    leveling_curve: 'default' | 'formula_v2';
     leveling_base_xp: number;
     leveling_exponent: number;
     xp_text_per_message: number;
@@ -53,6 +59,16 @@ interface LeaderboardRow {
     xp: number;
     level: number;
     coins: number;
+    message_count: number;
+    voice_minutes: number;
+}
+
+interface EconomyLevelRoleMappingRow {
+    guild_id: string;
+    role_id: string;
+    min_level: number;
+    created_at: number;
+    updated_at: number;
 }
 
 interface ClaimDailyRewardOptions {
@@ -63,7 +79,7 @@ interface AdminMutationInput {
     guildId: string;
     targetUserId: string;
     adminUserId: string;
-    reason: string;
+    reason?: string;
     amount: number;
     nowTimestamp: number;
     operation: EconomyAdminOperation;
@@ -72,7 +88,21 @@ interface AdminMutationInput {
 const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_DAILY_MESSAGE = '{user} odbiera dzienne cebuliony i zgarnia {coins} monet!';
 const MAX_ADMIN_XP_MUTATION_AMOUNT = 1_000_000;
+const MAX_ADMIN_LEVEL_MUTATION_AMOUNT = 1_000;
+const MAX_CSV_IMPORT_ROWS = 10_000;
+const ECONOMY_MIN_LEVEL = 1;
+const ECONOMY_MAX_LEVEL = 10_000;
 let economyWriteLock = Promise.resolve();
+
+export class EconomyCsvImportValidationError extends Error {}
+export class EconomyInputValidationError extends Error {}
+
+function resolveAdminMutationReason(reason: string | undefined): string {
+    const normalizedReason = reason?.trim() ?? '';
+    return normalizedReason.length > 0
+        ? normalizedReason
+        : 'Dashboard: reczna mutacja';
+}
 
 function toSafeInt(value: number, fallback: number): number {
     if (!Number.isFinite(value)) {
@@ -117,6 +147,7 @@ function normalizeEconomyConfig(input: EconomyConfig): EconomyConfig {
         dailyStreakGraceHours: clampInt(input.dailyStreakGraceHours, 24, 168),
         dailyMessages: sanitizeDailyMessageList(input.dailyMessages),
         levelingMode: input.levelingMode === 'linear' ? 'linear' : 'progressive',
+        levelingCurve: input.levelingCurve === 'formula_v2' ? 'formula_v2' : 'default',
         levelingBaseXp: clampInt(input.levelingBaseXp, 1, 1_000_000),
         levelingExponent: clampFloat(input.levelingExponent, 1, 8),
         xpTextPerMessage: clampInt(input.xpTextPerMessage, 0, 10_000),
@@ -140,8 +171,20 @@ function toEconomyUserState(row: EconomyUserRow): EconomyUserState {
         xp: row.xp,
         level: row.level,
         coins: row.coins,
+        messageCount: row.message_count,
+        voiceMinutes: row.voice_minutes,
         dailyStreak: row.daily_streak,
         lastDailyClaimAt: row.last_daily_claim_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+    };
+}
+
+function toEconomyLevelRoleMapping(row: EconomyLevelRoleMappingRow): EconomyLevelRoleMapping {
+    return {
+        guildId: row.guild_id,
+        roleId: row.role_id,
+        minLevel: row.min_level,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     };
@@ -174,6 +217,7 @@ function toEconomyConfig(row: EconomyConfigRow): EconomyConfig {
         dailyStreakGraceHours: row.daily_streak_grace_hours,
         dailyMessages: parseDailyMessages(row.daily_messages_json),
         levelingMode: row.leveling_mode,
+        levelingCurve: row.leveling_curve === 'formula_v2' ? 'formula_v2' : 'default',
         levelingBaseXp: row.leveling_base_xp,
         levelingExponent: row.leveling_exponent,
         xpTextPerMessage: row.xp_text_per_message,
@@ -191,38 +235,114 @@ function toEconomyConfig(row: EconomyConfigRow): EconomyConfig {
 }
 
 function resolveXpForNextLevel(level: number, config: EconomyConfig): number {
-    if (config.levelingMode === 'linear') {
-        return Math.max(1, Math.floor(config.levelingBaseXp * level));
+    const safeLevel = Math.max(ECONOMY_MIN_LEVEL, Math.floor(level));
+
+    if (config.levelingCurve === 'formula_v2') {
+        const previousLevel = Math.max(0, safeLevel - 1);
+        const formulaValue = 100
+            + (0.04 * (previousLevel ** 3))
+            + (0.8 * (previousLevel ** 2))
+            + (2 * previousLevel)
+            + 0.5;
+
+        return Math.max(1, Math.floor(formulaValue));
     }
 
-    return Math.max(1, Math.floor(config.levelingBaseXp * (level ** config.levelingExponent)));
+    if (config.levelingMode === 'linear') {
+        return Math.max(1, Math.floor(config.levelingBaseXp * safeLevel));
+    }
+
+    return Math.max(1, Math.floor(config.levelingBaseXp * (safeLevel ** config.levelingExponent)));
 }
 
 function resolveLevelFromXp(totalXp: number, config: EconomyConfig): number {
-    let level = 0;
+    let level = ECONOMY_MIN_LEVEL;
     let remainingXp = Math.max(0, totalXp);
 
-    while (level < 10_000) {
-        const nextLevel = level + 1;
-        const xpForNextLevel = resolveXpForNextLevel(nextLevel, config);
+    while (level < ECONOMY_MAX_LEVEL) {
+        const xpForNextLevel = resolveXpForNextLevel(level, config);
         if (remainingXp < xpForNextLevel) {
             return level;
         }
 
         remainingXp -= xpForNextLevel;
-        level = nextLevel;
+        level += 1;
     }
 
     return level;
 }
 
 function resolveXpSpentForLevel(level: number, config: EconomyConfig): number {
+    const safeLevel = Math.max(ECONOMY_MIN_LEVEL, Math.floor(level));
     let xpSpent = 0;
-    for (let currentLevel = 1; currentLevel <= level; currentLevel += 1) {
+
+    for (let currentLevel = ECONOMY_MIN_LEVEL; currentLevel < safeLevel; currentLevel += 1) {
         xpSpent += resolveXpForNextLevel(currentLevel, config);
     }
 
     return xpSpent;
+}
+
+function resolveTotalXpFromLevelAndProgress(level: number, xpIntoLevel: number, config: EconomyConfig): number {
+    const safeLevel = Math.max(ECONOMY_MIN_LEVEL, Math.floor(level));
+    const xpForCurrentLevel = resolveXpForNextLevel(safeLevel, config);
+    const safeXpIntoLevel = Math.max(0, Math.floor(xpIntoLevel));
+
+    if (safeXpIntoLevel >= xpForCurrentLevel) {
+        throw new EconomyCsvImportValidationError(
+            `XP wewnatrz levela (${safeXpIntoLevel}) musi byc mniejsze od progu kolejnego poziomu (${xpForCurrentLevel}).`,
+        );
+    }
+
+    return resolveXpSpentForLevel(safeLevel, config) + safeXpIntoLevel;
+}
+
+function normalizeLevelRoleMappings(inputMappings: EconomyLevelRoleMappingInput[]): EconomyLevelRoleMappingInput[] {
+    const normalized = inputMappings.map((mapping) => {
+        return {
+            roleId: String(mapping.roleId ?? '').trim(),
+            minLevel: Math.max(1, Math.floor(mapping.minLevel)),
+        };
+    });
+
+    const roleIdSet = new Set<string>();
+    for (const mapping of normalized) {
+        if (!/^\d{17,20}$/.test(mapping.roleId)) {
+            throw new EconomyInputValidationError('Kazde mapowanie roli musi zawierac poprawne roleId (17-20 cyfr).');
+        }
+
+        if (roleIdSet.has(mapping.roleId)) {
+            throw new EconomyInputValidationError(`Rola ${mapping.roleId} wystepuje wielokrotnie w mapowaniu leveli.`);
+        }
+
+        roleIdSet.add(mapping.roleId);
+    }
+
+    return [...normalized].sort((left, right) => {
+        if (left.minLevel !== right.minLevel) {
+            return left.minLevel - right.minLevel;
+        }
+
+        return left.roleId.localeCompare(right.roleId);
+    });
+}
+
+function parseCsvImportRows(csvContent: string): string[] {
+    const normalized = csvContent.replace(/^\uFEFF/, '');
+    const rows = normalized
+        .split(/\r?\n/g)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+    if (rows.length === 0) {
+        throw new EconomyCsvImportValidationError('Plik CSV jest pusty.');
+    }
+
+    if (rows.length > MAX_CSV_IMPORT_ROWS) {
+        throw new EconomyCsvImportValidationError(`Plik CSV przekracza limit ${MAX_CSV_IMPORT_ROWS} wierszy.`);
+    }
+
+    return rows;
 }
 
 export function resolveLevelProgress(totalXp: number, level: number, config: EconomyConfig): {
@@ -230,9 +350,10 @@ export function resolveLevelProgress(totalXp: number, level: number, config: Eco
     xpForNextLevel: number;
     xpToNextLevel: number;
 } {
-    const xpSpentForCurrentLevel = resolveXpSpentForLevel(level, config);
+    const safeLevel = Math.max(ECONOMY_MIN_LEVEL, Math.floor(level));
+    const xpSpentForCurrentLevel = resolveXpSpentForLevel(safeLevel, config);
     const xpIntoLevel = Math.max(0, totalXp - xpSpentForCurrentLevel);
-    const xpForNextLevel = resolveXpForNextLevel(level + 1, config);
+    const xpForNextLevel = resolveXpForNextLevel(safeLevel, config);
     const xpToNextLevel = Math.max(0, xpForNextLevel - xpIntoLevel);
 
     return {
@@ -379,14 +500,18 @@ async function getOrCreateEconomyUser(
             xp,
             level,
             coins,
+            message_count,
+            voice_minutes,
             daily_streak,
             last_daily_claim_at,
             created_at,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         guildId,
         userId,
+        0,
+        ECONOMY_MIN_LEVEL,
         0,
         0,
         0,
@@ -426,6 +551,7 @@ async function getEconomyConfigFromDatabase(db: Database): Promise<EconomyConfig
             daily_streak_grace_hours,
             daily_messages_json,
             leveling_mode,
+            leveling_curve,
             leveling_base_xp,
             leveling_exponent,
             xp_text_per_message,
@@ -476,6 +602,7 @@ export async function updateEconomyConfig(
                     daily_streak_grace_hours = ?,
                     daily_messages_json = ?,
                     leveling_mode = ?,
+                    leveling_curve = ?,
                     leveling_base_xp = ?,
                     leveling_exponent = ?,
                     xp_text_per_message = ?,
@@ -499,6 +626,7 @@ export async function updateEconomyConfig(
                 config.dailyStreakGraceHours,
                 JSON.stringify(config.dailyMessages),
                 config.levelingMode,
+                config.levelingCurve,
                 config.levelingBaseXp,
                 config.levelingExponent,
                 config.xpTextPerMessage,
@@ -534,6 +662,297 @@ export async function resetEconomyUsers(guildId: string): Promise<number> {
             );
 
             return Number(result?.changes ?? 0);
+        });
+    });
+}
+
+export async function incrementMessageCount(
+    guildId: string,
+    userId: string,
+    nowTimestamp: number,
+): Promise<void> {
+    const db = await getEconomyDatabase();
+
+    await withWriteLock(async () => {
+        await withTransaction(db, async () => {
+            await getOrCreateEconomyUser(db, guildId, userId, nowTimestamp);
+
+            await db.run(
+                `
+                UPDATE economy_users
+                SET message_count = message_count + 1,
+                    updated_at = ?
+                WHERE guild_id = ?
+                  AND user_id = ?
+                `,
+                nowTimestamp,
+                guildId,
+                userId,
+            );
+        });
+    });
+}
+
+export async function incrementVoiceMinutes(
+    guildId: string,
+    userId: string,
+    minutes: number,
+    nowTimestamp: number,
+): Promise<void> {
+    const db = await getEconomyDatabase();
+    const safeMinutes = Math.max(1, Math.floor(minutes));
+
+    await withWriteLock(async () => {
+        await withTransaction(db, async () => {
+            await getOrCreateEconomyUser(db, guildId, userId, nowTimestamp);
+
+            await db.run(
+                `
+                UPDATE economy_users
+                SET voice_minutes = voice_minutes + ?,
+                    updated_at = ?
+                WHERE guild_id = ?
+                  AND user_id = ?
+                `,
+                safeMinutes,
+                nowTimestamp,
+                guildId,
+                userId,
+            );
+        });
+    });
+}
+
+export async function getEconomyUserRankByXp(
+    guildId: string,
+    userId: string,
+    nowTimestamp: number,
+): Promise<number> {
+    const db = await getEconomyDatabase();
+
+    await getOrCreateEconomyUser(db, guildId, userId, nowTimestamp);
+
+    const rankRow = await db.get<{ rank: number }>(
+        `
+        SELECT 1 + COUNT(*) AS rank
+        FROM economy_users AS higher
+        INNER JOIN economy_users AS target
+            ON target.guild_id = ?
+           AND target.user_id = ?
+        WHERE higher.guild_id = target.guild_id
+          AND (
+              higher.xp > target.xp
+              OR (higher.xp = target.xp AND higher.level > target.level)
+              OR (higher.xp = target.xp AND higher.level = target.level AND higher.coins > target.coins)
+              OR (higher.xp = target.xp AND higher.level = target.level AND higher.coins = target.coins AND higher.user_id < target.user_id)
+          )
+        `,
+        guildId,
+        userId,
+    );
+
+    return Math.max(1, Number(rankRow?.rank ?? 1));
+}
+
+export async function getEconomyLevelRoleMappings(guildId: string): Promise<EconomyLevelRoleMapping[]> {
+    const db = await getEconomyDatabase();
+    const rows = await db.all<EconomyLevelRoleMappingRow[]>(
+        `
+        SELECT guild_id, role_id, min_level, created_at, updated_at
+        FROM economy_level_roles
+        WHERE guild_id = ?
+        ORDER BY min_level ASC, role_id ASC
+        `,
+        guildId,
+    );
+
+    return rows.map((row) => toEconomyLevelRoleMapping(row));
+}
+
+export async function replaceEconomyLevelRoleMappings(
+    guildId: string,
+    inputMappings: EconomyLevelRoleMappingInput[],
+    nowTimestamp: number,
+): Promise<EconomyLevelRoleMapping[]> {
+    const db = await getEconomyDatabase();
+    const mappings = normalizeLevelRoleMappings(inputMappings);
+
+    return withWriteLock(async () => {
+        return withTransaction(db, async () => {
+            await db.run(
+                `
+                DELETE FROM economy_level_roles
+                WHERE guild_id = ?
+                `,
+                guildId,
+            );
+
+            for (const mapping of mappings) {
+                await db.run(
+                    `
+                    INSERT INTO economy_level_roles (
+                        guild_id,
+                        role_id,
+                        min_level,
+                        created_at,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    `,
+                    guildId,
+                    mapping.roleId,
+                    mapping.minLevel,
+                    nowTimestamp,
+                    nowTimestamp,
+                );
+            }
+
+            const rows = await db.all<EconomyLevelRoleMappingRow[]>(
+                `
+                SELECT guild_id, role_id, min_level, created_at, updated_at
+                FROM economy_level_roles
+                WHERE guild_id = ?
+                ORDER BY min_level ASC, role_id ASC
+                `,
+                guildId,
+            );
+
+            return rows.map((row) => toEconomyLevelRoleMapping(row));
+        });
+    });
+}
+
+function parseCsvIntegerField(rawValue: string, lineNumber: number, columnName: string, minimum: number): number {
+    if (!/^-?\d+$/.test(rawValue)) {
+        throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: pole ${columnName} musi byc liczba calkowita.`);
+    }
+
+    const parsedValue = Number.parseInt(rawValue, 10);
+    if (!Number.isFinite(parsedValue) || parsedValue < minimum) {
+        throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: pole ${columnName} musi byc >= ${minimum}.`);
+    }
+
+    return parsedValue;
+}
+
+export async function importEconomyCsvSnapshot(input: {
+    guildId: string;
+    csvContent: string;
+    nowTimestamp: number;
+}): Promise<EconomyCsvImportResult> {
+    const db = await getEconomyDatabase();
+    const rows = parseCsvImportRows(input.csvContent);
+
+    return withWriteLock(async () => {
+        return withTransaction(db, async () => {
+            const config = await getEconomyConfigFromDatabase(db);
+            let insertedRows = 0;
+            let updatedRows = 0;
+            const seenUserIds = new Set<string>();
+
+            for (let index = 0; index < rows.length; index += 1) {
+                const lineNumber = index + 1;
+                const columns = rows[index].split(',').map((value) => value.trim());
+
+                if (columns.length !== 5) {
+                    throw new EconomyCsvImportValidationError(
+                        `Wiersz ${lineNumber}: oczekiwano 5 kolumn w formacie userId,level,xp,messages,voiceMinutes.`,
+                    );
+                }
+
+                const [userId, levelRaw, xpRaw, messageCountRaw, voiceMinutesRaw] = columns;
+
+                if (!/^\d{17,20}$/.test(userId)) {
+                    throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: pole userId ma niepoprawny format.`);
+                }
+
+                if (seenUserIds.has(userId)) {
+                    throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: userId ${userId} wystepuje wielokrotnie w pliku.`);
+                }
+
+                seenUserIds.add(userId);
+
+                const level = parseCsvIntegerField(levelRaw, lineNumber, 'level', ECONOMY_MIN_LEVEL);
+                const xpIntoLevel = parseCsvIntegerField(xpRaw, lineNumber, 'xp', 0);
+                const messageCount = parseCsvIntegerField(messageCountRaw, lineNumber, 'messages', 0);
+                const voiceMinutes = parseCsvIntegerField(voiceMinutesRaw, lineNumber, 'voiceMinutes', 0);
+
+                if (level > ECONOMY_MAX_LEVEL) {
+                    throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: level nie moze przekraczac 10000.`);
+                }
+
+                let totalXp = 0;
+                try {
+                    totalXp = resolveTotalXpFromLevelAndProgress(level, xpIntoLevel, config);
+                } catch (error) {
+                    if (error instanceof EconomyCsvImportValidationError) {
+                        throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: ${error.message}`);
+                    }
+
+                    throw error;
+                }
+
+                const updateResult = await db.run(
+                    `
+                    UPDATE economy_users
+                    SET xp = ?,
+                        level = ?,
+                        message_count = ?,
+                        voice_minutes = ?,
+                        updated_at = ?
+                    WHERE guild_id = ?
+                      AND user_id = ?
+                    `,
+                    totalXp,
+                    level,
+                    messageCount,
+                    voiceMinutes,
+                    input.nowTimestamp,
+                    input.guildId,
+                    userId,
+                );
+
+                if (Number(updateResult?.changes ?? 0) > 0) {
+                    updatedRows += 1;
+                    continue;
+                }
+
+                await db.run(
+                    `
+                    INSERT INTO economy_users (
+                        guild_id,
+                        user_id,
+                        xp,
+                        level,
+                        coins,
+                        message_count,
+                        voice_minutes,
+                        daily_streak,
+                        last_daily_claim_at,
+                        created_at,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `,
+                    input.guildId,
+                    userId,
+                    totalXp,
+                    level,
+                    0,
+                    messageCount,
+                    voiceMinutes,
+                    0,
+                    null,
+                    input.nowTimestamp,
+                    input.nowTimestamp,
+                );
+
+                insertedRows += 1;
+            }
+
+            return {
+                importedRows: rows.length,
+                insertedRows,
+                updatedRows,
+            };
         });
     });
 }
@@ -793,7 +1212,7 @@ export async function getEconomyLeaderboardPage(
 
     const rows = await db.all<LeaderboardRow[]>(
         `
-        SELECT user_id, xp, level, coins
+        SELECT user_id, xp, level, coins, message_count, voice_minutes
         FROM economy_users
         WHERE guild_id = ?
         ORDER BY ${orderBySql}
@@ -813,6 +1232,8 @@ export async function getEconomyLeaderboardPage(
             xp: row.xp,
             level: row.level,
             coins: row.coins,
+            messageCount: row.message_count,
+            voiceMinutes: row.voice_minutes,
             xpIntoLevel: progress.xpIntoLevel,
             xpForNextLevel: progress.xpForNextLevel,
             xpToNextLevel: progress.xpToNextLevel,
@@ -851,11 +1272,24 @@ async function applyAdminMutation(input: AdminMutationInput): Promise<EconomyAdm
             } else if (input.operation === 'reset_coins') {
                 currentCoins = 0;
             } else if (input.operation === 'reset_level') {
-                currentLevel = 0;
+                currentLevel = ECONOMY_MIN_LEVEL;
                 currentXp = 0;
             } else if (input.operation === 'add_xp') {
                 const config = await getEconomyConfigFromDatabase(db);
                 currentXp = user.xp + input.amount;
+                currentLevel = resolveLevelFromXp(currentXp, config);
+                const levelUpCoinsAwarded = resolveLevelUpCoins(user.level, currentLevel, config);
+                currentCoins = user.coins + levelUpCoinsAwarded;
+            } else if (input.operation === 'add_levels') {
+                const config = await getEconomyConfigFromDatabase(db);
+                const levelsToAdd = Math.max(1, Math.floor(input.amount));
+                let xpToAdd = 0;
+
+                for (let level = user.level; level < (user.level + levelsToAdd); level += 1) {
+                    xpToAdd += resolveXpForNextLevel(level, config);
+                }
+
+                currentXp = user.xp + xpToAdd;
                 currentLevel = resolveLevelFromXp(currentXp, config);
                 const levelUpCoinsAwarded = resolveLevelUpCoins(user.level, currentLevel, config);
                 currentCoins = user.coins + levelUpCoinsAwarded;
@@ -896,7 +1330,7 @@ async function applyAdminMutation(input: AdminMutationInput): Promise<EconomyAdm
                 input.targetUserId,
                 input.operation,
                 input.amount,
-                input.reason,
+                resolveAdminMutationReason(input.reason),
                 input.nowTimestamp,
             );
 
@@ -954,5 +1388,13 @@ export async function addXpByAdmin(input: Omit<AdminMutationInput, 'operation'>)
         ...input,
         amount: Math.min(MAX_ADMIN_XP_MUTATION_AMOUNT, Math.max(1, input.amount)),
         operation: 'add_xp',
+    });
+}
+
+export async function addLevelsByAdmin(input: Omit<AdminMutationInput, 'operation'>): Promise<EconomyAdminMutationResult> {
+    return applyAdminMutation({
+        ...input,
+        amount: Math.min(MAX_ADMIN_LEVEL_MUTATION_AMOUNT, Math.max(1, input.amount)),
+        operation: 'add_levels',
     });
 }

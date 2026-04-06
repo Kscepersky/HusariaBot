@@ -65,6 +65,36 @@ async function ensureEconomyConfigColumns(db: Database): Promise<void> {
             name: 'level_up_coins_per_level',
             sql: 'ALTER TABLE economy_config ADD COLUMN level_up_coins_per_level INTEGER NOT NULL DEFAULT 10',
         },
+        {
+            name: 'leveling_curve',
+            sql: "ALTER TABLE economy_config ADD COLUMN leveling_curve TEXT NOT NULL DEFAULT 'default'",
+        },
+        {
+            name: 'level_baseline_version',
+            sql: 'ALTER TABLE economy_config ADD COLUMN level_baseline_version INTEGER NOT NULL DEFAULT 0',
+        },
+    ];
+
+    for (const migration of migrations) {
+        if (!columnNames.has(migration.name)) {
+            await db.exec(migration.sql);
+        }
+    }
+}
+
+async function ensureEconomyUserColumns(db: Database): Promise<void> {
+    const columns = await db.all<Array<{ name: string }>>('PRAGMA table_info(economy_users)');
+    const columnNames = new Set(columns.map((column) => column.name));
+
+    const migrations: Array<{ name: string; sql: string }> = [
+        {
+            name: 'message_count',
+            sql: 'ALTER TABLE economy_users ADD COLUMN message_count INTEGER NOT NULL DEFAULT 0',
+        },
+        {
+            name: 'voice_minutes',
+            sql: 'ALTER TABLE economy_users ADD COLUMN voice_minutes INTEGER NOT NULL DEFAULT 0',
+        },
     ];
 
     for (const migration of migrations) {
@@ -82,15 +112,19 @@ async function initializeSchema(db: Database): Promise<void> {
             guild_id TEXT NOT NULL,
             user_id TEXT NOT NULL,
             xp INTEGER NOT NULL DEFAULT 0,
-            level INTEGER NOT NULL DEFAULT 0,
+            level INTEGER NOT NULL DEFAULT 1,
             coins INTEGER NOT NULL DEFAULT 0,
+            message_count INTEGER NOT NULL DEFAULT 0,
+            voice_minutes INTEGER NOT NULL DEFAULT 0,
             daily_streak INTEGER NOT NULL DEFAULT 0,
             last_daily_claim_at INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             PRIMARY KEY (guild_id, user_id),
             CHECK (xp >= 0),
-            CHECK (level >= 0),
+            CHECK (level >= 1),
+            CHECK (message_count >= 0),
+            CHECK (voice_minutes >= 0),
             CHECK (daily_streak >= 0)
         );
 
@@ -109,6 +143,8 @@ async function initializeSchema(db: Database): Promise<void> {
             daily_streak_grace_hours INTEGER NOT NULL,
             daily_messages_json TEXT NOT NULL,
             leveling_mode TEXT NOT NULL,
+            leveling_curve TEXT NOT NULL DEFAULT 'default',
+            level_baseline_version INTEGER NOT NULL DEFAULT 1,
             leveling_base_xp INTEGER NOT NULL,
             leveling_exponent REAL NOT NULL,
             xp_text_per_message INTEGER NOT NULL DEFAULT 1,
@@ -130,6 +166,8 @@ async function initializeSchema(db: Database): Promise<void> {
             CHECK (daily_streak_max_days >= 1),
             CHECK (daily_streak_grace_hours >= 24),
             CHECK (leveling_mode IN ('progressive', 'linear')),
+            CHECK (leveling_curve IN ('default', 'formula_v2')),
+            CHECK (level_baseline_version IN (0, 1)),
             CHECK (leveling_base_xp >= 1),
             CHECK (leveling_exponent >= 1),
             CHECK (watchparty_xp_multiplier >= 0),
@@ -149,9 +187,23 @@ async function initializeSchema(db: Database): Promise<void> {
 
         CREATE INDEX IF NOT EXISTS idx_economy_admin_mutations_created_at
             ON economy_admin_mutations(created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS economy_level_roles (
+            guild_id TEXT NOT NULL,
+            role_id TEXT NOT NULL,
+            min_level INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, role_id),
+            CHECK (min_level >= 1)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_economy_level_roles_guild_level
+            ON economy_level_roles(guild_id, min_level DESC, role_id ASC);
     `);
 
-            await ensureEconomyConfigColumns(db);
+    await ensureEconomyConfigColumns(db);
+    await ensureEconomyUserColumns(db);
 
     const now = Date.now();
     const defaultDailyMessages = JSON.stringify([
@@ -169,6 +221,8 @@ async function initializeSchema(db: Database): Promise<void> {
             daily_streak_grace_hours,
             daily_messages_json,
             leveling_mode,
+            leveling_curve,
+            level_baseline_version,
             leveling_base_xp,
             leveling_exponent,
             xp_text_per_message,
@@ -184,7 +238,7 @@ async function initializeSchema(db: Database): Promise<void> {
             level_up_coins_per_level,
             created_at,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         1,
         100,
@@ -194,6 +248,8 @@ async function initializeSchema(db: Database): Promise<void> {
         48,
         defaultDailyMessages,
         'progressive',
+        'default',
+        1,
         100,
         1.5,
         1,
@@ -210,6 +266,46 @@ async function initializeSchema(db: Database): Promise<void> {
         now,
         now,
     );
+
+    await db.exec('BEGIN IMMEDIATE TRANSACTION');
+    try {
+        const baselineRow = await db.get<{ level_baseline_version: number }>(
+            `
+            SELECT level_baseline_version
+            FROM economy_config
+            WHERE id = 1
+            LIMIT 1
+            `,
+        );
+
+        const baselineVersion = Number.isFinite(Number(baselineRow?.level_baseline_version))
+            ? Number(baselineRow?.level_baseline_version)
+            : 0;
+
+        if (baselineVersion < 1) {
+            await db.run(
+                `
+                UPDATE economy_users
+                SET level = level + 1
+                `,
+            );
+
+            await db.run(
+                `
+                UPDATE economy_config
+                SET level_baseline_version = 1,
+                    updated_at = ?
+                WHERE id = 1
+                `,
+                Date.now(),
+            );
+        }
+
+        await db.exec('COMMIT');
+    } catch (error) {
+        await db.exec('ROLLBACK');
+        throw error;
+    }
 }
 
 export async function getEconomyDatabase(): Promise<Database> {

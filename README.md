@@ -63,6 +63,7 @@ img/                        Image library
 - Node.js 20.17+ (Node.js 22 LTS recommended)
 - npm 9+
 - Discord application + bot configured in Discord Developer Portal
+- For `canvas`: on some environments without prebuilt binaries you may need native build tooling (Windows Build Tools / Python / C++ toolchain)
 
 ## Quick Start
 
@@ -111,6 +112,8 @@ Most important variables:
 | GUILD_ID | recommended | Test guild for instant command propagation |
 | ADMIN_ROLE_ID | yes | Admin role ID |
 | MODERATOR_ROLE_ID | yes | Moderator role ID |
+| COMMUNITY_MANAGER_ROLE_ID | yes (dashboard) | Community Manager role ID |
+| DEV_ROLE_ID | yes (dashboard) | Dev role ID (full dashboard + economy access) |
 | SUPPORT_CATEGORY_ID | yes | Tickets category ID |
 | VOICE_TRIGGER_CHANNEL_ID | yes (temp voice) | Trigger voice channel ID |
 | VOICE_CATEGORY_ID | yes (temp voice) | Category ID for temporary voice channels |
@@ -120,6 +123,7 @@ Most important variables:
 | DASHBOARD_SESSION_SECRET | yes (dashboard) | Express session secret |
 | DASHBOARD_SESSION_DB_PATH | no | Dashboard session SQLite path |
 | ECONOMY_DB_PATH | no | Economy SQLite path |
+| LEVEL_UP_ANNOUNCE_CHANNEL_ID | no | Text channel ID for natural level-up announcements |
 | DASHBOARD_SESSION_TTL_HOURS | no | Dashboard session TTL in hours |
 | DASHBOARD_TRUST_PROXY | no | Proxy trust setting (1/0) |
 | DASHBOARD_PORT | no | Dashboard port (default: 3000) |
@@ -145,20 +149,20 @@ Temporary voice flow:
 
 | Command | Description | Access |
 | --- | --- | --- |
-| /ping | Health check and latency | Admin/Moderator |
-| /dashboard | Dashboard link | Admin/Moderator |
-| /sendimg | Send image from `img` library | Admin/Moderator |
-| /ticketyconfig | Configure ticket panel | Admin/Moderator |
+| /ping | Health check and latency | Admin/Moderator/CommunityManager/Dev |
+| /dashboard | Dashboard link | Admin/Moderator/CommunityManager/Dev |
+| /sendimg | Send image from `img` library | Admin/Moderator/CommunityManager/Dev |
+| /ticketyconfig | Configure ticket panel | Admin/Moderator/CommunityManager/Dev |
 | /daily | Claim daily coin reward | All guild members |
 | /streak-daily | Show daily streak and multiplier | All guild members |
 | /leaderboard-xp | XP/level leaderboard | All guild members |
 | /stankonta | Private coin balance summary | All guild members |
-| /level | Public level progress summary | All guild members |
-| /dodaj-coinsy | Add coins to target user | Admin/Moderator |
-| /dodaj-xp | Add XP to target user | Admin/Moderator |
-| /usun-coinsy | Remove coins from target user | Admin/Moderator |
-| /resetuj-level | Reset target user level and XP | Admin/Moderator |
-| /resetuj-coinsy | Reset target user coins | Admin/Moderator |
+| /level | Public level card image with XP progress | All guild members |
+| /dodaj-coinsy | Add coins to target user | Admin/Moderator/CommunityManager/Dev |
+| /dodaj-xp | Add XP to target user | Admin/Moderator/CommunityManager/Dev |
+| /usun-coinsy | Remove coins from target user | Admin/Moderator/CommunityManager/Dev |
+| /resetuj-level | Reset target user level and XP | Admin/Moderator/CommunityManager/Dev |
+| /resetuj-coinsy | Reset target user coins | Admin/Moderator/CommunityManager/Dev |
 
 ## Dashboard
 
@@ -171,8 +175,18 @@ Dashboard modules:
 - Sent posts (edit, retry, delete).
 - Discord Scheduled Events management (CRUD).
 - G2 matches (PandaScore sync, filters, refresh).
-- Economy settings (daily, leveling, text/voice XP, reset users).
-- Economy leaderboard (XP/coins sorting, pagination, Discord display names/avatars).
+- Economy settings (daily, leveling, text/voice XP, reset users, strict CSV import snapshot, role rewards per level).
+- Economy leaderboard (XP/coins sorting, pagination, Discord display names/avatars, message and voice-minute stats).
+- Economy access policy: settings/mutations/import/level-role mappings are Dev-only; leaderboard is available for Admin/Moderator/CommunityManager/Dev.
+
+Economy CSV import format:
+
+- Strict no-header rows: `userId,level,xp,messages,voiceMinutes`
+- `level` uses HusariaBot internal scale where first level is `1`
+- `xp` means XP inside current level (not total XP)
+- Import uses current leveling curve to convert level + xp into total XP
+- Import works in snapshot mode (overwrites target state fields, does not add)
+- Import is fail-fast with full rollback on first invalid row
 
 Dashboard scripts:
 

@@ -62,7 +62,7 @@ export const dashboardLinkCommand = {
             .setDescription(
                 [
                     'Panel do tworzenia i publikacji embedów oraz wysyłki obrazów.',
-                    'Dostęp posiadają tylko role Zarząd i Moderator.',
+                    'Dostęp posiadają role Zarząd, Moderator, Community Manager i Dev.',
                     '',
                     `Link: ${dashboardUrl}`,
                 ].join('\n'),

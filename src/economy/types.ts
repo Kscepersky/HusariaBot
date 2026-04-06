@@ -1,4 +1,5 @@
 export type EconomyLevelingMode = 'progressive' | 'linear';
+export type EconomyLevelingCurve = 'default' | 'formula_v2';
 
 export interface EconomyConfig {
     dailyMinCoins: number;
@@ -8,6 +9,7 @@ export interface EconomyConfig {
     dailyStreakGraceHours: number;
     dailyMessages: string[];
     levelingMode: EconomyLevelingMode;
+    levelingCurve: EconomyLevelingCurve;
     levelingBaseXp: number;
     levelingExponent: number;
     xpTextPerMessage: number;
@@ -29,10 +31,31 @@ export interface EconomyUserState {
     xp: number;
     level: number;
     coins: number;
+    messageCount: number;
+    voiceMinutes: number;
     dailyStreak: number;
     lastDailyClaimAt: number | null;
     createdAt: number;
     updatedAt: number;
+}
+
+export interface EconomyLevelRoleMapping {
+    guildId: string;
+    roleId: string;
+    minLevel: number;
+    createdAt: number;
+    updatedAt: number;
+}
+
+export interface EconomyLevelRoleMappingInput {
+    roleId: string;
+    minLevel: number;
+}
+
+export interface EconomyCsvImportResult {
+    importedRows: number;
+    insertedRows: number;
+    updatedRows: number;
 }
 
 export interface DailyClaimContext {
@@ -71,7 +94,7 @@ export interface DailyStreakSummary {
     lastClaimAt: number | null;
 }
 
-export type EconomyAdminOperation = 'add_coins' | 'remove_coins' | 'reset_coins' | 'reset_level' | 'add_xp';
+export type EconomyAdminOperation = 'add_coins' | 'remove_coins' | 'reset_coins' | 'reset_level' | 'add_xp' | 'add_levels';
 
 export interface EconomyAdminMutationResult {
     guildId: string;
@@ -95,6 +118,8 @@ export interface EconomyLeaderboardEntry {
     xp: number;
     level: number;
     coins: number;
+    messageCount: number;
+    voiceMinutes: number;
     xpIntoLevel: number;
     xpForNextLevel: number;
     xpToNextLevel: number;

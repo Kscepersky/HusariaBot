@@ -42,7 +42,7 @@
         <span class="sidebar-icon">🏟️</span>
         <span>Baza meczów G2</span>
       </a>
-      <a href="#" class="sidebar-item" data-section="economy-settings">
+      <a href="#" class="sidebar-item" id="economy-settings-nav-item" data-section="economy-settings" style="display:none;">
         <span class="sidebar-icon">🧅</span>
         <span>Ustawienia ekonomii</span>
       </a>
@@ -417,7 +417,11 @@
         <p>Konfiguruj daily, poziomy i XP. Komendy użyją zmian od razu, a runtime naliczania odświeża konfigurację cyklicznie.</p>
       </div>
 
-      <div class="creator-form-card">
+      <div id="economy-dev-only-notice" class="scheduled-empty economy-access-notice" hidden>
+        Ustawienia i operacje ekonomii są dostępne tylko dla roli Dev. Dla ról support dostępny pozostaje leaderboard ekonomii.
+      </div>
+
+      <div id="economy-dev-controls" class="creator-form-card" style="display:none;">
         <div class="scheduled-toolbar">
           <button id="economy-settings-reload-btn" class="btn-secondary" type="button">Odśwież ustawienia</button>
           <span class="preview-note" id="economy-settings-last-loaded">Brak danych.</span>
@@ -446,6 +450,12 @@
           <select id="economy-leveling-mode" class="form-select">
             <option value="progressive">Progressive</option>
             <option value="linear">Linear</option>
+          </select>
+
+          <label class="form-label" for="economy-leveling-curve">Krzywa XP na poziom</label>
+          <select id="economy-leveling-curve" class="form-select">
+            <option value="default">Domyślna (zależna od trybu i base/exponent)</option>
+            <option value="formula_v2">Formula v2 (100 + 0.04(l-1)^3 + 0.8(l-1)^2 + 2(l-1) + 0.5)</option>
           </select>
 
           <label class="form-label" for="economy-leveling-base-xp">Leveling: base XP</label>
@@ -500,6 +510,73 @@
           <button id="economy-settings-save-btn" class="btn-primary" type="button">Zapisz ustawienia ekonomii</button>
           <button id="economy-settings-reset-users-btn" class="btn-secondary" type="button">Resetuj wszystkich użytkowników ekonomii</button>
         </div>
+
+        <hr class="section-divider">
+
+        <div class="section-header">
+          <h3>🛠️ Ręczna migracja użytkownika</h3>
+          <p>Dla importu z innego bota: wpisz ID użytkownika Discord i dodaj ręcznie coinsy, XP lub levele.</p>
+        </div>
+
+        <div class="events-form-grid">
+          <label class="form-label" for="economy-mutation-user-id">ID użytkownika Discord</label>
+          <input id="economy-mutation-user-id" type="text" class="form-input" placeholder="np. 123456789012345678">
+
+          <label class="form-label" for="economy-mutation-coins-amount">Coins do dodania</label>
+          <input id="economy-mutation-coins-amount" type="number" class="form-input" min="1" step="1" value="100">
+
+          <label class="form-label" for="economy-mutation-xp-amount">XP do dodania</label>
+          <input id="economy-mutation-xp-amount" type="number" class="form-input" min="1" step="1" value="100">
+
+          <label class="form-label" for="economy-mutation-levels-amount">Levele do dodania</label>
+          <input id="economy-mutation-levels-amount" type="number" class="form-input" min="1" max="1000" step="1" value="1">
+        </div>
+
+        <div class="scheduled-actions">
+          <button id="economy-mutation-add-coins-btn" class="btn-secondary" type="button">Dodaj Coins użytkownikowi</button>
+          <button id="economy-mutation-add-xp-btn" class="btn-secondary" type="button">Dodaj XP użytkownikowi</button>
+          <button id="economy-mutation-add-levels-btn" class="btn-secondary" type="button">Dodaj levele użytkownikowi</button>
+        </div>
+
+        <hr class="section-divider">
+
+        <div class="section-header">
+          <h3>📥 Import CSV (snapshot)</h3>
+          <p>Format bez nagłówka: userId,level,xp,messages,voiceMinutes. Jeden błędny wiersz anuluje cały import.</p>
+        </div>
+
+        <div class="events-form-grid">
+          <label class="form-label" for="economy-csv-import-file">Plik CSV</label>
+          <input id="economy-csv-import-file" type="file" class="form-input" accept=".csv,text/csv">
+          <p class="form-help">Przykład wiersza: 123456789012345678,12,45,1000,250</p>
+        </div>
+
+        <div class="scheduled-actions">
+          <button id="economy-csv-import-btn" class="btn-secondary" type="button">Importuj snapshot CSV</button>
+        </div>
+
+        <hr class="section-divider">
+
+        <div class="section-header">
+          <h3>🎖️ Role za level</h3>
+          <p>Bot nadaje najwyższą rolę z progiem ≤ aktualny level i usuwa tylko inne role z tej mapy.</p>
+        </div>
+
+        <div class="events-form-grid">
+          <label class="form-label" for="economy-level-role-id">Rola</label>
+          <select id="economy-level-role-id" class="form-select">
+            <option value="">Wybierz rolę</option>
+          </select>
+
+          <label class="form-label" for="economy-level-role-min-level">Minimalny level</label>
+          <input id="economy-level-role-min-level" type="number" class="form-input" min="1" step="1" value="1">
+        </div>
+
+        <div class="scheduled-actions">
+          <button id="economy-level-role-add-btn" class="btn-secondary" type="button">Dodaj mapowanie roli</button>
+        </div>
+
+        <div id="economy-level-roles-list" class="scheduled-list"></div>
       </div>
     </div>
 

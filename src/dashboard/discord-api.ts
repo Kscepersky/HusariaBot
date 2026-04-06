@@ -159,6 +159,8 @@ export interface DiscordMentionUser {
     nick: string | null;
 }
 
+export type DiscordMemberRoleUpdateOutcome = 'updated' | 'not_found';
+
 function buildWatchpartyPermissionOverwrite(guildId: string, initiallyOpen: boolean): {
     id: string;
     type: number;
@@ -223,6 +225,48 @@ export async function getGuildMember(userId: string, guildId: string): Promise<D
     if (resp.status === 404) return null;
     if (!resp.ok) throw new Error(`Failed to fetch guild member: ${resp.status}`);
     return resp.json() as Promise<DiscordGuildMember>;
+}
+
+export async function updateGuildMemberRoles(
+    guildId: string,
+    userId: string,
+    roles: string[],
+): Promise<DiscordMemberRoleUpdateOutcome> {
+    if (!isValidDiscordId(guildId)) {
+        throw new Error('Invalid guild ID format.');
+    }
+
+    if (!isValidDiscordId(userId)) {
+        throw new Error('Invalid user ID format.');
+    }
+
+    const sanitizedRoles = [...new Set(
+        roles
+            .map((roleId) => roleId.trim())
+            .filter((roleId) => isValidDiscordId(roleId)),
+    )];
+
+    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}`, {
+        method: 'PATCH',
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            roles: sanitizedRoles,
+        }),
+    });
+
+    if (resp.status === 404) {
+        return 'not_found';
+    }
+
+    if (!resp.ok) {
+        const errPayload = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to update guild member roles: ${resp.status} — ${JSON.stringify(errPayload)}`);
+    }
+
+    return 'updated';
 }
 
 export async function getGuildTextChannels(guildId: string): Promise<DiscordChannel[]> {
@@ -724,10 +768,33 @@ export async function sendEmbedToChannel(channelId: string, embedJson: object): 
     return sendMessageToChannel(channelId, { embeds: [embedJson] });
 }
 
+function resolveDashboardSupportRoleIds(): string[] {
+    const roleIds = [
+        requireEnv('ADMIN_ROLE_ID'),
+        requireEnv('MODERATOR_ROLE_ID'),
+        process.env.COMMUNITY_MANAGER_ROLE_ID?.trim(),
+    ];
+
+    return [...new Set(roleIds.filter((roleId): roleId is string => typeof roleId === 'string' && roleId.length > 0))];
+}
+
+function resolveDashboardDevRoleId(): string | null {
+    const roleId = process.env.DEV_ROLE_ID?.trim();
+    return roleId && roleId.length > 0 ? roleId : null;
+}
+
+export function hasSupportRole(member: DiscordGuildMember): boolean {
+    const supportRoleIds = resolveDashboardSupportRoleIds();
+    return supportRoleIds.some((roleId) => member.roles.includes(roleId));
+}
+
+export function hasDevRole(member: DiscordGuildMember): boolean {
+    const devRoleId = resolveDashboardDevRoleId();
+    return Boolean(devRoleId && member.roles.includes(devRoleId));
+}
+
 export function hasRequiredRole(member: DiscordGuildMember): boolean {
-    const adminId  = requireEnv('ADMIN_ROLE_ID');
-    const modId    = requireEnv('MODERATOR_ROLE_ID');
-    return member.roles.includes(adminId) || member.roles.includes(modId);
+    return hasSupportRole(member) || hasDevRole(member);
 }
 
 const ALLOWED_IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif']);

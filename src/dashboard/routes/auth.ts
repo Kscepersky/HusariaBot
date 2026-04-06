@@ -97,7 +97,7 @@ authRouter.get('/login', (_req, res) => {
 });
 
 const ERROR_MESSAGES: Record<string, string> = {
-    no_access:     'Nie masz uprawnień. Wymagana rola: Zarząd lub Moderator.',
+    no_access:     'Nie masz uprawnień. Wymagana rola: Zarząd, Moderator, Community Manager lub Dev.',
     not_member:    'Nie jesteś członkiem tego serwera Discord.',
     invalid_state: 'Błąd autoryzacji — nieprawidłowy stan. Spróbuj ponownie.',
     auth_failed:   'Logowanie nie powiodło się. Spróbuj ponownie.',
