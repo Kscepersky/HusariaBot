@@ -269,6 +269,74 @@ export async function updateGuildMemberRoles(
     return 'updated';
 }
 
+export async function addGuildMemberRole(
+    guildId: string,
+    userId: string,
+    roleId: string,
+): Promise<DiscordMemberRoleUpdateOutcome> {
+    if (!isValidDiscordId(guildId)) {
+        throw new Error('Invalid guild ID format.');
+    }
+
+    if (!isValidDiscordId(userId)) {
+        throw new Error('Invalid user ID format.');
+    }
+
+    if (!isValidDiscordId(roleId)) {
+        throw new Error('Invalid role ID format.');
+    }
+
+    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+    });
+
+    if (resp.status === 404) {
+        return 'not_found';
+    }
+
+    if (!resp.ok) {
+        const errPayload = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to add guild member role: ${resp.status} — ${JSON.stringify(errPayload)}`);
+    }
+
+    return 'updated';
+}
+
+export async function removeGuildMemberRole(
+    guildId: string,
+    userId: string,
+    roleId: string,
+): Promise<DiscordMemberRoleUpdateOutcome> {
+    if (!isValidDiscordId(guildId)) {
+        throw new Error('Invalid guild ID format.');
+    }
+
+    if (!isValidDiscordId(userId)) {
+        throw new Error('Invalid user ID format.');
+    }
+
+    if (!isValidDiscordId(roleId)) {
+        throw new Error('Invalid role ID format.');
+    }
+
+    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+    });
+
+    if (resp.status === 404) {
+        return 'not_found';
+    }
+
+    if (!resp.ok) {
+        const errPayload = await resp.json().catch(() => ({}));
+        throw new Error(`Failed to remove guild member role: ${resp.status} — ${JSON.stringify(errPayload)}`);
+    }
+
+    return 'updated';
+}
+
 export async function getGuildTextChannels(guildId: string): Promise<DiscordChannel[]> {
     const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/channels`, {
         headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },

@@ -52,6 +52,39 @@ export interface EconomyLevelRoleMappingInput {
     minLevel: number;
 }
 
+export interface EconomyTimeoutRecord {
+    id: number;
+    guildId: string;
+    userId: string;
+    reason: string;
+    muteRoleId: string;
+    createdByUserId: string;
+    createdAt: number;
+    expiresAt: number;
+    isActive: boolean;
+    releasedAt: number | null;
+    releasedByUserId: string | null;
+    releaseReason: string | null;
+}
+
+export interface EconomyTimeoutCreateInput {
+    guildId: string;
+    userId: string;
+    reason: string;
+    muteRoleId: string;
+    createdByUserId: string;
+    createdAt: number;
+    expiresAt: number;
+}
+
+export interface EconomyTimeoutReleaseInput {
+    guildId: string;
+    timeoutId: number;
+    releasedAt: number;
+    releasedByUserId: string;
+    releaseReason: string;
+}
+
 export interface EconomyCsvImportResult {
     importedRows: number;
     insertedRows: number;

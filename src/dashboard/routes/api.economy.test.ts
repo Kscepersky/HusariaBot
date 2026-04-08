@@ -37,10 +37,15 @@ vi.mock('../../economy/repository.js', () => ({
     addCoinsByAdmin: vi.fn(),
     addLevelsByAdmin: vi.fn(),
     addXpByAdmin: vi.fn(),
+    createEconomyTimeout: vi.fn(),
+    getActiveEconomyTimeoutForUser: vi.fn(),
     getEconomyConfig: vi.fn(),
     getEconomyLeaderboardPage: vi.fn(),
     getEconomyLevelRoleMappings: vi.fn(),
+    getEconomyTimeoutById: vi.fn(),
     importEconomyCsvSnapshot: vi.fn(),
+    listActiveEconomyTimeouts: vi.fn(),
+    releaseEconomyTimeout: vi.fn(),
     replaceEconomyLevelRoleMappings: vi.fn(),
     updateEconomyConfig: vi.fn(),
     resetEconomyUsers: vi.fn(),
@@ -53,6 +58,8 @@ vi.mock('../discord-api.js', () => ({
     getGuildRoles: vi.fn(),
     getGuildEmojis: vi.fn(),
     getGuildMember: vi.fn(),
+    addGuildMemberRole: vi.fn(),
+    removeGuildMemberRole: vi.fn(),
     updateGuildMemberRoles: vi.fn(),
     hasDevRole: vi.fn(() => true),
     hasRequiredRole: vi.fn(() => true),
@@ -101,15 +108,27 @@ import {
     addCoinsByAdmin,
     addLevelsByAdmin,
     addXpByAdmin,
+    createEconomyTimeout,
+    getActiveEconomyTimeoutForUser,
     getEconomyConfig,
     getEconomyLeaderboardPage,
     getEconomyLevelRoleMappings,
+    getEconomyTimeoutById,
     importEconomyCsvSnapshot,
+    listActiveEconomyTimeouts,
+    releaseEconomyTimeout,
     replaceEconomyLevelRoleMappings,
     resetEconomyUsers,
     updateEconomyConfig,
 } from '../../economy/repository.js';
-import { getGuildMember, hasDevRole, hasRequiredRole, updateGuildMemberRoles } from '../discord-api.js';
+import {
+    addGuildMemberRole,
+    getGuildMember,
+    hasDevRole,
+    hasRequiredRole,
+    removeGuildMemberRole,
+    updateGuildMemberRoles,
+} from '../discord-api.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
 import { publishDashboardPost } from '../publish-flow.js';
 import { insertScheduledPost, updateScheduledPost } from '../scheduler/store.js';
@@ -220,6 +239,7 @@ describe('api economy settings routes', () => {
         process.env.MODERATOR_ROLE_ID = '910000000000000002';
         process.env.COMMUNITY_MANAGER_ROLE_ID = '910000000000000003';
         process.env.DEV_ROLE_ID = '910000000000000004';
+        process.env.SERVER_MUTE_ROLE_ID = '910000000000000005';
         vi.mocked(getGuildMember).mockResolvedValue({ roles: ['admin-role'] } as any);
         vi.mocked(hasDevRole).mockReturnValue(true);
         vi.mocked(hasRequiredRole).mockReturnValue(true);
@@ -1452,6 +1472,234 @@ describe('api economy settings routes', () => {
             const cachedProfileLookups = vi.mocked(getGuildMember).mock.calls
                 .filter((call) => call[0] === dedupeUserId);
             expect(cachedProfileLookups).toHaveLength(1);
+        });
+    });
+
+    it('zwraca aktywna liste timeoutow', async () => {
+        vi.mocked(listActiveEconomyTimeouts).mockResolvedValue([
+            {
+                id: 1,
+                guildId: '123456789012345678',
+                userId: '999999999999999999',
+                reason: 'Flood',
+                muteRoleId: '910000000000000005',
+                createdByUserId: 'user-1',
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 60_000,
+                isActive: true,
+                releasedAt: null,
+                releasedByUserId: null,
+                releaseReason: null,
+            },
+        ] as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/timeouts?userId=999999999999999999&limit=25`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(Array.isArray(body.timeouts)).toBe(true);
+            expect(vi.mocked(listActiveEconomyTimeouts)).toHaveBeenCalledWith(
+                '123456789012345678',
+                {
+                    userId: '999999999999999999',
+                    limit: 25,
+                },
+            );
+        });
+    });
+
+    it('naklada timeout przez dashboard i zapisuje rekord', async () => {
+        const now = Date.now();
+        const createdTimeout = {
+            id: 55,
+            guildId: '123456789012345678',
+            userId: '999999999999999999',
+            reason: 'Spam',
+            muteRoleId: '910000000000000005',
+            createdByUserId: 'user-1',
+            createdAt: now,
+            expiresAt: now + (60 * 60 * 1000),
+            isActive: true,
+            releasedAt: null,
+            releasedByUserId: null,
+            releaseReason: null,
+        };
+
+        vi.mocked(getActiveEconomyTimeoutForUser)
+            .mockResolvedValueOnce(null as any)
+            .mockResolvedValueOnce(createdTimeout as any);
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return { roles: ['admin-role'] } as any;
+            }
+
+            if (userId === '999999999999999999') {
+                return { roles: ['222222222222222222'] } as any;
+            }
+
+            return null;
+        });
+        vi.mocked(createEconomyTimeout).mockResolvedValue(createdTimeout as any);
+        vi.mocked(addGuildMemberRole).mockResolvedValue('updated' as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/timeouts`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '999999999999999999',
+                    durationAmount: 1,
+                    durationUnit: 'h',
+                    reason: 'Spam',
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(createEconomyTimeout)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(addGuildMemberRole)).toHaveBeenCalledWith(
+                '123456789012345678',
+                '999999999999999999',
+                '910000000000000005',
+            );
+        });
+    });
+
+    it('odrzuca timeout dla bota przez API', async () => {
+        vi.mocked(getActiveEconomyTimeoutForUser).mockResolvedValue(null as any);
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return { roles: ['admin-role'] } as any;
+            }
+
+            if (userId === '999999999999999999') {
+                return { roles: ['222222222222222222'], user: { bot: true } } as any;
+            }
+
+            return null;
+        });
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/timeouts`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '999999999999999999',
+                    durationAmount: 1,
+                    durationUnit: 'h',
+                    reason: 'Spam',
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(body.error).toBe('Nie mozna nalozyc timeoutu na boty.');
+            expect(vi.mocked(createEconomyTimeout)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('odrzuca timeout dla czlonka staffu', async () => {
+        vi.mocked(getActiveEconomyTimeoutForUser).mockResolvedValue(null as any);
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return { roles: ['admin-role'] } as any;
+            }
+
+            if (userId === '999999999999999999') {
+                return { roles: ['910000000000000001'] } as any;
+            }
+
+            return null;
+        });
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/timeouts`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '999999999999999999',
+                    durationAmount: 1,
+                    durationUnit: 'h',
+                    reason: 'Spam',
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(403);
+            expect(body.error).toBe('Nie mozna nalozyc timeoutu na czlonka staffu.');
+            expect(vi.mocked(createEconomyTimeout)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('zdejmuje timeout przez dashboard i aktualizuje role', async () => {
+        const activeTimeout = {
+            id: 77,
+            guildId: '123456789012345678',
+            userId: '888888888888888888',
+            reason: 'Flood',
+            muteRoleId: '910000000000000005',
+            createdByUserId: 'user-1',
+            createdAt: Date.now() - 5_000,
+            expiresAt: Date.now() + (60 * 60 * 1000),
+            isActive: true,
+            releasedAt: null,
+            releasedByUserId: null,
+            releaseReason: null,
+        };
+        const releasedTimeout = {
+            ...activeTimeout,
+            isActive: false,
+            releasedAt: Date.now(),
+            releasedByUserId: 'user-1',
+            releaseReason: 'Timeout zdjety recznie z dashboardu',
+        };
+
+        vi.mocked(getEconomyTimeoutById).mockResolvedValue(activeTimeout as any);
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return { roles: ['admin-role'] } as any;
+            }
+
+            if (userId === '888888888888888888') {
+                return { roles: ['910000000000000005', '123123123123123123'] } as any;
+            }
+
+            return null;
+        });
+        vi.mocked(removeGuildMemberRole).mockResolvedValue('updated' as any);
+        vi.mocked(releaseEconomyTimeout).mockResolvedValue(releasedTimeout as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/timeouts/77/remove`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({}),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(removeGuildMemberRole)).toHaveBeenCalledWith(
+                '123456789012345678',
+                '888888888888888888',
+                '910000000000000005',
+            );
+            expect(vi.mocked(releaseEconomyTimeout)).toHaveBeenCalledTimes(1);
         });
     });
 });

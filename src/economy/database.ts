@@ -200,6 +200,35 @@ async function initializeSchema(db: Database): Promise<void> {
 
         CREATE INDEX IF NOT EXISTS idx_economy_level_roles_guild_level
             ON economy_level_roles(guild_id, min_level DESC, role_id ASC);
+
+        CREATE TABLE IF NOT EXISTS economy_timeouts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            mute_role_id TEXT NOT NULL,
+            created_by_user_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            released_at INTEGER,
+            released_by_user_id TEXT,
+            release_reason TEXT,
+            CHECK (created_at >= 0),
+            CHECK (expires_at >= 0),
+            CHECK (expires_at >= created_at),
+            CHECK (is_active IN (0, 1))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_economy_timeouts_guild_expires
+            ON economy_timeouts(guild_id, is_active, expires_at ASC);
+
+        CREATE INDEX IF NOT EXISTS idx_economy_timeouts_guild_created
+            ON economy_timeouts(guild_id, created_at DESC);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_economy_timeouts_active_user
+            ON economy_timeouts(guild_id, user_id)
+            WHERE is_active = 1;
     `);
 
     await ensureEconomyConfigColumns(db);

@@ -97,6 +97,17 @@ export const economyLevelRoleMappingsSchema = z.object({
     }).strip()).max(250),
 }).strip();
 
+export const timeoutCreateSchema = z.object({
+    targetUserId: z.string().regex(/^\d{17,20}$/),
+    durationAmount: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    durationUnit: z.enum(['s', 'm', 'h', 'd', 'mo', 'y']),
+    reason: z.string().trim().min(1).max(500),
+}).strip();
+
+export const timeoutRemoveSchema = z.object({
+    reason: z.string().trim().min(1).max(500).optional(),
+}).strip();
+
 export const sendImageSchema = z.object({
     filename: z.string().min(1).max(255),
     channelId: z.string().regex(/^\d{17,20}$/),

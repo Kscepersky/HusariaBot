@@ -8,17 +8,25 @@ import {
     addLevelsByAdmin,
     addXpByAdmin,
     awardMessageXp,
+    awardVoiceXp,
+    awardWatchpartyVoiceActivity,
+    createEconomyTimeout,
     claimDailyReward,
+    getActiveEconomyTimeoutForUser,
     getEconomyConfig,
     getEconomyLeaderboardPage,
     getEconomyLevelRoleMappings,
+    getEconomyTimeoutById,
     getEconomyUserRankByXp,
     getEconomyUserState,
     getDailyStreakSummary,
     importEconomyCsvSnapshot,
     incrementMessageCount,
     incrementVoiceMinutes,
+    listActiveEconomyTimeouts,
+    listExpiredActiveEconomyTimeouts,
     removeCoinsByAdmin,
+    releaseEconomyTimeout,
     replaceEconomyLevelRoleMappings,
     resetEconomyUsers,
     resetCoinsByAdmin,
@@ -28,6 +36,54 @@ import {
 
 const GUILD_ID = 'guild-1';
 const USER_ID = 'user-1';
+const RANK_TIERS = [
+    { minLevel: 1, maxLevel: 9, levelRewardMultiplier: 3.0, dripRate: 0.08 },
+    { minLevel: 10, maxLevel: 19, levelRewardMultiplier: 4.5, dripRate: 0.10 },
+    { minLevel: 20, maxLevel: 34, levelRewardMultiplier: 6.0, dripRate: 0.13 },
+    { minLevel: 35, maxLevel: 49, levelRewardMultiplier: 8.0, dripRate: 0.17 },
+    { minLevel: 50, maxLevel: 74, levelRewardMultiplier: 11.0, dripRate: 0.22 },
+    { minLevel: 75, maxLevel: 99, levelRewardMultiplier: 15.0, dripRate: 0.28 },
+    { minLevel: 100, maxLevel: 124, levelRewardMultiplier: 20.0, dripRate: 0.35 },
+];
+
+function resolveTierForLevel(level: number): { levelRewardMultiplier: number; dripRate: number } {
+    const safeLevel = Math.max(1, Math.floor(level));
+    const tier = RANK_TIERS.find((candidateTier) => {
+        return safeLevel >= candidateTier.minLevel && safeLevel <= candidateTier.maxLevel;
+    });
+
+    return tier ?? RANK_TIERS[RANK_TIERS.length - 1];
+}
+
+function resolveFormulaV2XpForNextLevel(level: number): number {
+    const safeLevel = Math.max(1, Math.floor(level));
+    const previousLevel = Math.max(0, safeLevel - 1);
+
+    return Math.max(1, Math.floor(
+        100
+        + (0.04 * (previousLevel ** 3))
+        + (0.8 * (previousLevel ** 2))
+        + (2 * previousLevel)
+        + 0.5,
+    ));
+}
+
+function resolveFormulaV2XpToReachLevel(level: number): number {
+    const safeLevel = Math.max(1, Math.floor(level));
+    let xpSpent = 0;
+
+    for (let currentLevel = 1; currentLevel < safeLevel; currentLevel += 1) {
+        xpSpent += resolveFormulaV2XpForNextLevel(currentLevel);
+    }
+
+    return xpSpent;
+}
+
+function resolveExpectedLevelReward(level: number): number {
+    const tier = resolveTierForLevel(level);
+    const xpRequiredForLevel = resolveFormulaV2XpToReachLevel(level);
+    return Math.floor(50 + (tier.levelRewardMultiplier * Math.sqrt(xpRequiredForLevel)));
+}
 
 async function withTempEconomyDb(testFn: (databasePath: string) => Promise<void>): Promise<void> {
     const directoryPath = await mkdtemp(join(tmpdir(), 'husaria-economy-test-'));
@@ -279,7 +335,7 @@ describe('economy daily repository', () => {
             expect(mutation.previousXp).toBe(0);
             expect(mutation.currentXp).toBe(100);
             expect(mutation.currentLevel).toBe(2);
-            expect(mutation.currentCoins).toBe(45);
+            expect(mutation.currentCoins).toBe(resolveExpectedLevelReward(2));
         });
     });
 
@@ -447,7 +503,7 @@ describe('economy daily repository', () => {
             const state = await getEconomyUserState(GUILD_ID, USER_ID, nowTimestamp + 1_000);
             expect(state.xp).toBe(100);
             expect(state.level).toBe(2);
-            expect(state.coins).toBe(45);
+            expect(state.coins).toBe(resolveExpectedLevelReward(2));
         });
     });
 
@@ -484,7 +540,8 @@ describe('economy daily repository', () => {
             expect(updatedConfig.dailyMaxCoins).toBe(600);
             expect(updatedConfig.dailyStreakIncrement).toBe(0.1);
             expect(updatedConfig.dailyMessages).toEqual(['{user} test 1 {coins}', '{user} test 2 {streak}']);
-            expect(updatedConfig.levelingMode).toBe('linear');
+            expect(updatedConfig.levelingMode).toBe('progressive');
+            expect(updatedConfig.levelingCurve).toBe('formula_v2');
             expect(updatedConfig.xpVoiceRequireTwoUsers).toBe(false);
             expect(updatedConfig.xpVoiceAllowSelfMute).toBe(false);
             expect(updatedConfig.xpVoiceAllowSelfDeaf).toBe(true);
@@ -492,6 +549,105 @@ describe('economy daily repository', () => {
 
             const reloadedConfig = await getEconomyConfig();
             expect(reloadedConfig).toEqual(updatedConfig);
+        });
+    });
+
+    it('nalicza drip tylko dla naturalnych zrodel XP', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 10, 0, 0, 0);
+            const voiceAward = await awardVoiceXp(GUILD_ID, USER_ID, nowTimestamp, 4);
+
+            expect(voiceAward.awardedXp).toBe(20);
+            expect(voiceAward.coinsAwarded).toBe(1);
+
+            const adminMutation = await addXpByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: USER_ID,
+                adminUserId: 'admin-1',
+                reason: 'Admin bez drip',
+                amount: 20,
+                nowTimestamp: nowTimestamp + 1_000,
+            });
+
+            expect(adminMutation.currentCoins).toBe(1);
+        });
+    });
+
+    it('watchparty nalicza naturalny drip, bonus coins i level-up reward', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 10, 30, 0, 0);
+            const currentConfig = await getEconomyConfig();
+            const updatedConfig = await updateEconomyConfig({
+                ...currentConfig,
+                xpVoicePerMinute: 100,
+                watchpartyXpMultiplier: 1.5,
+                watchpartyCoinBonusPerMinute: 2,
+            }, nowTimestamp);
+
+            const award = await awardWatchpartyVoiceActivity(
+                GUILD_ID,
+                USER_ID,
+                nowTimestamp + 1_000,
+                updatedConfig,
+            );
+
+            expect(award.awardedXp).toBe(150);
+            expect(award.currentLevel).toBe(2);
+            expect(award.coinsAwarded).toBe(resolveExpectedLevelReward(2) + 12 + 2);
+        });
+    });
+
+    it('poprawnie nalicza level-up rewards na granicach tierow', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 11, 0, 0, 0);
+            const mutation = await addLevelsByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: USER_ID,
+                adminUserId: 'admin-1',
+                reason: 'Granice tierow',
+                amount: 99,
+                nowTimestamp,
+            });
+
+            let expectedCoins = 0;
+            for (let level = 2; level <= 100; level += 1) {
+                expectedCoins += resolveExpectedLevelReward(level);
+            }
+
+            expect(mutation.currentLevel).toBe(100);
+            expect(mutation.currentCoins).toBe(expectedCoins);
+        });
+    });
+
+    it('dla poziomow 125+ uzywa ostatniego tieru', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 11, 30, 0, 0);
+
+            await addLevelsByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: USER_ID,
+                adminUserId: 'admin-1',
+                reason: 'Podbicie do 124',
+                amount: 123,
+                nowTimestamp,
+            });
+
+            const beforeState = await getEconomyUserState(GUILD_ID, USER_ID, nowTimestamp + 1_000);
+
+            await addLevelsByAdmin({
+                guildId: GUILD_ID,
+                targetUserId: USER_ID,
+                adminUserId: 'admin-1',
+                reason: 'Przejscie 124->125',
+                amount: 1,
+                nowTimestamp: nowTimestamp + 2_000,
+            });
+
+            const afterState = await getEconomyUserState(GUILD_ID, USER_ID, nowTimestamp + 3_000);
+
+            const expectedLevel125Reward = resolveExpectedLevelReward(125);
+            expect(afterState.level).toBe(125);
+            expect(afterState.coins - beforeState.coins).toBe(expectedLevel125Reward);
         });
     });
 
@@ -612,11 +768,13 @@ describe('economy daily repository', () => {
 
             expect(userOne.level).toBe(1);
             expect(userOne.xp).toBe(5);
+            expect(userOne.coins).toBe(0);
             expect(userOne.messageCount).toBe(10);
             expect(userOne.voiceMinutes).toBe(15);
 
             expect(userTwo.level).toBe(2);
             expect(userTwo.xp).toBe(110);
+            expect(userTwo.coins).toBe(resolveExpectedLevelReward(2));
             expect(userTwo.messageCount).toBe(4);
             expect(userTwo.voiceMinutes).toBe(6);
 
@@ -634,8 +792,31 @@ describe('economy daily repository', () => {
 
             const updatedUserOne = await getEconomyUserState(GUILD_ID, '111111111111111111', nowTimestamp + 4_000);
             expect(updatedUserOne.xp).toBe(8);
+            expect(updatedUserOne.coins).toBe(0);
             expect(updatedUserOne.messageCount).toBe(12);
             expect(updatedUserOne.voiceMinutes).toBe(17);
+        });
+    });
+
+    it('import CSV przelicza coinsy na podstawie levelu (np. level 50)', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 12, 30, 0, 0);
+
+            await importEconomyCsvSnapshot({
+                guildId: GUILD_ID,
+                csvContent: '333333333333333333,50,0,100,200',
+                nowTimestamp,
+            });
+
+            const importedUser = await getEconomyUserState(GUILD_ID, '333333333333333333', nowTimestamp + 1_000);
+
+            let expectedCoins = 0;
+            for (let level = 2; level <= 50; level += 1) {
+                expectedCoins += resolveExpectedLevelReward(level);
+            }
+
+            expect(importedUser.level).toBe(50);
+            expect(importedUser.coins).toBe(expectedCoins);
         });
     });
 
@@ -727,6 +908,120 @@ describe('economy daily repository', () => {
 
             expect(userARank).toBe(2);
             expect(userBRank).toBe(1);
+        });
+    });
+
+    it('tworzy timeout i zwraca go na liscie aktywnych timeoutow', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 13, 0, 0, 0);
+
+            const timeout = await createEconomyTimeout({
+                guildId: GUILD_ID,
+                userId: '111111111111111111',
+                reason: 'Flood',
+                muteRoleId: '999999999999999999',
+                createdByUserId: 'admin-1',
+                createdAt: nowTimestamp,
+                expiresAt: nowTimestamp + (2 * 60 * 60 * 1000),
+            });
+
+            expect(timeout.isActive).toBe(true);
+
+            const activeForUser = await getActiveEconomyTimeoutForUser(GUILD_ID, '111111111111111111');
+            expect(activeForUser?.id).toBe(timeout.id);
+
+            const activeTimeouts = await listActiveEconomyTimeouts(GUILD_ID);
+            expect(activeTimeouts).toHaveLength(1);
+            expect(activeTimeouts[0]?.id).toBe(timeout.id);
+        });
+    });
+
+    it('blokuje utworzenie drugiego aktywnego timeoutu dla tego samego usera', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 13, 15, 0, 0);
+
+            await createEconomyTimeout({
+                guildId: GUILD_ID,
+                userId: '111111111111111111',
+                reason: 'Pierwszy timeout',
+                muteRoleId: '999999999999999999',
+                createdByUserId: 'admin-1',
+                createdAt: nowTimestamp,
+                expiresAt: nowTimestamp + (60 * 60 * 1000),
+            });
+
+            await expect(createEconomyTimeout({
+                guildId: GUILD_ID,
+                userId: '111111111111111111',
+                reason: 'Drugi timeout',
+                muteRoleId: '999999999999999999',
+                createdByUserId: 'admin-2',
+                createdAt: nowTimestamp + 1_000,
+                expiresAt: nowTimestamp + (2 * 60 * 60 * 1000),
+            })).rejects.toThrow('aktywny timeout');
+        });
+    });
+
+    it('zdejmuje timeout i usuwa go z listy aktywnych', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 13, 30, 0, 0);
+
+            const timeout = await createEconomyTimeout({
+                guildId: GUILD_ID,
+                userId: '222222222222222222',
+                reason: 'Test release',
+                muteRoleId: '999999999999999999',
+                createdByUserId: 'admin-1',
+                createdAt: nowTimestamp,
+                expiresAt: nowTimestamp + (3 * 60 * 60 * 1000),
+            });
+
+            const released = await releaseEconomyTimeout({
+                guildId: GUILD_ID,
+                timeoutId: timeout.id,
+                releasedAt: nowTimestamp + 5_000,
+                releasedByUserId: 'admin-1',
+                releaseReason: 'Kara zdjeta',
+            });
+
+            expect(released?.isActive).toBe(false);
+            expect(released?.releaseReason).toContain('Kara zdjeta');
+
+            const byId = await getEconomyTimeoutById(GUILD_ID, timeout.id);
+            expect(byId?.isActive).toBe(false);
+
+            const activeTimeouts = await listActiveEconomyTimeouts(GUILD_ID);
+            expect(activeTimeouts).toHaveLength(0);
+        });
+    });
+
+    it('zwraca wygasle timeouty do automatycznego sprzatania', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 14, 0, 0, 0);
+
+            await createEconomyTimeout({
+                guildId: 'guild-1',
+                userId: '333333333333333333',
+                reason: 'Wygasl',
+                muteRoleId: '999999999999999999',
+                createdByUserId: 'admin-1',
+                createdAt: nowTimestamp - (2 * 60 * 60 * 1000),
+                expiresAt: nowTimestamp - 1_000,
+            });
+
+            await createEconomyTimeout({
+                guildId: 'guild-2',
+                userId: '444444444444444444',
+                reason: 'Jeszcze aktywny',
+                muteRoleId: '999999999999999999',
+                createdByUserId: 'admin-2',
+                createdAt: nowTimestamp,
+                expiresAt: nowTimestamp + (60 * 60 * 1000),
+            });
+
+            const expiredTimeouts = await listExpiredActiveEconomyTimeouts(nowTimestamp, 20);
+            expect(expiredTimeouts).toHaveLength(1);
+            expect(expiredTimeouts[0]?.userId).toBe('333333333333333333');
         });
     });
 });

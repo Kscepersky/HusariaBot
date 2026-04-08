@@ -1,0 +1,585 @@
+diff --git a/src/economy/repository.ts b/src/economy/repository.ts
+index ee39e9f..4ef6026 100644
+--- a/src/economy/repository.ts
++++ b/src/economy/repository.ts
+@@ -3,6 +3,9 @@ import { getEconomyDatabase } from './database.js';
+ import type {
+     EconomyAdminMutationResult,
+     EconomyCsvImportResult,
++    EconomyTimeoutCreateInput,
++    EconomyTimeoutRecord,
++    EconomyTimeoutReleaseInput,
+     EconomyLeaderboardPage,
+     EconomyLeaderboardSortBy,
+     EconomyLevelRoleMapping,
+@@ -71,6 +74,21 @@ interface EconomyLevelRoleMappingRow {
+     updated_at: number;
+ }
+ 
++interface EconomyTimeoutRow {
++    id: number;
++    guild_id: string;
++    user_id: string;
++    reason: string;
++    mute_role_id: string;
++    created_by_user_id: string;
++    created_at: number;
++    expires_at: number;
++    is_active: number;
++    released_at: number | null;
++    released_by_user_id: string | null;
++    release_reason: string | null;
++}
++
+ interface ClaimDailyRewardOptions {
+     random: () => number;
+ }
+@@ -85,6 +103,13 @@ interface AdminMutationInput {
+     operation: EconomyAdminOperation;
+ }
+ 
++interface EconomyRankTier {
++    minLevel: number;
++    maxLevel: number | null;
++    levelRewardMultiplier: number;
++    dripRate: number;
++}
++
+ const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+ const DEFAULT_DAILY_MESSAGE = '{user} odbiera dzienne cebuliony i zgarnia {coins} monet!';
+ const MAX_ADMIN_XP_MUTATION_AMOUNT = 1_000_000;
+@@ -92,6 +117,16 @@ const MAX_ADMIN_LEVEL_MUTATION_AMOUNT = 1_000;
+ const MAX_CSV_IMPORT_ROWS = 10_000;
+ const ECONOMY_MIN_LEVEL = 1;
+ const ECONOMY_MAX_LEVEL = 10_000;
++const MAX_TIMEOUT_REASON_LENGTH = 500;
++const RANK_TIERS: readonly EconomyRankTier[] = [
++    { minLevel: 1, maxLevel: 9, levelRewardMultiplier: 3.0, dripRate: 0.08 },
++    { minLevel: 10, maxLevel: 19, levelRewardMultiplier: 4.5, dripRate: 0.10 },
++    { minLevel: 20, maxLevel: 34, levelRewardMultiplier: 6.0, dripRate: 0.13 },
++    { minLevel: 35, maxLevel: 49, levelRewardMultiplier: 8.0, dripRate: 0.17 },
++    { minLevel: 50, maxLevel: 74, levelRewardMultiplier: 11.0, dripRate: 0.22 },
++    { minLevel: 75, maxLevel: 99, levelRewardMultiplier: 15.0, dripRate: 0.28 },
++    { minLevel: 100, maxLevel: 124, levelRewardMultiplier: 20.0, dripRate: 0.35 },
++];
+ let economyWriteLock = Promise.resolve();
+ 
+ export class EconomyCsvImportValidationError extends Error {}
+@@ -104,6 +139,15 @@ function resolveAdminMutationReason(reason: string | undefined): string {
+         : 'Dashboard: reczna mutacja';
+ }
+ 
++function normalizeTimeoutReason(reason: string, fallback: string): string {
++    const normalizedReason = reason.trim();
++    if (normalizedReason.length === 0) {
++        return fallback;
++    }
++
++    return normalizedReason.slice(0, MAX_TIMEOUT_REASON_LENGTH);
++}
++
+ function toSafeInt(value: number, fallback: number): number {
+     if (!Number.isFinite(value)) {
+         return fallback;
+@@ -146,8 +190,8 @@ function normalizeEconomyConfig(input: EconomyConfig): EconomyConfig {
+         dailyStreakMaxDays: clampInt(input.dailyStreakMaxDays, 1, 365),
+         dailyStreakGraceHours: clampInt(input.dailyStreakGraceHours, 24, 168),
+         dailyMessages: sanitizeDailyMessageList(input.dailyMessages),
+-        levelingMode: input.levelingMode === 'linear' ? 'linear' : 'progressive',
+-        levelingCurve: input.levelingCurve === 'formula_v2' ? 'formula_v2' : 'default',
++        levelingMode: 'progressive',
++        levelingCurve: 'formula_v2',
+         levelingBaseXp: clampInt(input.levelingBaseXp, 1, 1_000_000),
+         levelingExponent: clampFloat(input.levelingExponent, 1, 8),
+         xpTextPerMessage: clampInt(input.xpTextPerMessage, 0, 10_000),
+@@ -190,6 +234,23 @@ function toEconomyLevelRoleMapping(row: EconomyLevelRoleMappingRow): EconomyLeve
+     };
+ }
+ 
++function toEconomyTimeoutRecord(row: EconomyTimeoutRow): EconomyTimeoutRecord {
++    return {
++        id: row.id,
++        guildId: row.guild_id,
++        userId: row.user_id,
++        reason: row.reason,
++        muteRoleId: row.mute_role_id,
++        createdByUserId: row.created_by_user_id,
++        createdAt: row.created_at,
++        expiresAt: row.expires_at,
++        isActive: row.is_active === 1,
++        releasedAt: row.released_at,
++        releasedByUserId: row.released_by_user_id,
++        releaseReason: row.release_reason,
++    };
++}
++
+ function parseDailyMessages(value: string): string[] {
+     try {
+         const parsed = JSON.parse(value) as unknown;
+@@ -216,8 +277,8 @@ function toEconomyConfig(row: EconomyConfigRow): EconomyConfig {
+         dailyStreakMaxDays: row.daily_streak_max_days,
+         dailyStreakGraceHours: row.daily_streak_grace_hours,
+         dailyMessages: parseDailyMessages(row.daily_messages_json),
+-        levelingMode: row.leveling_mode,
+-        levelingCurve: row.leveling_curve === 'formula_v2' ? 'formula_v2' : 'default',
++        levelingMode: 'progressive',
++        levelingCurve: 'formula_v2',
+         levelingBaseXp: row.leveling_base_xp,
+         levelingExponent: row.leveling_exponent,
+         xpTextPerMessage: row.xp_text_per_message,
+@@ -234,25 +295,29 @@ function toEconomyConfig(row: EconomyConfigRow): EconomyConfig {
+     };
+ }
+ 
+-function resolveXpForNextLevel(level: number, config: EconomyConfig): number {
++function resolveXpForNextLevel(level: number, _config: EconomyConfig): number {
+     const safeLevel = Math.max(ECONOMY_MIN_LEVEL, Math.floor(level));
++    const previousLevel = Math.max(0, safeLevel - 1);
++    const formulaValue = 100
++        + (0.04 * (previousLevel ** 3))
++        + (0.8 * (previousLevel ** 2))
++        + (2 * previousLevel)
++        + 0.5;
++
++    return Math.max(1, Math.floor(formulaValue));
++}
+ 
+-    if (config.levelingCurve === 'formula_v2') {
+-        const previousLevel = Math.max(0, safeLevel - 1);
+-        const formulaValue = 100
+-            + (0.04 * (previousLevel ** 3))
+-            + (0.8 * (previousLevel ** 2))
+-            + (2 * previousLevel)
+-            + 0.5;
+-
+-        return Math.max(1, Math.floor(formulaValue));
+-    }
++function resolveRankTierForLevel(level: number): EconomyRankTier {
++    const safeLevel = Math.max(ECONOMY_MIN_LEVEL, Math.floor(level));
++    const tier = RANK_TIERS.find((candidateTier) => {
++        if (candidateTier.maxLevel === null) {
++            return safeLevel >= candidateTier.minLevel;
++        }
+ 
+-    if (config.levelingMode === 'linear') {
+-        return Math.max(1, Math.floor(config.levelingBaseXp * safeLevel));
+-    }
++        return safeLevel >= candidateTier.minLevel && safeLevel <= candidateTier.maxLevel;
++    });
+ 
+-    return Math.max(1, Math.floor(config.levelingBaseXp * (safeLevel ** config.levelingExponent)));
++    return tier ?? RANK_TIERS[RANK_TIERS.length - 1];
+ }
+ 
+ function resolveLevelFromXp(totalXp: number, config: EconomyConfig): number {
+@@ -370,12 +435,24 @@ function resolveLevelUpCoins(previousLevel: number, currentLevel: number, config
+ 
+     let awarded = 0;
+     for (let level = previousLevel + 1; level <= currentLevel; level += 1) {
+-        awarded += config.levelUpCoinsBase + (level * config.levelUpCoinsPerLevel);
++        const tier = resolveRankTierForLevel(level);
++        const xpRequiredForLevel = resolveXpSpentForLevel(level, config);
++        awarded += Math.floor(50 + (tier.levelRewardMultiplier * Math.sqrt(xpRequiredForLevel)));
+     }
+ 
+     return Math.max(0, awarded);
+ }
+ 
++function resolveDripCoinsForAwardedXp(levelBeforeAward: number, xpGained: number): number {
++    const safeAwardedXp = Math.max(0, Math.floor(xpGained));
++    if (safeAwardedXp === 0) {
++        return 0;
++    }
++
++    const tier = resolveRankTierForLevel(levelBeforeAward);
++    return Math.max(0, Math.floor(safeAwardedXp * tier.dripRate));
++}
++
+ async function withTransaction<T>(db: Database, work: () => Promise<T>): Promise<T> {
+     await db.exec('BEGIN IMMEDIATE TRANSACTION');
+ 
+@@ -821,6 +898,299 @@ export async function replaceEconomyLevelRoleMappings(
+     });
+ }
+ 
++async function getEconomyTimeoutByIdFromDatabase(
++    db: Database,
++    guildId: string,
++    timeoutId: number,
++): Promise<EconomyTimeoutRecord | null> {
++    const row = await db.get<EconomyTimeoutRow>(
++        `
++        SELECT
++            id,
++            guild_id,
++            user_id,
++            reason,
++            mute_role_id,
++            created_by_user_id,
++            created_at,
++            expires_at,
++            is_active,
++            released_at,
++            released_by_user_id,
++            release_reason
++        FROM economy_timeouts
++        WHERE guild_id = ?
++          AND id = ?
++        LIMIT 1
++        `,
++        guildId,
++        timeoutId,
++    );
++
++    return row ? toEconomyTimeoutRecord(row) : null;
++}
++
++export async function getEconomyTimeoutById(guildId: string, timeoutId: number): Promise<EconomyTimeoutRecord | null> {
++    const db = await getEconomyDatabase();
++    return getEconomyTimeoutByIdFromDatabase(db, guildId, timeoutId);
++}
++
++export async function getActiveEconomyTimeoutForUser(
++    guildId: string,
++    userId: string,
++): Promise<EconomyTimeoutRecord | null> {
++    const db = await getEconomyDatabase();
++
++    const row = await db.get<EconomyTimeoutRow>(
++        `
++        SELECT
++            id,
++            guild_id,
++            user_id,
++            reason,
++            mute_role_id,
++            created_by_user_id,
++            created_at,
++            expires_at,
++            is_active,
++            released_at,
++            released_by_user_id,
++            release_reason
++        FROM economy_timeouts
++        WHERE guild_id = ?
++          AND user_id = ?
++          AND is_active = 1
++        ORDER BY created_at DESC, id DESC
++        LIMIT 1
++        `,
++        guildId,
++        userId,
++    );
++
++    return row ? toEconomyTimeoutRecord(row) : null;
++}
++
++export async function listActiveEconomyTimeouts(
++    guildId: string,
++    options: {
++        userId?: string;
++        limit?: number;
++    } = {},
++): Promise<EconomyTimeoutRecord[]> {
++    const db = await getEconomyDatabase();
++    const safeLimit = Math.max(1, Math.min(250, Math.floor(options.limit ?? 100)));
++    const userId = options.userId?.trim() ?? '';
++
++    const rows = userId.length > 0
++        ? await db.all<EconomyTimeoutRow[]>(
++            `
++            SELECT
++                id,
++                guild_id,
++                user_id,
++                reason,
++                mute_role_id,
++                created_by_user_id,
++                created_at,
++                expires_at,
++                is_active,
++                released_at,
++                released_by_user_id,
++                release_reason
++            FROM economy_timeouts
++            WHERE guild_id = ?
++              AND is_active = 1
++              AND user_id = ?
++            ORDER BY expires_at ASC, created_at ASC
++            LIMIT ?
++            `,
++            guildId,
++            userId,
++            safeLimit,
++        )
++        : await db.all<EconomyTimeoutRow[]>(
++            `
++            SELECT
++                id,
++                guild_id,
++                user_id,
++                reason,
++                mute_role_id,
++                created_by_user_id,
++                created_at,
++                expires_at,
++                is_active,
++                released_at,
++                released_by_user_id,
++                release_reason
++            FROM economy_timeouts
++            WHERE guild_id = ?
++              AND is_active = 1
++            ORDER BY expires_at ASC, created_at ASC
++            LIMIT ?
++            `,
++            guildId,
++            safeLimit,
++        );
++
++    return rows.map((row) => toEconomyTimeoutRecord(row));
++}
++
++export async function listExpiredActiveEconomyTimeouts(
++    nowTimestamp: number,
++    limit = 100,
++): Promise<EconomyTimeoutRecord[]> {
++    const db = await getEconomyDatabase();
++    const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
++
++    const rows = await db.all<EconomyTimeoutRow[]>(
++        `
++        SELECT
++            id,
++            guild_id,
++            user_id,
++            reason,
++            mute_role_id,
++            created_by_user_id,
++            created_at,
++            expires_at,
++            is_active,
++            released_at,
++            released_by_user_id,
++            release_reason
++        FROM economy_timeouts
++        WHERE is_active = 1
++          AND expires_at <= ?
++        ORDER BY expires_at ASC, created_at ASC
++        LIMIT ?
++        `,
++        nowTimestamp,
++        safeLimit,
++    );
++
++    return rows.map((row) => toEconomyTimeoutRecord(row));
++}
++
++export async function createEconomyTimeout(input: EconomyTimeoutCreateInput): Promise<EconomyTimeoutRecord> {
++    const db = await getEconomyDatabase();
++    const guildId = input.guildId.trim();
++    const userId = input.userId.trim();
++    const muteRoleId = input.muteRoleId.trim();
++    const createdByUserId = input.createdByUserId.trim();
++    const createdAt = Math.max(0, Math.floor(input.createdAt));
++    const expiresAt = Math.max(0, Math.floor(input.expiresAt));
++    const reason = normalizeTimeoutReason(input.reason, 'Brak powodu');
++
++    if (!guildId || !userId || !muteRoleId || !createdByUserId) {
++        throw new EconomyInputValidationError('Brakuje wymaganych danych timeoutu.');
++    }
++
++    if (expiresAt <= createdAt) {
++        throw new EconomyInputValidationError('Data konca timeoutu musi byc pozniejsza niz data rozpoczecia.');
++    }
++
++    return withWriteLock(async () => {
++        return withTransaction(db, async () => {
++            const activeTimeout = await db.get<{ id: number }>(
++                `
++                SELECT id
++                FROM economy_timeouts
++                WHERE guild_id = ?
++                  AND user_id = ?
++                  AND is_active = 1
++                LIMIT 1
++                `,
++                guildId,
++                userId,
++            );
++
++            if (activeTimeout) {
++                throw new EconomyInputValidationError('Uzytkownik ma juz aktywny timeout.');
++            }
++
++            let insertResult: Awaited<ReturnType<Database['run']>>;
++            try {
++                insertResult = await db.run(
++                    `
++                    INSERT INTO economy_timeouts (
++                        guild_id,
++                        user_id,
++                        reason,
++                        mute_role_id,
++                        created_by_user_id,
++                        created_at,
++                        expires_at,
++                        is_active,
++                        released_at,
++                        released_by_user_id,
++                        release_reason
++                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, NULL, NULL)
++                    `,
++                    guildId,
++                    userId,
++                    reason,
++                    muteRoleId,
++                    createdByUserId,
++                    createdAt,
++                    expiresAt,
++                );
++            } catch (error) {
++                const message = error instanceof Error ? error.message : String(error);
++                if (message.includes('idx_economy_timeouts_active_user')) {
++                    throw new EconomyInputValidationError('Uzytkownik ma juz aktywny timeout.');
++                }
++
++                throw error;
++            }
++
++            const timeoutId = Number(insertResult.lastID ?? 0);
++            const createdTimeout = await getEconomyTimeoutByIdFromDatabase(db, guildId, timeoutId);
++            if (!createdTimeout) {
++                throw new Error('Nie udalo sie odczytac utworzonego timeoutu.');
++            }
++
++            return createdTimeout;
++        });
++    });
++}
++
++export async function releaseEconomyTimeout(input: EconomyTimeoutReleaseInput): Promise<EconomyTimeoutRecord | null> {
++    const db = await getEconomyDatabase();
++    const guildId = input.guildId.trim();
++    const timeoutId = Math.max(1, Math.floor(input.timeoutId));
++    const releasedAt = Math.max(0, Math.floor(input.releasedAt));
++    const releasedByUserId = input.releasedByUserId.trim();
++    const releaseReason = normalizeTimeoutReason(input.releaseReason, 'Timeout zakonczony');
++
++    if (!guildId || !releasedByUserId) {
++        throw new EconomyInputValidationError('Brakuje wymaganych danych do zdjecia timeoutu.');
++    }
++
++    return withWriteLock(async () => {
++        return withTransaction(db, async () => {
++            await db.run(
++                `
++                UPDATE economy_timeouts
++                SET is_active = 0,
++                    released_at = ?,
++                    released_by_user_id = ?,
++                    release_reason = ?
++                WHERE guild_id = ?
++                  AND id = ?
++                  AND is_active = 1
++                `,
++                releasedAt,
++                releasedByUserId,
++                releaseReason,
++                guildId,
++                timeoutId,
++            );
++
++            return getEconomyTimeoutByIdFromDatabase(db, guildId, timeoutId);
++        });
++    });
++}
++
+ function parseCsvIntegerField(rawValue: string, lineNumber: number, columnName: string, minimum: number): number {
+     if (!/^-?\d+$/.test(rawValue)) {
+         throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: pole ${columnName} musi byc liczba calkowita.`);
+@@ -891,11 +1261,14 @@ export async function importEconomyCsvSnapshot(input: {
+                     throw error;
+                 }
+ 
++                const importedCoins = resolveLevelUpCoins(ECONOMY_MIN_LEVEL, level, config);
++
+                 const updateResult = await db.run(
+                     `
+                     UPDATE economy_users
+                     SET xp = ?,
+                         level = ?,
++                        coins = ?,
+                         message_count = ?,
+                         voice_minutes = ?,
+                         updated_at = ?
+@@ -904,6 +1277,7 @@ export async function importEconomyCsvSnapshot(input: {
+                     `,
+                     totalXp,
+                     level,
++                    importedCoins,
+                     messageCount,
+                     voiceMinutes,
+                     input.nowTimestamp,
+@@ -936,7 +1310,7 @@ export async function importEconomyCsvSnapshot(input: {
+                     userId,
+                     totalXp,
+                     level,
+-                    0,
++                    importedCoins,
+                     messageCount,
+                     voiceMinutes,
+                     0,
+@@ -1091,6 +1465,7 @@ async function awardXp(
+     options: {
+         bonusCoins?: number;
+         config?: EconomyConfig;
++        source?: 'natural' | 'admin';
+     } = {},
+ ): Promise<EconomyXpAwardResult> {
+     const db = await getEconomyDatabase();
+@@ -1107,8 +1482,11 @@ async function awardXp(
+             const previousLevel = user.level;
+             const currentLevel = resolveLevelFromXp(currentXp, config);
+             const levelsGained = Math.max(0, currentLevel - previousLevel);
++            const dripCoinsAwarded = options.source === 'natural'
++                ? resolveDripCoinsForAwardedXp(previousLevel, awardedXp)
++                : 0;
+             const levelUpCoinsAwarded = resolveLevelUpCoins(previousLevel, currentLevel, config);
+-            const coinsAwarded = levelUpCoinsAwarded + bonusCoins;
++            const coinsAwarded = levelUpCoinsAwarded + dripCoinsAwarded + bonusCoins;
+             const currentCoins = user.coins + coinsAwarded;
+ 
+             await db.run(
+@@ -1152,7 +1530,10 @@ export async function awardMessageXp(
+     nowTimestamp: number,
+ ): Promise<EconomyXpAwardResult> {
+     const config = await getEconomyConfig();
+-    return awardXp(guildId, userId, nowTimestamp, config.xpTextPerMessage, { config });
++    return awardXp(guildId, userId, nowTimestamp, config.xpTextPerMessage, {
++        config,
++        source: 'natural',
++    });
+ }
+ 
+ export async function awardVoiceXp(
+@@ -1163,7 +1544,10 @@ export async function awardVoiceXp(
+ ): Promise<EconomyXpAwardResult> {
+     const config = await getEconomyConfig();
+     const amount = Math.max(0, Math.floor(config.xpVoicePerMinute * Math.max(0, multiplier)));
+-    return awardXp(guildId, userId, nowTimestamp, amount, { config });
++    return awardXp(guildId, userId, nowTimestamp, amount, {
++        config,
++        source: 'natural',
++    });
+ }
+ 
+ export async function awardWatchpartyVoiceActivity(
+@@ -1178,6 +1562,7 @@ export async function awardWatchpartyVoiceActivity(
+     return awardXp(guildId, userId, nowTimestamp, xpAmount, {
+         bonusCoins,
+         config,
++        source: 'natural',
+     });
+ }
+ 

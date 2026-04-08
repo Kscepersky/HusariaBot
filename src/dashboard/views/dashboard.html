@@ -50,6 +50,10 @@
         <span class="sidebar-icon">🏆</span>
         <span>Leaderboard ekonomii</span>
       </a>
+      <a href="#" class="sidebar-item" data-section="timeouts-system">
+        <span class="sidebar-icon">🔇</span>
+        <span>System timeoutow</span>
+      </a>
     </nav>
   </aside>
 
@@ -414,7 +418,7 @@
     <div id="section-economy-settings" class="section-panel">
       <div class="section-header">
         <h2>🧅 Ustawienia ekonomii</h2>
-        <p>Konfiguruj daily, poziomy i XP. Komendy użyją zmian od razu, a runtime naliczania odświeża konfigurację cyklicznie.</p>
+        <p>Konfiguruj daily i XP. Komendy użyją zmian od razu, a runtime naliczania odświeża konfigurację cyklicznie.</p>
       </div>
 
       <div id="economy-dev-only-notice" class="scheduled-empty economy-access-notice" hidden>
@@ -445,24 +449,6 @@
 
           <label class="form-label" for="economy-daily-messages">Daily: wiadomości (1 linia = 1 szablon)</label>
           <textarea id="economy-daily-messages" class="form-textarea" rows="4"></textarea>
-
-          <label class="form-label" for="economy-leveling-mode">Tryb levelowania</label>
-          <select id="economy-leveling-mode" class="form-select">
-            <option value="progressive">Progressive</option>
-            <option value="linear">Linear</option>
-          </select>
-
-          <label class="form-label" for="economy-leveling-curve">Krzywa XP na poziom</label>
-          <select id="economy-leveling-curve" class="form-select">
-            <option value="default">Domyślna (zależna od trybu i base/exponent)</option>
-            <option value="formula_v2">Formula v2 (100 + 0.04(l-1)^3 + 0.8(l-1)^2 + 2(l-1) + 0.5)</option>
-          </select>
-
-          <label class="form-label" for="economy-leveling-base-xp">Leveling: base XP</label>
-          <input id="economy-leveling-base-xp" type="number" class="form-input" min="1" step="1">
-
-          <label class="form-label" for="economy-leveling-exponent">Leveling: exponent</label>
-          <input id="economy-leveling-exponent" type="number" class="form-input" min="1" step="0.01">
 
           <label class="form-label" for="economy-xp-text-per-message">XP text: za wiadomość</label>
           <input id="economy-xp-text-per-message" type="number" class="form-input" min="0" step="1">
@@ -499,16 +485,83 @@
             <span>Przyznawaj XP voice na kanale AFK.</span>
           </label>
 
-          <label class="form-label" for="economy-level-up-coins-base">Level-up: base coins</label>
-          <input id="economy-level-up-coins-base" type="number" class="form-input" min="0" step="1">
-
-          <label class="form-label" for="economy-level-up-coins-per-level">Level-up: bonus per level</label>
-          <input id="economy-level-up-coins-per-level" type="number" class="form-input" min="0" step="1">
         </div>
 
         <div class="scheduled-actions">
           <button id="economy-settings-save-btn" class="btn-primary" type="button">Zapisz ustawienia ekonomii</button>
           <button id="economy-settings-reset-users-btn" class="btn-secondary" type="button">Resetuj wszystkich użytkowników ekonomii</button>
+        </div>
+
+        <hr class="section-divider">
+
+        <div class="creator-preview-card economy-reward-preview-card">
+          <div class="preview-header">
+            <h3>📈 Symulacja nagród coins</h3>
+            <span class="preview-note">Formula v2 + RANK_TIERS</span>
+          </div>
+
+          <div class="economy-reward-grid">
+            <div class="scheduled-preview economy-reward-block">
+              <h4>Tiery rang</h4>
+              <table class="economy-tier-table">
+                <thead>
+                  <tr>
+                    <th>Poziomy</th>
+                    <th>M_r</th>
+                    <th>D_r</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>1-9</td><td>3.0</td><td>0.08</td></tr>
+                  <tr><td>10-19</td><td>4.5</td><td>0.10</td></tr>
+                  <tr><td>20-34</td><td>6.0</td><td>0.13</td></tr>
+                  <tr><td>35-49</td><td>8.0</td><td>0.17</td></tr>
+                  <tr><td>50-74</td><td>11.0</td><td>0.22</td></tr>
+                  <tr><td>75-99</td><td>15.0</td><td>0.28</td></tr>
+                  <tr><td>100-124</td><td>20.0</td><td>0.35</td></tr>
+                  <tr><td>125+</td><td>20.0</td><td>0.35</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="scheduled-preview economy-reward-block">
+              <h4>Kalkulator level-up</h4>
+              <div class="economy-reward-inline-form">
+                <label class="form-label" for="economy-preview-level">Poziom docelowy</label>
+                <input id="economy-preview-level" type="number" class="form-input" min="1" step="1" value="10">
+              </div>
+              <p class="preview-note" id="economy-preview-level-output">Nagroda: -</p>
+            </div>
+
+            <div class="scheduled-preview economy-reward-block">
+              <h4>Kalkulator drip</h4>
+              <div class="economy-reward-inline-form">
+                <label class="form-label" for="economy-preview-drip-level">Poziom przed awardem</label>
+                <input id="economy-preview-drip-level" type="number" class="form-input" min="1" step="1" value="9">
+              </div>
+              <div class="economy-reward-inline-form">
+                <label class="form-label" for="economy-preview-drip-xp">XP gained</label>
+                <input id="economy-preview-drip-xp" type="number" class="form-input" min="0" step="1" value="25">
+              </div>
+              <p class="preview-note" id="economy-preview-drip-output">Nagroda drip: -</p>
+            </div>
+
+            <div class="scheduled-preview economy-reward-block">
+              <h4>Zakres level-up</h4>
+              <div class="economy-reward-range-grid">
+                <div>
+                  <label class="form-label" for="economy-preview-range-start">Start (aktualny level)</label>
+                  <input id="economy-preview-range-start" type="number" class="form-input" min="1" step="1" value="8">
+                </div>
+                <div>
+                  <label class="form-label" for="economy-preview-range-end">Koniec (wbity level)</label>
+                  <input id="economy-preview-range-end" type="number" class="form-input" min="1" step="1" value="12">
+                </div>
+              </div>
+              <p class="preview-note" id="economy-preview-range-total">Suma: -</p>
+              <div id="economy-preview-range-breakdown" class="economy-reward-breakdown"></div>
+            </div>
+          </div>
         </div>
 
         <hr class="section-divider">
@@ -607,6 +660,72 @@
         </div>
 
         <div id="economy-leaderboard-list" class="scheduled-list"></div>
+      </div>
+    </div>
+
+    <div id="section-timeouts-system" class="section-panel">
+      <div class="section-header">
+        <h2>🔇 System timeoutow</h2>
+        <p>Nakladaj timeouty przez role Server Mute, sprawdzaj aktywne kary i zdejmuj je recznie.</p>
+      </div>
+
+      <div class="creator-form-card">
+        <div class="section-header">
+          <h3>➕ Naloz timeout</h3>
+          <p>Wyszukaj uzytkownika po nicku, podaj ilosc i wybierz jednostke czasu z listy.</p>
+        </div>
+
+        <div class="events-form-grid">
+          <label class="form-label" for="timeout-user-search">Szukaj uzytkownika</label>
+          <input id="timeout-user-search" type="text" class="form-input" placeholder="np. nick gracza...">
+          <div id="timeout-user-search-results" class="mention-user-results"></div>
+
+          <label class="form-label" for="timeout-selected-user-id">Wybrany user ID</label>
+          <input id="timeout-selected-user-id" type="text" class="form-input" readonly placeholder="Wybierz użytkownika z listy">
+
+          <label class="form-label" for="timeout-duration-amount">Ilosc czasu timeoutu</label>
+          <input id="timeout-duration-amount" type="number" min="1" step="1" class="form-input" value="1" placeholder="Np. 30">
+
+          <label class="form-label" for="timeout-duration-unit">Jednostka czasu timeoutu</label>
+          <select id="timeout-duration-unit" class="form-select">
+            <option value="s">Sekundy</option>
+            <option value="m" selected>Minuty</option>
+            <option value="h">Godziny</option>
+            <option value="d">Dni</option>
+            <option value="mo">Miesiace</option>
+            <option value="y">Lata</option>
+          </select>
+
+          <label class="form-label" for="timeout-reason">Powod</label>
+          <textarea id="timeout-reason" class="form-textarea" rows="3" maxlength="500" placeholder="Opisz powod timeoutu..."></textarea>
+        </div>
+
+        <div class="scheduled-actions">
+          <button id="timeout-create-btn" class="btn-secondary" type="button">Naloz timeout</button>
+        </div>
+
+        <hr class="section-divider">
+
+        <div class="section-header">
+          <h3>📋 Aktywne timeouty</h3>
+          <p>Mozesz filtrowac liste po nicku i szybko usuwac aktywne kary.</p>
+        </div>
+
+        <div class="events-form-grid">
+          <label class="form-label" for="timeout-filter-user-search">Filtruj po uzytkowniku</label>
+          <input id="timeout-filter-user-search" type="text" class="form-input" placeholder="Szukaj po nicku...">
+          <div id="timeout-filter-user-search-results" class="mention-user-results"></div>
+
+          <label class="form-label" for="timeout-filter-user-id">Filtr user ID</label>
+          <input id="timeout-filter-user-id" type="text" class="form-input" readonly placeholder="Brak filtra">
+        </div>
+
+        <div class="scheduled-actions">
+          <button id="timeout-list-refresh-btn" class="btn-secondary" type="button">Odswiez liste</button>
+          <button id="timeout-filter-clear-btn" class="btn-secondary" type="button">Wyczysc filtr</button>
+        </div>
+
+        <div id="timeout-list" class="scheduled-list"></div>
       </div>
     </div>
 

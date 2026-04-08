@@ -9,6 +9,8 @@ import {
     getGuildRoles,
     getGuildEmojis,
     getGuildMember,
+    addGuildMemberRole,
+    removeGuildMemberRole,
     updateGuildMemberRoles,
     listGuildScheduledEvents,
     hasDevRole,
@@ -35,6 +37,8 @@ import {
     economyUserMutationSchema,
     embedPayloadSchema,
     sendImageSchema,
+    timeoutCreateSchema,
+    timeoutRemoveSchema,
     zodErrorToMessage,
 } from '../validation/request-schemas.js';
 import { publishDashboardPost } from '../publish-flow.js';
@@ -50,15 +54,21 @@ import {
     addCoinsByAdmin,
     addLevelsByAdmin,
     addXpByAdmin,
+    createEconomyTimeout,
+    getActiveEconomyTimeoutForUser,
     getEconomyConfig,
     getEconomyLeaderboardPage,
     getEconomyLevelRoleMappings,
+    getEconomyTimeoutById,
     importEconomyCsvSnapshot,
+    listActiveEconomyTimeouts,
+    releaseEconomyTimeout,
     replaceEconomyLevelRoleMappings,
     resetEconomyUsers,
     updateEconomyConfig,
 } from '../../economy/repository.js';
 import type { EconomyLeaderboardPage, EconomyLeaderboardSortBy } from '../../economy/types.js';
+import { parseTimeoutDurationParts } from '../../timeouts/duration.js';
 
 config();
 
@@ -131,6 +141,15 @@ function resolveProtectedStaffRoleIds(): Set<string> {
             .map((roleId) => String(roleId ?? '').trim())
             .filter((roleId) => /^\d{17,20}$/.test(roleId)),
     );
+}
+
+function resolveServerMuteRoleId(): string | null {
+    const roleId = String(process.env.SERVER_MUTE_ROLE_ID ?? '').trim();
+    if (!/^\d{17,20}$/.test(roleId)) {
+        return null;
+    }
+
+    return roleId;
 }
 
 function parseEconomyImportUserRows(csvContent: string): EconomyCsvImportedUserRow[] {
@@ -804,7 +823,7 @@ apiRouter.get('/emojis', async (_req, res) => {
 });
 
 // GET /api/members/search — search guild members for mention picker
-apiRouter.get('/members/search', async (req, res) => {
+apiRouter.get('/members/search', requireCurrentDashboardRole, async (req, res) => {
     const guildId = process.env.GUILD_ID!;
     const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
 
@@ -822,6 +841,233 @@ apiRouter.get('/members/search', async (req, res) => {
     } catch (err) {
         console.error('Failed to search members:', err);
         res.status(500).json({ error: 'Nie udało się wyszukać użytkowników.' });
+    }
+});
+
+// GET /api/timeouts — list active timeouts in current guild
+apiRouter.get('/timeouts', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    const userIdRaw = normalizeTrimmedString(req.query.userId);
+    if (userIdRaw && !/^\d{17,20}$/.test(userIdRaw)) {
+        res.status(400).json({ error: 'Nieprawidlowy parametr userId.' });
+        return;
+    }
+
+    const limit = Math.max(1, Math.min(250, parsePositiveIntQuery(req.query.limit, 100)));
+
+    try {
+        const timeouts = await listActiveEconomyTimeouts(guildId, {
+            userId: userIdRaw.length > 0 ? userIdRaw : undefined,
+            limit,
+        });
+
+        res.json({ success: true, timeouts });
+    } catch (error) {
+        console.error('Failed to list active timeouts:', error);
+        res.status(500).json({ error: 'Nie udalo sie pobrac listy timeoutow.' });
+    }
+});
+
+// POST /api/timeouts — create timeout and assign Server Mute role
+apiRouter.post('/timeouts', requireCurrentDashboardRole, async (req, res) => {
+    const parsedBody = timeoutCreateSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    const muteRoleId = resolveServerMuteRoleId();
+    if (!muteRoleId) {
+        res.status(500).json({ error: 'Brakuje poprawnej zmiennej SERVER_MUTE_ROLE_ID.' });
+        return;
+    }
+
+    const adminUserId = req.session.user?.id;
+    if (!adminUserId) {
+        res.status(401).json({ error: 'Brak autoryzacji.' });
+        return;
+    }
+
+    const targetUserId = parsedBody.data.targetUserId;
+    const reason = parsedBody.data.reason;
+
+    let duration;
+    try {
+        duration = parseTimeoutDurationParts(parsedBody.data.durationAmount, parsedBody.data.durationUnit);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Nieprawidlowy czas timeoutu.';
+        res.status(400).json({ error: message });
+        return;
+    }
+
+    let createdTimeoutId: number | null = null;
+    let muteRoleAssigned = false;
+
+    try {
+        const activeTimeout = await getActiveEconomyTimeoutForUser(guildId, targetUserId);
+        if (activeTimeout && activeTimeout.isActive) {
+            res.status(409).json({
+                error: 'Uzytkownik ma juz aktywny timeout.',
+                timeout: activeTimeout,
+            });
+            return;
+        }
+
+        const member = await getGuildMember(targetUserId, guildId);
+        if (!member) {
+            res.status(404).json({ error: 'Nie znaleziono uzytkownika na serwerze.' });
+            return;
+        }
+
+        if (member.user?.bot) {
+            res.status(400).json({ error: 'Nie mozna nalozyc timeoutu na boty.' });
+            return;
+        }
+
+        const protectedStaffRoleIds = resolveProtectedStaffRoleIds();
+        if (member.roles.some((roleId) => protectedStaffRoleIds.has(roleId))) {
+            res.status(403).json({ error: 'Nie mozna nalozyc timeoutu na czlonka staffu.' });
+            return;
+        }
+
+        if (member.roles.includes(muteRoleId)) {
+            res.status(409).json({ error: 'Uzytkownik ma juz role Server Mute.' });
+            return;
+        }
+
+        const nowTimestamp = Date.now();
+        const createdTimeout = await createEconomyTimeout({
+            guildId,
+            userId: targetUserId,
+            reason,
+            muteRoleId,
+            createdByUserId: adminUserId,
+            createdAt: nowTimestamp,
+            expiresAt: nowTimestamp + duration.durationMs,
+        });
+        createdTimeoutId = createdTimeout.id;
+
+        const updateOutcome = await addGuildMemberRole(guildId, targetUserId, muteRoleId);
+        if (updateOutcome === 'not_found') {
+            await releaseEconomyTimeout({
+                guildId,
+                timeoutId: createdTimeout.id,
+                releasedAt: Date.now(),
+                releasedByUserId: adminUserId,
+                releaseReason: 'Uzytkownik zniknal z serwera podczas nakladania timeoutu',
+            });
+
+            res.status(404).json({ error: 'Nie znaleziono uzytkownika na serwerze.' });
+            return;
+        }
+
+        muteRoleAssigned = true;
+
+        res.json({
+            success: true,
+            timeout: createdTimeout,
+            duration: duration.normalized,
+        });
+    } catch (error) {
+        if (createdTimeoutId !== null && !muteRoleAssigned) {
+            await releaseEconomyTimeout({
+                guildId,
+                timeoutId: createdTimeoutId,
+                releasedAt: Date.now(),
+                releasedByUserId: adminUserId,
+                releaseReason: 'Rollback timeoutu po bledzie API Discorda',
+            }).catch((releaseError) => {
+                console.error('Failed to rollback timeout after API error:', releaseError);
+            });
+        }
+
+        if (error instanceof EconomyInputValidationError) {
+            const isActiveTimeoutConflict = error.message.toLowerCase().includes('aktywny timeout');
+            res.status(isActiveTimeoutConflict ? 409 : 400).json({ error: error.message });
+            return;
+        }
+
+        console.error('Failed to create timeout from dashboard:', error);
+        res.status(500).json({ error: 'Nie udalo sie nalozyc timeoutu.' });
+    }
+});
+
+// POST /api/timeouts/:timeoutId/remove — remove timeout and Server Mute role
+apiRouter.post('/timeouts/:timeoutId/remove', requireCurrentDashboardRole, async (req, res) => {
+    const timeoutId = Number.parseInt(String(req.params.timeoutId ?? ''), 10);
+    if (!Number.isFinite(timeoutId) || timeoutId <= 0) {
+        res.status(400).json({ error: 'Nieprawidlowe timeoutId.' });
+        return;
+    }
+
+    const parsedBody = timeoutRemoveSchema.safeParse(req.body ?? {});
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    const adminUserId = req.session.user?.id;
+    if (!adminUserId) {
+        res.status(401).json({ error: 'Brak autoryzacji.' });
+        return;
+    }
+
+    try {
+        const timeoutRecord = await getEconomyTimeoutById(guildId, timeoutId);
+        if (!timeoutRecord) {
+            res.status(404).json({ error: 'Nie znaleziono timeoutu.' });
+            return;
+        }
+
+        if (!timeoutRecord.isActive) {
+            res.status(409).json({ error: 'Timeout jest juz nieaktywny.', timeout: timeoutRecord });
+            return;
+        }
+
+        const member = await getGuildMember(timeoutRecord.userId, guildId);
+        if (member && member.roles.includes(timeoutRecord.muteRoleId)) {
+            await removeGuildMemberRole(guildId, timeoutRecord.userId, timeoutRecord.muteRoleId);
+        }
+
+        const releasedTimeout = await releaseEconomyTimeout({
+            guildId,
+            timeoutId,
+            releasedAt: Date.now(),
+            releasedByUserId: adminUserId,
+            releaseReason: parsedBody.data.reason ?? 'Timeout zdjety recznie z dashboardu',
+        });
+
+        if (!releasedTimeout) {
+            res.status(404).json({ error: 'Nie znaleziono timeoutu.' });
+            return;
+        }
+
+        res.json({ success: true, timeout: releasedTimeout });
+    } catch (error) {
+        if (error instanceof EconomyInputValidationError) {
+            res.status(400).json({ error: error.message });
+            return;
+        }
+
+        console.error('Failed to remove timeout from dashboard:', error);
+        res.status(500).json({ error: 'Nie udalo sie zdjac timeoutu.' });
     }
 });
 

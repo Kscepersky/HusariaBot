@@ -114,6 +114,7 @@ Most important variables:
 | MODERATOR_ROLE_ID | yes | Moderator role ID |
 | COMMUNITY_MANAGER_ROLE_ID | yes (dashboard) | Community Manager role ID |
 | DEV_ROLE_ID | yes (dashboard) | Dev role ID (full dashboard + economy access) |
+| SERVER_MUTE_ROLE_ID | yes (timeouts) | Role ID used for timeout system (`/mute` + dashboard) |
 | SUPPORT_CATEGORY_ID | yes | Tickets category ID |
 | VOICE_TRIGGER_CHANNEL_ID | yes (temp voice) | Trigger voice channel ID |
 | VOICE_CATEGORY_ID | yes (temp voice) | Category ID for temporary voice channels |
@@ -158,6 +159,7 @@ Temporary voice flow:
 | /leaderboard-xp | XP/level leaderboard | All guild members |
 | /stankonta | Private coin balance summary | All guild members |
 | /level | Public level card image with XP progress | All guild members |
+| /mute | Apply timeout via Server Mute role | Admin/Moderator/CommunityManager/Dev |
 | /dodaj-coinsy | Add coins to target user | Admin/Moderator/CommunityManager/Dev |
 | /dodaj-xp | Add XP to target user | Admin/Moderator/CommunityManager/Dev |
 | /usun-coinsy | Remove coins from target user | Admin/Moderator/CommunityManager/Dev |
@@ -177,7 +179,15 @@ Dashboard modules:
 - G2 matches (PandaScore sync, filters, refresh).
 - Economy settings (daily, leveling, text/voice XP, reset users, strict CSV import snapshot, role rewards per level).
 - Economy leaderboard (XP/coins sorting, pagination, Discord display names/avatars, message and voice-minute stats).
+- Timeout system (create/list/remove) with user search and duration fields: `durationAmount + durationUnit` (`s`, `m`, `h`, `d`, `mo`, `y`).
 - Economy access policy: settings/mutations/import/level-role mappings are Dev-only; leaderboard is available for Admin/Moderator/CommunityManager/Dev.
+
+Timeout safety rules:
+
+- Timeout cannot be applied to bots.
+- Timeout cannot be applied to protected staff roles (Admin/Moderator/Community Manager/Dev).
+- A user can have only one active timeout at a time.
+- Max timeout duration is 10 years.
 
 Economy CSV import format:
 
@@ -229,6 +239,7 @@ Additional security rules:
 - Multi-layer rate limiting is enabled (global + OAuth callback + API mutations).
 - Dashboard sessions are stored in SQLite (not MemoryStore).
 - Do not publish logs containing environment data.
+- Before push, verify runtime data files (`data/*.json`, sqlite files) are intentional; avoid committing live counters/state snapshots.
 
 ## Troubleshooting
 

@@ -14,6 +14,7 @@ import { resetujCoinsyCommand } from './commands/resetuj-coinsy.js';
 import { leaderboardXpCommand } from './commands/leaderboard-xp.js';
 import { stankontaCommand } from './commands/stankonta.js';
 import { levelCommand } from './commands/level.js';
+import { muteCommand } from './commands/mute.js';
 
 config();
 
@@ -46,6 +47,7 @@ const commands = [
     leaderboardXpCommand.data.toJSON(),
     stankontaCommand.data.toJSON(),
     levelCommand.data.toJSON(),
+    muteCommand.data.toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(token);

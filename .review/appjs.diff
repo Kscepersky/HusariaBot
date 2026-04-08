@@ -1,0 +1,867 @@
+diff --git a/src/dashboard/public/js/app.js b/src/dashboard/public/js/app.js
+index 6652fa3..8a61b5e 100644
+--- a/src/dashboard/public/js/app.js
++++ b/src/dashboard/public/js/app.js
+@@ -7,6 +7,7 @@ const COLOR_MAP = {
+ 
+ const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+ const MAX_ECONOMY_CSV_IMPORT_BYTES = 2_000_000
++const TIMEOUT_DURATION_UNITS = new Set(['s', 'm', 'h', 'd', 'mo', 'y'])
+ const ALLOWED_UPLOAD_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif'])
+ const ALLOWED_UPLOAD_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif'])
+ const UPLOAD_MIME_BY_EXT = {
+@@ -16,6 +17,17 @@ const UPLOAD_MIME_BY_EXT = {
+   '.gif': 'image/gif',
+ }
+ 
++const ECONOMY_RANK_TIERS = [
++  { minLevel: 1, maxLevel: 9, levelRewardMultiplier: 3.0, dripRate: 0.08 },
++  { minLevel: 10, maxLevel: 19, levelRewardMultiplier: 4.5, dripRate: 0.10 },
++  { minLevel: 20, maxLevel: 34, levelRewardMultiplier: 6.0, dripRate: 0.13 },
++  { minLevel: 35, maxLevel: 49, levelRewardMultiplier: 8.0, dripRate: 0.17 },
++  { minLevel: 50, maxLevel: 74, levelRewardMultiplier: 11.0, dripRate: 0.22 },
++  { minLevel: 75, maxLevel: 99, levelRewardMultiplier: 15.0, dripRate: 0.28 },
++  { minLevel: 100, maxLevel: 124, levelRewardMultiplier: 20.0, dripRate: 0.35 },
++]
++const ECONOMY_PREVIEW_MAX_LEVEL = 10_000
++
+ let currentMode = 'embedded'
+ let selectedColor = 'czerwony'
+ let activeEditorId = 'content-textarea'
+@@ -46,6 +58,7 @@ let eventsSectionBound = false
+ let g2SectionBound = false
+ let economySectionBound = false
+ let economyLeaderboardSectionBound = false
++let timeoutSectionBound = false
+ let currentSection = 'embed-creator'
+ let scheduledPosts = []
+ let sentPosts = []
+@@ -67,6 +80,24 @@ let economyLevelRoleMappings = []
+ let economyLevelRoleMappingsLoaded = false
+ let economyHasDevAccess = null
+ let economyAccessRetryTimerId = null
++let timeoutCreateSearchDebounceId = null
++let timeoutFilterSearchDebounceId = null
++let timeoutCreateSearchRequestId = 0
++let timeoutFilterSearchRequestId = 0
++let timeoutCreateSearchResults = []
++let timeoutFilterSearchResults = []
++let timeoutSelectedUserId = ''
++let timeoutFilterUserId = ''
++let timeoutEntries = []
++let timeoutLoadError = null
++let economyHiddenLevelingConfig = {
++  levelingMode: 'progressive',
++  levelingCurve: 'formula_v2',
++  levelingBaseXp: 100,
++  levelingExponent: 1.5,
++  levelUpCoinsBase: 25,
++  levelUpCoinsPerLevel: 10,
++}
+ 
+ let g2Matches = []
+ let g2FilterOptions = {
+@@ -96,6 +127,7 @@ document.addEventListener('DOMContentLoaded', async () => {
+   await initG2Section()
+   await initEconomySection()
+   await initEconomyLeaderboardSection()
++  await initTimeoutSection()
+   await loadG2Matches({ silent: true })
+   switchSection('embed-creator')
+ })
+@@ -275,6 +307,10 @@ function switchSection(section) {
+     void loadEconomyLeaderboard({ silent: false })
+   }
+ 
++  if (section === 'timeouts-system') {
++    void loadTimeoutList({ silent: false })
++  }
++
+   if (typeof window.onDashboardSectionChanged === 'function') {
+     window.onDashboardSectionChanged(section)
+   }
+@@ -372,6 +408,25 @@ async function initEconomyLeaderboardSection() {
+   }
+ }
+ 
++async function initTimeoutSection() {
++  renderTimeoutMemberResults('create', [], '')
++  renderTimeoutMemberResults('filter', [], '')
++
++  const filterInput = document.getElementById('timeout-filter-user-id')
++  if (filterInput instanceof HTMLInputElement) {
++    filterInput.value = timeoutFilterUserId
++  }
++
++  renderTimeoutList()
++
++  if (!timeoutSectionBound) {
++    timeoutSectionBound = true
++    bindTimeoutSectionListeners()
++  }
++
++  await loadTimeoutList({ silent: true })
++}
++
+ function bindEmbedSectionListeners() {
+   const modeTabs = document.getElementById('mode-tabs')
+   modeTabs?.addEventListener('click', (event) => {
+@@ -1594,7 +1649,6 @@ function bindEconomySectionListeners() {
+   const importCsvButton = document.getElementById('economy-csv-import-btn')
+   const addLevelRoleButton = document.getElementById('economy-level-role-add-btn')
+   const levelRolesList = document.getElementById('economy-level-roles-list')
+-  const levelingCurveSelect = document.getElementById('economy-leveling-curve')
+ 
+   reloadButton?.addEventListener('click', async () => {
+     await loadEconomySettings({ silent: false })
+@@ -1643,13 +1697,10 @@ function bindEconomySectionListeners() {
+     await removeEconomyLevelRoleMapping(roleId)
+   })
+ 
+-  levelingCurveSelect?.addEventListener('change', () => {
+-    syncLevelingCurveUiState()
+-  })
+-
+   renderEconomyLevelRoleOptions()
+   renderEconomyLevelRoleMappings()
+-  syncLevelingCurveUiState()
++  bindEconomyPreviewListeners()
++  renderEconomyRewardPreview()
+ }
+ 
+ function bindEconomyLeaderboardSectionListeners() {
+@@ -1694,6 +1745,474 @@ function bindEconomyLeaderboardSectionListeners() {
+   })
+ }
+ 
++function bindTimeoutSectionListeners() {
++  const createButton = document.getElementById('timeout-create-btn')
++  const refreshButton = document.getElementById('timeout-list-refresh-btn')
++  const clearFilterButton = document.getElementById('timeout-filter-clear-btn')
++  const createSearchInput = document.getElementById('timeout-user-search')
++  const createSearchResults = document.getElementById('timeout-user-search-results')
++  const filterSearchInput = document.getElementById('timeout-filter-user-search')
++  const filterSearchResults = document.getElementById('timeout-filter-user-search-results')
++  const list = document.getElementById('timeout-list')
++
++  createButton?.addEventListener('click', async () => {
++    await createTimeoutFromDashboard()
++  })
++
++  refreshButton?.addEventListener('click', async () => {
++    await loadTimeoutList({ silent: false })
++  })
++
++  clearFilterButton?.addEventListener('click', async () => {
++    timeoutFilterUserId = ''
++    timeoutFilterSearchResults = []
++
++    const filterInput = document.getElementById('timeout-filter-user-id')
++    if (filterInput instanceof HTMLInputElement) {
++      filterInput.value = ''
++    }
++
++    if (filterSearchInput instanceof HTMLInputElement) {
++      filterSearchInput.value = ''
++    }
++
++    renderTimeoutMemberResults('filter', [], '')
++    await loadTimeoutList({ silent: false })
++  })
++
++  createSearchInput?.addEventListener('input', () => {
++    if (!(createSearchInput instanceof HTMLInputElement)) {
++      return
++    }
++
++    if (timeoutCreateSearchDebounceId) {
++      clearTimeout(timeoutCreateSearchDebounceId)
++    }
++
++    timeoutCreateSearchDebounceId = setTimeout(async () => {
++      await searchTimeoutMembers(createSearchInput.value, 'create')
++    }, 250)
++  })
++
++  filterSearchInput?.addEventListener('input', () => {
++    if (!(filterSearchInput instanceof HTMLInputElement)) {
++      return
++    }
++
++    if (timeoutFilterSearchDebounceId) {
++      clearTimeout(timeoutFilterSearchDebounceId)
++    }
++
++    timeoutFilterSearchDebounceId = setTimeout(async () => {
++      await searchTimeoutMembers(filterSearchInput.value, 'filter')
++    }, 250)
++  })
++
++  createSearchResults?.addEventListener('click', (event) => {
++    const button = event.target.closest('button[data-user-id]')
++    if (!button) {
++      return
++    }
++
++    const userId = button.getAttribute('data-user-id')?.trim() ?? ''
++    const displayName = button.getAttribute('data-display-name')?.trim() ?? ''
++    if (!/^\d{17,20}$/.test(userId)) {
++      return
++    }
++
++    timeoutSelectedUserId = userId
++    if (displayName.length > 0) {
++      knownUsers.set(userId, displayName)
++    }
++
++    const selectedInput = document.getElementById('timeout-selected-user-id')
++    if (selectedInput instanceof HTMLInputElement) {
++      selectedInput.value = userId
++    }
++
++    if (createSearchInput instanceof HTMLInputElement && displayName.length > 0) {
++      createSearchInput.value = displayName
++    }
++
++    timeoutCreateSearchResults = []
++    renderTimeoutMemberResults('create', [], '')
++  })
++
++  filterSearchResults?.addEventListener('click', async (event) => {
++    const button = event.target.closest('button[data-user-id]')
++    if (!button) {
++      return
++    }
++
++    const userId = button.getAttribute('data-user-id')?.trim() ?? ''
++    const displayName = button.getAttribute('data-display-name')?.trim() ?? ''
++    if (!/^\d{17,20}$/.test(userId)) {
++      return
++    }
++
++    timeoutFilterUserId = userId
++    if (displayName.length > 0) {
++      knownUsers.set(userId, displayName)
++    }
++
++    const filterInput = document.getElementById('timeout-filter-user-id')
++    if (filterInput instanceof HTMLInputElement) {
++      filterInput.value = userId
++    }
++
++    if (filterSearchInput instanceof HTMLInputElement && displayName.length > 0) {
++      filterSearchInput.value = displayName
++    }
++
++    timeoutFilterSearchResults = []
++    renderTimeoutMemberResults('filter', [], '')
++    await loadTimeoutList({ silent: false })
++  })
++
++  list?.addEventListener('click', async (event) => {
++    const button = event.target.closest('button[data-timeout-remove-id]')
++    if (!button) {
++      return
++    }
++
++    const timeoutId = Number(button.getAttribute('data-timeout-remove-id') ?? '0')
++    if (!Number.isFinite(timeoutId) || timeoutId <= 0) {
++      showToast('Ô£î Nieprawidlowe timeoutId.', 'error')
++      return
++    }
++
++    await removeTimeoutFromDashboard(timeoutId)
++  })
++}
++
++function formatTimeoutRemainingLabel(expiresAt) {
++  const msLeft = Math.max(0, Number(expiresAt) - Date.now())
++  if (!Number.isFinite(msLeft) || msLeft <= 0) {
++    return 'wygasa teraz'
++  }
++
++  const totalMinutes = Math.ceil(msLeft / 60000)
++  const days = Math.floor(totalMinutes / (24 * 60))
++  const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
++  const minutes = totalMinutes % 60
++
++  if (days > 0) {
++    return hours > 0 ? `${days}d ${hours}h` : `${days}d`
++  }
++
++  if (hours > 0) {
++    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`
++  }
++
++  return `${Math.max(1, minutes)}m`
++}
++
++function resolveTimeoutDisplayName(userId) {
++  const knownName = knownUsers.get(userId)
++  if (typeof knownName === 'string' && knownName.trim().length > 0) {
++    return knownName.trim()
++  }
++
++  return `Uzytkownik ${userId}`
++}
++
++function renderTimeoutMemberResults(mode, results, queryText = '') {
++  const containerId = mode === 'create'
++    ? 'timeout-user-search-results'
++    : 'timeout-filter-user-search-results'
++  const container = document.getElementById(containerId)
++  if (!container) {
++    return
++  }
++
++  const normalizedQuery = String(queryText ?? '').trim()
++  if (!Array.isArray(results) || results.length === 0) {
++    const emptyLabel = normalizedQuery.length < 2
++      ? '<p class="popover-empty">Wpisz min. 2 znaki, aby wyszukac uzytkownika.</p>'
++      : '<p class="popover-empty">Brak pasujacych uzytkownikow.</p>'
++    container.innerHTML = emptyLabel
++    return
++  }
++
++  container.innerHTML = results.map((member) => {
++    const displayName = member.nick || member.globalName || member.username || 'uzytkownik'
++    const username = member.username || 'unknown'
++
++    return `
++      <button type="button" class="mention-user-item" data-user-id="${escapeHtml(String(member.id ?? ''))}" data-display-name="${escapeHtml(displayName)}" title="@${escapeHtml(displayName)}">
++        <span class="mention-user-name">${escapeHtml(displayName)}</span>
++        <span class="mention-user-meta">@${escapeHtml(username)}</span>
++      </button>`
++  }).join('')
++}
++
++async function searchTimeoutMembers(rawQuery, mode) {
++  const query = String(rawQuery ?? '').trim()
++  if (mode !== 'create' && mode !== 'filter') {
++    return
++  }
++
++  if (mode === 'create') {
++    timeoutCreateSearchRequestId += 1
++  } else {
++    timeoutFilterSearchRequestId += 1
++  }
++
++  const requestId = mode === 'create' ? timeoutCreateSearchRequestId : timeoutFilterSearchRequestId
++
++  if (query.length < 2) {
++    if (mode === 'create') {
++      timeoutCreateSearchResults = []
++      renderTimeoutMemberResults('create', [], query)
++    } else {
++      timeoutFilterSearchResults = []
++      renderTimeoutMemberResults('filter', [], query)
++    }
++
++    return
++  }
++
++  try {
++    const response = await fetch(`/api/members/search?query=${encodeURIComponent(query)}&limit=8`)
++    if (!response.ok) {
++      throw new Error('fetch failed')
++    }
++
++    const payload = await response.json()
++    const requestStillActive = mode === 'create'
++      ? requestId === timeoutCreateSearchRequestId
++      : requestId === timeoutFilterSearchRequestId
++    if (!requestStillActive) {
++      return
++    }
++
++    const members = Array.isArray(payload.members) ? payload.members : []
++    members.forEach((member) => {
++      if (!member?.id) {
++        return
++      }
++
++      const displayName = member.nick || member.globalName || member.username || `Uzytkownik ${member.id}`
++      knownUsers.set(String(member.id), String(displayName))
++    })
++
++    if (mode === 'create') {
++      timeoutCreateSearchResults = members
++      renderTimeoutMemberResults('create', timeoutCreateSearchResults, query)
++    } else {
++      timeoutFilterSearchResults = members
++      renderTimeoutMemberResults('filter', timeoutFilterSearchResults, query)
++    }
++  } catch {
++    const requestStillActive = mode === 'create'
++      ? requestId === timeoutCreateSearchRequestId
++      : requestId === timeoutFilterSearchRequestId
++    if (!requestStillActive) {
++      return
++    }
++
++    if (mode === 'create') {
++      timeoutCreateSearchResults = []
++      renderTimeoutMemberResults('create', [], query)
++    } else {
++      timeoutFilterSearchResults = []
++      renderTimeoutMemberResults('filter', [], query)
++    }
++
++    showToast('Nie udalo sie wyszukac uzytkownikow.', 'error')
++  }
++}
++
++function renderTimeoutList() {
++  const list = document.getElementById('timeout-list')
++  if (!list) {
++    return
++  }
++
++  const errorBlock = timeoutLoadError
++    ? `<div class="scheduled-empty scheduled-error">Nie udalo sie pobrac timeoutow: ${escapeHtml(timeoutLoadError)}</div>`
++    : ''
++
++  if (!Array.isArray(timeoutEntries) || timeoutEntries.length === 0) {
++    list.innerHTML = timeoutLoadError
++      ? errorBlock
++      : '<div class="scheduled-empty">Brak aktywnych timeoutow.</div>'
++    return
++  }
++
++  const nowTimestamp = Date.now()
++  list.innerHTML = `${errorBlock}${timeoutEntries.map((timeoutEntry) => {
++    const timeoutId = Number(timeoutEntry.id)
++    const userId = String(timeoutEntry.userId ?? '')
++    const reason = String(timeoutEntry.reason ?? 'Brak powodu')
++    const createdAt = Number(timeoutEntry.createdAt)
++    const expiresAt = Number(timeoutEntry.expiresAt)
++    const createdByUserId = String(timeoutEntry.createdByUserId ?? 'unknown')
++    const displayName = resolveTimeoutDisplayName(userId)
++    const remainingLabel = formatTimeoutRemainingLabel(expiresAt)
++    const isExpiringSoon = Number.isFinite(expiresAt) && (expiresAt - nowTimestamp) <= (60 * 60 * 1000)
++    const statusClass = isExpiringSoon ? 'timeout-chip-expiring' : 'timeout-chip-active'
++    const statusLabel = isExpiringSoon ? `Koniec za: ${remainingLabel}` : `Aktywny: ${remainingLabel}`
++
++    return `
++      <article class="scheduled-card">
++        <div class="scheduled-card-header">
++          <span class="scheduled-card-title">${escapeHtml(displayName)} (ID: ${escapeHtml(userId)})</span>
++          <span class="scheduled-chip ${statusClass}">${escapeHtml(statusLabel)}</span>
++        </div>
++        <div class="scheduled-card-meta">
++          <span class="scheduled-chip">Timeout ID: ${escapeHtml(String(timeoutId))}</span>
++          <span class="scheduled-chip">Nadany przez: ${escapeHtml(createdByUserId)}</span>
++          <span class="scheduled-chip">Start: ${escapeHtml(Number.isFinite(createdAt) ? formatTimestampInWarsaw(createdAt) : '-')}</span>
++          <span class="scheduled-chip">Koniec: ${escapeHtml(Number.isFinite(expiresAt) ? formatTimestampInWarsaw(expiresAt) : '-')}</span>
++          <span class="scheduled-chip">Powod: ${escapeHtml(reason)}</span>
++        </div>
++        <div class="scheduled-actions">
++          <button class="btn-secondary" type="button" data-timeout-remove-id="${escapeHtml(String(timeoutId))}">Usun timeout</button>
++        </div>
++      </article>`
++  }).join('')}`
++}
++
++async function loadTimeoutList({ silent = false } = {}) {
++  try {
++    const params = new URLSearchParams({
++      limit: '100',
++    })
++
++    if (/^\d{17,20}$/.test(timeoutFilterUserId)) {
++      params.set('userId', timeoutFilterUserId)
++    }
++
++    const response = await fetch(`/api/timeouts?${params.toString()}`)
++    const payload = await parseApiResponse(response)
++    if (!response.ok) {
++      throw new Error(payload.error ?? 'Nie udalo sie pobrac timeoutow.')
++    }
++
++    timeoutEntries = Array.isArray(payload.timeouts) ? payload.timeouts : []
++    timeoutLoadError = null
++    renderTimeoutList()
++  } catch (error) {
++    timeoutEntries = []
++    timeoutLoadError = error instanceof Error ? error.message : 'Nieznany blad'
++    renderTimeoutList()
++
++    if (!silent) {
++      showToast(`Ô£î ${timeoutLoadError}`, 'error')
++    }
++  }
++}
++
++async function createTimeoutFromDashboard() {
++  const selectedUserInput = document.getElementById('timeout-selected-user-id')
++  const durationAmountInput = document.getElementById('timeout-duration-amount')
++  const durationUnitSelect = document.getElementById('timeout-duration-unit')
++  const reasonInput = document.getElementById('timeout-reason')
++  const createButton = document.getElementById('timeout-create-btn')
++
++  if (!(selectedUserInput instanceof HTMLInputElement)
++    || !(durationAmountInput instanceof HTMLInputElement)
++    || !(durationUnitSelect instanceof HTMLSelectElement)
++    || !(reasonInput instanceof HTMLTextAreaElement)) {
++    showToast('Ô£î Brakuje pol formularza timeoutu.', 'error')
++    return
++  }
++
++  const targetUserId = selectedUserInput.value.trim() || timeoutSelectedUserId
++  if (!/^\d{17,20}$/.test(targetUserId)) {
++    showToast('Ô£î Wybierz poprawnego uzytkownika z listy wyszukiwania.', 'error')
++    return
++  }
++
++  const durationAmount = Number.parseInt(durationAmountInput.value.trim(), 10)
++  if (!Number.isInteger(durationAmount) || durationAmount <= 0) {
++    showToast('Ô£î Podaj dodatnia liczbe calkowita czasu timeoutu.', 'error')
++    return
++  }
++
++  const durationUnit = durationUnitSelect.value.trim()
++  if (!TIMEOUT_DURATION_UNITS.has(durationUnit)) {
++    showToast('Ô£î Wybierz poprawna jednostke czasu timeoutu.', 'error')
++    return
++  }
++
++  const reason = reasonInput.value.trim()
++  if (reason.length === 0) {
++    showToast('Ô£î Powod timeoutu nie moze byc pusty.', 'error')
++    return
++  }
++
++  if (reason.length > 500) {
++    showToast('Ô£î Powod timeoutu nie moze byc dluzszy niz 500 znakow.', 'error')
++    return
++  }
++
++  if (createButton instanceof HTMLButtonElement) {
++    createButton.disabled = true
++  }
++
++  try {
++    const response = await fetchWithCsrf('/api/timeouts', {
++      method: 'POST',
++      headers: {
++        'Content-Type': 'application/json',
++      },
++      body: JSON.stringify({
++        targetUserId,
++        durationAmount,
++        durationUnit,
++        reason,
++      }),
++    })
++
++    const payload = await parseApiResponse(response)
++    if (!response.ok) {
++      throw new Error(payload.error ?? 'Nie udalo sie nalozyc timeoutu.')
++    }
++
++    timeoutSelectedUserId = targetUserId
++    selectedUserInput.value = targetUserId
++    showToast(`Ôù Nalozono timeout na ${resolveTimeoutDisplayName(targetUserId)}.`, 'success')
++    await loadTimeoutList({ silent: true })
++  } catch (error) {
++    const message = error instanceof Error ? error.message : 'Nieznany blad'
++    showToast(`Ô£î ${message}`, 'error')
++  } finally {
++    if (createButton instanceof HTMLButtonElement) {
++      createButton.disabled = false
++    }
++  }
++}
++
++async function removeTimeoutFromDashboard(timeoutId) {
++  const confirmed = window.confirm('Czy na pewno chcesz usunac ten timeout?')
++  if (!confirmed) {
++    return
++  }
++
++  try {
++    const response = await fetchWithCsrf(`/api/timeouts/${encodeURIComponent(String(timeoutId))}/remove`, {
++      method: 'POST',
++      headers: {
++        'Content-Type': 'application/json',
++      },
++      body: JSON.stringify({}),
++    })
++
++    const payload = await parseApiResponse(response)
++    if (!response.ok) {
++      throw new Error(payload.error ?? 'Nie udalo sie usunac timeoutu.')
++    }
++
++    showToast('Ôù Timeout zostal usuniety.', 'success')
++    await loadTimeoutList({ silent: true })
++  } catch (error) {
++    const message = error instanceof Error ? error.message : 'Nieznany blad'
++    showToast(`Ô£î ${message}`, 'error')
++  }
++}
++
+ function renderEconomyLeaderboard() {
+   const list = document.getElementById('economy-leaderboard-list')
+   const countLabel = document.getElementById('economy-leaderboard-count-label')
+@@ -1947,23 +2466,11 @@ function collectEconomySettingsForm() {
+     .map((entry) => entry.trim())
+     .filter((entry) => entry.length > 0)
+ 
+-  const levelingMode = readEconomyInputValue('economy-leveling-mode')
+-  const levelingCurve = readEconomyInputValue('economy-leveling-curve')
+-  const levelingBaseXpRaw = readEconomyInputValue('economy-leveling-base-xp')
+-  const levelingExponentRaw = readEconomyInputValue('economy-leveling-exponent')
+-  const levelingBaseXp = levelingCurve === 'formula_v2'
+-    ? Math.max(1, Math.floor(Number(levelingBaseXpRaw) || 100))
+-    : Math.floor(toFiniteNumber(levelingBaseXpRaw, 'Leveling: base XP'))
+-  const levelingExponent = levelingCurve === 'formula_v2'
+-    ? Math.max(1, Number(levelingExponentRaw) || 1.5)
+-    : toFiniteNumber(levelingExponentRaw, 'Leveling: exponent')
+   const xpTextPerMessage = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-text-per-message'), 'XP text: za wiadomosc'))
+   const xpTextCooldownSeconds = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-text-cooldown-seconds'), 'XP text: cooldown'))
+   const xpVoicePerMinute = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-voice-per-minute'), 'XP voice: za minute'))
+   const watchpartyXpMultiplier = toFiniteNumber(readEconomyInputValue('economy-watchparty-xp-multiplier'), 'Watchparty: mnoznik XP')
+   const watchpartyCoinBonusPerMinute = Math.floor(toFiniteNumber(readEconomyInputValue('economy-watchparty-coin-bonus-per-minute'), 'Watchparty: bonus coin/min'))
+-  const levelUpCoinsBase = Math.floor(toFiniteNumber(readEconomyInputValue('economy-level-up-coins-base'), 'Level-up: base coins'))
+-  const levelUpCoinsPerLevel = Math.floor(toFiniteNumber(readEconomyInputValue('economy-level-up-coins-per-level'), 'Level-up: bonus per level'))
+ 
+   if (dailyMaxCoins < dailyMinCoins) {
+     throw new Error('Daily: max coins nie moze byc mniejsze niz min coins.')
+@@ -1973,14 +2480,6 @@ function collectEconomySettingsForm() {
+     throw new Error('Podaj co najmniej jedna wiadomosc daily.')
+   }
+ 
+-  if (levelingMode !== 'progressive' && levelingMode !== 'linear') {
+-    throw new Error('Nieprawidlowy tryb levelowania.')
+-  }
+-
+-  if (levelingCurve !== 'default' && levelingCurve !== 'formula_v2') {
+-    throw new Error('Nieprawidlowa krzywa levelowania.')
+-  }
+-
+   return {
+     dailyMinCoins,
+     dailyMaxCoins,
+@@ -1988,10 +2487,10 @@ function collectEconomySettingsForm() {
+     dailyStreakMaxDays,
+     dailyStreakGraceHours,
+     dailyMessages,
+-    levelingMode,
+-    levelingCurve,
+-    levelingBaseXp,
+-    levelingExponent,
++    levelingMode: economyHiddenLevelingConfig.levelingMode,
++    levelingCurve: economyHiddenLevelingConfig.levelingCurve,
++    levelingBaseXp: economyHiddenLevelingConfig.levelingBaseXp,
++    levelingExponent: economyHiddenLevelingConfig.levelingExponent,
+     xpTextPerMessage,
+     xpTextCooldownSeconds,
+     xpVoicePerMinute,
+@@ -2001,8 +2500,8 @@ function collectEconomySettingsForm() {
+     xpVoiceAllowAfk: readEconomyCheckboxValue('economy-xp-voice-allow-afk'),
+     watchpartyXpMultiplier,
+     watchpartyCoinBonusPerMinute,
+-    levelUpCoinsBase,
+-    levelUpCoinsPerLevel,
++    levelUpCoinsBase: economyHiddenLevelingConfig.levelUpCoinsBase,
++    levelUpCoinsPerLevel: economyHiddenLevelingConfig.levelUpCoinsPerLevel,
+   }
+ }
+ 
+@@ -2027,10 +2526,6 @@ function setEconomySettingsForm(config) {
+   setValue('economy-daily-streak-max-days', config.dailyStreakMaxDays)
+   setValue('economy-daily-streak-grace-hours', config.dailyStreakGraceHours)
+   setValue('economy-daily-messages', Array.isArray(config.dailyMessages) ? config.dailyMessages.join('\n') : '')
+-  setValue('economy-leveling-mode', config.levelingMode)
+-  setValue('economy-leveling-curve', config.levelingCurve === 'formula_v2' ? 'formula_v2' : 'default')
+-  setValue('economy-leveling-base-xp', config.levelingBaseXp)
+-  setValue('economy-leveling-exponent', config.levelingExponent)
+   setValue('economy-xp-text-per-message', config.xpTextPerMessage)
+   setValue('economy-xp-text-cooldown-seconds', config.xpTextCooldownSeconds)
+   setValue('economy-xp-voice-per-minute', config.xpVoicePerMinute)
+@@ -2040,35 +2535,164 @@ function setEconomySettingsForm(config) {
+   setChecked('economy-xp-voice-allow-self-mute', config.xpVoiceAllowSelfMute)
+   setChecked('economy-xp-voice-allow-self-deaf', config.xpVoiceAllowSelfDeaf)
+   setChecked('economy-xp-voice-allow-afk', config.xpVoiceAllowAfk)
+-  setValue('economy-level-up-coins-base', config.levelUpCoinsBase)
+-  setValue('economy-level-up-coins-per-level', config.levelUpCoinsPerLevel)
+-  syncLevelingCurveUiState()
++  economyHiddenLevelingConfig = {
++    levelingMode: 'progressive',
++    levelingCurve: 'formula_v2',
++    levelingBaseXp: Number.isFinite(Number(config.levelingBaseXp)) ? Math.max(1, Math.floor(Number(config.levelingBaseXp))) : 100,
++    levelingExponent: Number.isFinite(Number(config.levelingExponent)) ? Math.max(1, Number(config.levelingExponent)) : 1.5,
++    levelUpCoinsBase: Number.isFinite(Number(config.levelUpCoinsBase)) ? Math.max(0, Math.floor(Number(config.levelUpCoinsBase))) : 25,
++    levelUpCoinsPerLevel: Number.isFinite(Number(config.levelUpCoinsPerLevel)) ? Math.max(0, Math.floor(Number(config.levelUpCoinsPerLevel))) : 10,
++  }
++
++  renderEconomyRewardPreview()
++}
++
++function bindEconomyPreviewListeners() {
++  const previewInputIds = [
++    'economy-preview-level',
++    'economy-preview-drip-level',
++    'economy-preview-drip-xp',
++    'economy-preview-range-start',
++    'economy-preview-range-end',
++  ]
++
++  previewInputIds.forEach((inputId) => {
++    const input = document.getElementById(inputId)
++    if (input instanceof HTMLInputElement) {
++      input.addEventListener('input', () => {
++        renderEconomyRewardPreview()
++      })
++    }
++  })
+ }
+ 
+-function syncLevelingCurveUiState() {
+-  const curveSelect = document.getElementById('economy-leveling-curve')
+-  const baseXpInput = document.getElementById('economy-leveling-base-xp')
+-  const exponentInput = document.getElementById('economy-leveling-exponent')
++function toSafePreviewInt(rawValue, fallbackValue, minimumValue, maximumValue) {
++  const numericValue = Number(rawValue)
++  if (!Number.isFinite(numericValue)) {
++    return fallbackValue
++  }
++
++  const flooredValue = Math.floor(numericValue)
++  return Math.max(minimumValue, Math.min(maximumValue, flooredValue))
++}
++
++function resolveFormulaV2XpForNextLevel(level) {
++  const safeLevel = toSafePreviewInt(level, 1, 1, ECONOMY_PREVIEW_MAX_LEVEL)
++  const previousLevel = Math.max(0, safeLevel - 1)
++  const formulaValue = 100
++    + (0.04 * (previousLevel ** 3))
++    + (0.8 * (previousLevel ** 2))
++    + (2 * previousLevel)
++    + 0.5
++
++  return Math.max(1, Math.floor(formulaValue))
++}
++
++function resolveFormulaV2XpToReachLevel(level) {
++  const safeLevel = toSafePreviewInt(level, 1, 1, ECONOMY_PREVIEW_MAX_LEVEL)
++  let xpSpent = 0
++
++  for (let currentLevel = 1; currentLevel < safeLevel; currentLevel += 1) {
++    xpSpent += resolveFormulaV2XpForNextLevel(currentLevel)
++  }
++
++  return xpSpent
++}
+ 
+-  if (!(curveSelect instanceof HTMLSelectElement)) {
++function resolveRankTierForLevel(level) {
++  const safeLevel = toSafePreviewInt(level, 1, 1, ECONOMY_PREVIEW_MAX_LEVEL)
++  const tier = ECONOMY_RANK_TIERS.find((candidateTier) => {
++    return safeLevel >= candidateTier.minLevel && safeLevel <= candidateTier.maxLevel
++  })
++
++  return tier ?? ECONOMY_RANK_TIERS[ECONOMY_RANK_TIERS.length - 1]
++}
++
++function resolveLevelUpRewardForLevel(level) {
++  const safeLevel = toSafePreviewInt(level, 1, 1, ECONOMY_PREVIEW_MAX_LEVEL)
++  const tier = resolveRankTierForLevel(safeLevel)
++  const xpRequiredForLevel = resolveFormulaV2XpToReachLevel(safeLevel)
++
++  return {
++    reward: Math.max(0, Math.floor(50 + (tier.levelRewardMultiplier * Math.sqrt(xpRequiredForLevel)))),
++    xpRequiredForLevel,
++    tier,
++  }
++}
++
++function resolveDripReward(levelBeforeAward, xpGained) {
++  const safeXpGained = toSafePreviewInt(xpGained, 0, 0, 1_000_000_000)
++  const tier = resolveRankTierForLevel(levelBeforeAward)
++
++  return {
++    reward: Math.max(0, Math.floor(safeXpGained * tier.dripRate)),
++    tier,
++    safeXpGained,
++  }
++}
++
++function renderEconomyRewardPreview() {
++  const levelInput = document.getElementById('economy-preview-level')
++  const dripLevelInput = document.getElementById('economy-preview-drip-level')
++  const dripXpInput = document.getElementById('economy-preview-drip-xp')
++  const rangeStartInput = document.getElementById('economy-preview-range-start')
++  const rangeEndInput = document.getElementById('economy-preview-range-end')
++
++  const levelOutput = document.getElementById('economy-preview-level-output')
++  const dripOutput = document.getElementById('economy-preview-drip-output')
++  const rangeTotalOutput = document.getElementById('economy-preview-range-total')
++  const rangeBreakdown = document.getElementById('economy-preview-range-breakdown')
++
++  if (!(levelInput instanceof HTMLInputElement)
++    || !(dripLevelInput instanceof HTMLInputElement)
++    || !(dripXpInput instanceof HTMLInputElement)
++    || !(rangeStartInput instanceof HTMLInputElement)
++    || !(rangeEndInput instanceof HTMLInputElement)
++    || !(levelOutput instanceof HTMLElement)
++    || !(dripOutput instanceof HTMLElement)
++    || !(rangeTotalOutput instanceof HTMLElement)
++    || !(rangeBreakdown instanceof HTMLElement)) {
+     return
+   }
+ 
+-  const useFormulaV2 = curveSelect.value === 'formula_v2'
++  const targetLevel = toSafePreviewInt(levelInput.value, 1, 1, ECONOMY_PREVIEW_MAX_LEVEL)
++  levelInput.value = String(targetLevel)
++  const levelReward = resolveLevelUpRewardForLevel(targetLevel)
++  levelOutput.textContent = `Nagroda: ${levelReward.reward} coin | XP(${targetLevel})=${levelReward.xpRequiredForLevel} | M_r=${levelReward.tier.levelRewardMultiplier.toFixed(2)}`
+ 
+-  if (baseXpInput instanceof HTMLInputElement) {
+-    baseXpInput.disabled = useFormulaV2
+-    baseXpInput.title = useFormulaV2
+-      ? 'Dla Formula v2 pole base XP nie jest u+-ywane.'
+-      : ''
++  const dripLevel = toSafePreviewInt(dripLevelInput.value, 1, 1, ECONOMY_PREVIEW_MAX_LEVEL)
++  dripLevelInput.value = String(dripLevel)
++  const dripXp = toSafePreviewInt(dripXpInput.value, 0, 0, 1_000_000_000)
++  dripXpInput.value = String(dripXp)
++  const drip = resolveDripReward(dripLevel, dripXp)
++  dripOutput.textContent = `Nagroda drip: ${drip.reward} coin | xpGained=${drip.safeXpGained} | D_r=${drip.tier.dripRate.toFixed(2)}`
++
++  const rangeStart = toSafePreviewInt(rangeStartInput.value, 1, 1, ECONOMY_PREVIEW_MAX_LEVEL)
++  rangeStartInput.value = String(rangeStart)
++  const rangeEnd = toSafePreviewInt(rangeEndInput.value, rangeStart + 1, 1, ECONOMY_PREVIEW_MAX_LEVEL)
++  rangeEndInput.value = String(rangeEnd)
++
++  if (rangeEnd <= rangeStart) {
++    rangeTotalOutput.textContent = 'Suma: 0 coin (koniec musi byc wiekszy od startu).'
++    rangeBreakdown.innerHTML = ''
++    return
+   }
+ 
+-  if (exponentInput instanceof HTMLInputElement) {
+-    exponentInput.disabled = useFormulaV2
+-    exponentInput.title = useFormulaV2
+-      ? 'Dla Formula v2 pole exponent nie jest u+-ywane.'
+-      : ''
++  const breakdownRows = []
++  let totalReward = 0
++  const cappedRangeEnd = Math.min(rangeEnd, rangeStart + 150)
++
++  for (let level = rangeStart + 1; level <= cappedRangeEnd; level += 1) {
++    const rewardDetails = resolveLevelUpRewardForLevel(level)
++    totalReward += rewardDetails.reward
++    breakdownRows.push(`<span class="economy-reward-pill">L${level}: +${rewardDetails.reward}</span>`)
+   }
++
++  const wasCapped = cappedRangeEnd !== rangeEnd
++  rangeTotalOutput.textContent = wasCapped
++    ? `Suma: ${totalReward} coin (pokazano do L${cappedRangeEnd}, limit 150 leveli naraz).`
++    : `Suma: ${totalReward} coin.`
++  rangeBreakdown.innerHTML = breakdownRows.join('')
+ }
+ 
+ function resolveEconomyMutationAmount(operation) {
