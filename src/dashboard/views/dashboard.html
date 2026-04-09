@@ -54,6 +54,14 @@
         <span class="sidebar-icon">🔇</span>
         <span>System timeoutow</span>
       </a>
+      <a href="#" class="sidebar-item" data-section="ticket-history">
+        <span class="sidebar-icon">📒</span>
+        <span>Historia Ticketow</span>
+      </a>
+      <a href="#" class="sidebar-item" data-section="image-library">
+        <span class="sidebar-icon">🖼️</span>
+        <span>Biblioteka Grafik</span>
+      </a>
     </nav>
   </aside>
 
@@ -65,7 +73,7 @@
       </div>
 
       <div class="creator-grid">
-        <div class="creator-form-card">
+        <div class="creator-form-card" id="creator-form-card">
           <div class="form-group">
             <label class="form-label">Tryb publikacji</label>
             <div class="mode-tabs" id="mode-tabs">
@@ -190,7 +198,7 @@
           <details class="form-group form-disclosure" id="image-group">
             <summary class="disclosure-summary">Wstaw grafikę (opcjonalnie)</summary>
             <div class="disclosure-content">
-              <p class="form-help">Obsługiwane formaty: JPEG, PNG, GIF.</p>
+              <p class="form-help">Obsługiwane formaty: JPEG, PNG, GIF, WebP, SVG.</p>
               <select id="image-mode-select" class="form-select">
                 <option value="none">Nie dodawaj grafiki</option>
                 <option value="library">Wybierz z biblioteki /img</option>
@@ -198,11 +206,19 @@
               </select>
 
               <div id="image-library-panel" class="image-option-panel" hidden>
+                <div class="image-panel-toolbar">
+                  <input id="image-library-search" type="text" class="form-input" placeholder="Szukaj po nazwie pliku...">
+                </div>
                 <div class="image-grid" id="image-grid"></div>
+                <div class="image-pagination" id="image-library-pagination" hidden>
+                  <button id="image-library-prev-btn" class="btn-secondary" type="button">⬅</button>
+                  <span class="preview-note" id="image-library-page-label">Strona 1/1</span>
+                  <button id="image-library-next-btn" class="btn-secondary" type="button">➡</button>
+                </div>
               </div>
 
               <div id="image-upload-panel" class="image-option-panel" hidden>
-                <input type="file" id="image-upload-input" class="form-input" accept="image/png,image/jpeg,image/gif">
+                <input type="file" id="image-upload-input" class="form-input" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml">
                 <p class="upload-file-name" id="upload-file-name">Nie wybrano pliku.</p>
               </div>
             </div>
@@ -280,7 +296,7 @@
             <span id="send-btn-text">Opublikuj</span>
           </button>
         </div>
-        <div class="creator-preview-card">
+        <div class="creator-preview-card" id="creator-preview-card">
           <div class="preview-header">
             <span>Podgląd</span>
             <span class="preview-note">wygląd przybliżony</span>
@@ -726,6 +742,72 @@
         </div>
 
         <div id="timeout-list" class="scheduled-list"></div>
+      </div>
+    </div>
+
+    <div id="section-image-library" class="section-panel">
+      <div class="section-header">
+        <h2>🖼️ Biblioteka Grafik</h2>
+        <p>Wrzucaj, pobieraj, zmieniaj nazwy i usuwaj grafiki z katalogu /img. Kreator synchronizuje się automatycznie.</p>
+      </div>
+
+      <div class="creator-form-card">
+        <div class="scheduled-toolbar image-library-toolbar">
+          <input id="image-library-tab-search" type="text" class="form-input" placeholder="Szukaj po nazwie pliku...">
+          <select id="image-library-tab-sort" class="form-select">
+            <option value="newest">Sortowanie: najnowsze</option>
+            <option value="name_asc">Sortowanie: nazwa A-Z</option>
+          </select>
+          <button id="image-library-tab-refresh-btn" class="btn-secondary" type="button">Odśwież</button>
+        </div>
+
+        <div class="events-form-grid image-library-upload-grid">
+          <label class="form-label" for="image-library-upload-file">Wybierz plik</label>
+          <input id="image-library-upload-file" type="file" class="form-input" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml">
+
+          <label class="form-label" for="image-library-upload-name">Nazwa pliku</label>
+          <input id="image-library-upload-name" type="text" class="form-input" placeholder="np. zapowiedz-meczu.png">
+        </div>
+
+        <div class="scheduled-actions">
+          <button id="image-library-upload-btn" class="btn-primary" type="button">Dodaj grafikę do biblioteki</button>
+        </div>
+
+        <div id="image-library-tab-list" class="scheduled-list"></div>
+
+        <div class="scheduled-toolbar">
+          <div class="image-pagination" id="image-library-tab-pagination" hidden>
+            <button id="image-library-tab-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
+            <span class="preview-note" id="image-library-tab-page-label">Strona 1/1</span>
+            <button id="image-library-tab-next-btn" class="btn-secondary" type="button">Następna ➡</button>
+          </div>
+          <span class="preview-note" id="image-library-tab-count-label">Elementy: 0</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="section-ticket-history" class="section-panel">
+      <div class="section-header">
+        <h2>📒 Historia Ticketow</h2>
+        <p>Lista zamknietych ticketow z informacja kto i kiedy zamknal ticket oraz z jakiego powodu.</p>
+      </div>
+
+      <div class="creator-form-card">
+        <div class="scheduled-toolbar image-library-toolbar">
+          <input id="ticket-history-search" type="text" class="form-input" placeholder="Szukaj po nazwie kanalu, ownerze lub powodzie...">
+          <span class="preview-note" id="ticket-history-count-label">Elementy: 0</span>
+          <button id="ticket-history-refresh-btn" class="btn-secondary" type="button">Odswiez</button>
+        </div>
+
+        <div id="ticket-history-list" class="scheduled-list"></div>
+
+        <div class="scheduled-toolbar">
+          <div class="image-pagination" id="ticket-history-pagination" hidden>
+            <button id="ticket-history-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
+            <span class="preview-note" id="ticket-history-page-label">Strona 1/1</span>
+            <button id="ticket-history-next-btn" class="btn-secondary" type="button">Nastepna ➡</button>
+          </div>
+        </div>
       </div>
     </div>
 

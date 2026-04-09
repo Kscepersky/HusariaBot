@@ -1,6 +1,9 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { config } from 'dotenv';
 import { randomUUID } from 'node:crypto';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
 import { requireAuth } from '../middleware/require-auth.js';
 import {
     createExternalGuildScheduledEvent,
@@ -37,6 +40,8 @@ import {
     economyLevelRoleMappingsSchema,
     economyUserMutationSchema,
     embedPayloadSchema,
+    imageLibraryRenameSchema,
+    imageLibraryUploadSchema,
     sendImageSchema,
     timeoutCreateSchema,
     timeoutRemoveSchema,
@@ -70,6 +75,7 @@ import {
 } from '../../economy/repository.js';
 import type { EconomyLeaderboardPage, EconomyLeaderboardSortBy } from '../../economy/types.js';
 import { parseTimeoutDurationParts } from '../../timeouts/duration.js';
+import { listTicketHistoryEntries, resolveTicketTranscriptFilePath } from '../../tickets/history-store.js';
 import { createLogger } from '../../utils/logger.js';
 
 config();
@@ -81,7 +87,29 @@ const LEADERBOARD_PROFILE_FAILURE_CACHE_TTL_MS = 30 * 1000;
 const LEADERBOARD_PROFILE_CACHE_MAX_ENTRIES = 1500;
 const LEADERBOARD_PROFILE_CONCURRENCY_LIMIT = 5;
 const LEADERBOARD_PROFILE_LOOKUP_TIMEOUT_MS = 3_000;
+const IMAGE_LIBRARY_PAGE_SIZE_DEFAULT = 8;
+const IMAGE_LIBRARY_PAGE_SIZE_MAX = 64;
+const IMAGE_LIBRARY_MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const TICKET_HISTORY_PAGE_SIZE_DEFAULT = 20;
+const TICKET_HISTORY_PAGE_SIZE_MAX = 100;
 const apiLogger = createLogger('dashboard:api');
+
+const IMAGE_LIBRARY_ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
+const IMAGE_LIBRARY_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+};
+
+class ImageLibraryValidationError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'ImageLibraryValidationError';
+    }
+}
 
 interface LeaderboardProfileCacheEntry {
     displayName: string;
@@ -97,12 +125,21 @@ function isClientValidationError(error: unknown): boolean {
         return false;
     }
 
+    if (error instanceof ImageLibraryValidationError) {
+        return true;
+    }
+
     return [
         'nie istnieje',
+        'nieobslugiwany format',
         'nieobsługiwany format',
+        'nieprawidlowy format',
         'nieprawidłowy format',
+        'za duzy',
         'za duży',
+        'zawartosc pliku nie zgadza sie',
         'zawartość pliku nie zgadza się',
+        'niedozwolone',
     ].some((messagePart) => error.message.toLowerCase().includes(messagePart));
 }
 
@@ -137,6 +174,149 @@ function formatMuteDmMessage(guildName: string, expiresAtMs: number, adminUserId
     return `Zostales zmutowany na serwerze **${guildName}** do **${formatDiscordTimestamp(expiresAtMs)}** przez **<@${adminUserId}>** z powodu: **${reason}**`;
 }
 
+function resolveImageLibraryDirectoryPath(): string {
+    return join(__dirname, '..', '..', '..', 'img');
+}
+
+function normalizeUploadMimeType(rawMimeType: string): string {
+    const normalized = rawMimeType.trim().toLowerCase();
+    return normalized === 'image/jpg' ? 'image/jpeg' : normalized;
+}
+
+function resolveSafeImageFilename(rawValue: string): string | null {
+    const normalized = rawValue.trim();
+    if (!normalized || normalized === '.' || normalized === '..' || normalized.length > 255) {
+        return null;
+    }
+
+    if (/[\\/]/.test(normalized)) {
+        return null;
+    }
+
+    if (/[<>:"|?*\x00-\x1F]/.test(normalized)) {
+        return null;
+    }
+
+    return normalized;
+}
+
+function resolveImageLibraryExtension(filename: string): string {
+    return extname(filename).toLowerCase();
+}
+
+function parseUploadData(uploadBase64: string): Buffer | null {
+    const trimmed = uploadBase64.trim();
+    const dataUrlMatch = /^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(trimmed);
+
+    let base64Data = trimmed;
+    if (dataUrlMatch) {
+        base64Data = dataUrlMatch[2] ?? '';
+    }
+
+    const normalized = base64Data.replace(/\s+/g, '');
+    if (!normalized || normalized.length % 4 !== 0 || !/^[A-Za-z0-9+/]+=*$/.test(normalized)) {
+        return null;
+    }
+
+    return Buffer.from(normalized, 'base64');
+}
+
+function detectImageMime(buffer: Buffer): string | null {
+    if (
+        buffer.length >= 8
+        && buffer[0] === 0x89
+        && buffer[1] === 0x50
+        && buffer[2] === 0x4e
+        && buffer[3] === 0x47
+        && buffer[4] === 0x0d
+        && buffer[5] === 0x0a
+        && buffer[6] === 0x1a
+        && buffer[7] === 0x0a
+    ) {
+        return 'image/png';
+    }
+
+    if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+        return 'image/jpeg';
+    }
+
+    if (buffer.length >= 6) {
+        const gifHeader = buffer.toString('ascii', 0, 6);
+        if (gifHeader === 'GIF87a' || gifHeader === 'GIF89a') {
+            return 'image/gif';
+        }
+    }
+
+    if (buffer.length >= 12) {
+        const riffHeader = buffer.toString('ascii', 0, 4);
+        const webpHeader = buffer.toString('ascii', 8, 12);
+        if (riffHeader === 'RIFF' && webpHeader === 'WEBP') {
+            return 'image/webp';
+        }
+    }
+
+    const svgProbe = buffer.toString('utf8', 0, Math.min(buffer.length, 4096)).trimStart();
+    if (svgProbe.startsWith('<?xml') || svgProbe.startsWith('<svg') || svgProbe.includes('<svg')) {
+        return 'image/svg+xml';
+    }
+
+    return null;
+}
+
+function validateSvgSafety(buffer: Buffer): void {
+    const svgContent = buffer.toString('utf8');
+    if (/<script[\s>]/i.test(svgContent) || /\son[a-z]+\s*=\s*/i.test(svgContent)) {
+        throw new ImageLibraryValidationError('Plik SVG zawiera niedozwolone skrypty.');
+    }
+
+    if (/xlink:href\s*=\s*['"]\s*javascript:/i.test(svgContent)) {
+        throw new ImageLibraryValidationError('Plik SVG zawiera niedozwolone odwolania JavaScript.');
+    }
+}
+
+function listImageLibraryEntries(searchQuery: string, sortBy: ImageLibrarySortBy): ImageLibraryEntry[] {
+    const imageDirectoryPath = resolveImageLibraryDirectoryPath();
+    if (!existsSync(imageDirectoryPath)) {
+        return [];
+    }
+
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+
+    const entries = readdirSync(imageDirectoryPath, { withFileTypes: true })
+        .filter((entry) => entry.isFile())
+        .map((entry) => {
+            const extension = resolveImageLibraryExtension(entry.name);
+            if (!IMAGE_LIBRARY_ALLOWED_EXTENSIONS.has(extension)) {
+                return null;
+            }
+
+            if (normalizedSearch && !entry.name.toLowerCase().includes(normalizedSearch)) {
+                return null;
+            }
+
+            const stats = statSync(join(imageDirectoryPath, entry.name));
+            return {
+                name: entry.name,
+                sizeBytes: stats.size,
+                modifiedAt: stats.mtimeMs,
+                mimeType: IMAGE_LIBRARY_MIME_BY_EXTENSION[extension] ?? 'application/octet-stream',
+            } satisfies ImageLibraryEntry;
+        })
+        .filter((entry): entry is ImageLibraryEntry => entry !== null);
+
+    if (sortBy === 'name_asc') {
+        return entries.sort((left, right) => left.name.localeCompare(right.name, 'pl', { sensitivity: 'base' }));
+    }
+
+    return entries.sort((left, right) => {
+        if (left.modifiedAt !== right.modifiedAt) {
+            return right.modifiedAt - left.modifiedAt;
+        }
+
+        return left.name.localeCompare(right.name, 'pl', { sensitivity: 'base' });
+    });
+}
+
 interface EconomyCsvImportedUserRow {
     userId: string;
     level: number;
@@ -148,6 +328,15 @@ interface EconomyImportRoleSyncStats {
     skippedUsers: number;
     failedUsers: number;
 }
+
+interface ImageLibraryEntry {
+    name: string;
+    sizeBytes: number;
+    modifiedAt: number;
+    mimeType: string;
+}
+
+type ImageLibrarySortBy = 'newest' | 'name_asc';
 
 function resolveProtectedStaffRoleIds(): Set<string> {
     const roleIds = [
@@ -1123,14 +1312,335 @@ apiRouter.post('/timeouts/:timeoutId/remove', requireCurrentDashboardRole, async
     }
 });
 
-// GET /api/images — list available images from /img directory
-apiRouter.get('/images', (_req, res) => {
+// GET /api/images — list available images from /img directory with pagination/search/sort
+apiRouter.get('/images', requireCurrentDashboardRole, (req, res) => {
     try {
-        const images = listImages();
-        res.json({ images });
-    } catch (err) {
-        console.error('Failed to list images:', err);
+        const search = normalizeTrimmedString(req.query.search);
+        const sortByRaw = normalizeTrimmedString(req.query.sortBy);
+        const sortBy: ImageLibrarySortBy = sortByRaw === 'name_asc' ? 'name_asc' : 'newest';
+
+        const pageSizeRequested = parsePositiveIntQuery(req.query.pageSize, IMAGE_LIBRARY_PAGE_SIZE_DEFAULT);
+        const pageSize = Math.max(1, Math.min(IMAGE_LIBRARY_PAGE_SIZE_MAX, pageSizeRequested));
+
+        const allEntries = listImageLibraryEntries(search, sortBy);
+        const totalItems = allEntries.length;
+        const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+
+        const requestedPage = parsePositiveIntQuery(req.query.page, 1);
+        const page = Math.min(requestedPage, totalPages);
+        const startIndex = (page - 1) * pageSize;
+        const pageEntries = allEntries.slice(startIndex, startIndex + pageSize);
+
+        res.json({
+            success: true,
+            images: pageEntries.map((entry) => entry.name),
+            entries: pageEntries.map((entry) => ({
+                ...entry,
+                url: `/img/${encodeURIComponent(entry.name)}`,
+            })),
+            pagination: {
+                page,
+                pageSize,
+                totalItems,
+                totalPages,
+            },
+            search,
+            sortBy,
+        });
+    } catch (error) {
+        apiLogger.error('IMAGE_LIBRARY_LIST_FAILED', 'Nie udalo sie pobrac listy obrazow.', {
+            actorUserId: req.session.user?.id,
+        }, error);
         res.status(500).json({ error: 'Nie udało się pobrać listy obrazów.' });
+    }
+});
+
+// POST /api/images/upload — upload image into /img library
+apiRouter.post('/images/upload', requireCurrentDashboardRole, async (req, res) => {
+    const parsedBody = imageLibraryUploadSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const actorUserId = req.session.user?.id;
+    if (!actorUserId) {
+        res.status(401).json({ error: 'Brak autoryzacji.' });
+        return;
+    }
+
+    try {
+        const normalizedFilename = resolveSafeImageFilename(parsedBody.data.filename);
+        if (!normalizedFilename) {
+            res.status(400).json({ error: 'Nieprawidlowa nazwa pliku.' });
+            return;
+        }
+
+        const extension = resolveImageLibraryExtension(normalizedFilename);
+        if (!IMAGE_LIBRARY_ALLOWED_EXTENSIONS.has(extension)) {
+            res.status(400).json({ error: 'Nieobslugiwany format pliku graficznego.' });
+            return;
+        }
+
+        const expectedMimeType = IMAGE_LIBRARY_MIME_BY_EXTENSION[extension];
+        const normalizedMimeType = normalizeUploadMimeType(parsedBody.data.uploadMimeType);
+        if (!expectedMimeType || normalizedMimeType !== expectedMimeType) {
+            res.status(400).json({ error: 'Typ MIME nie zgadza sie z rozszerzeniem pliku.' });
+            return;
+        }
+
+        const imageBuffer = parseUploadData(parsedBody.data.uploadBase64);
+        if (!imageBuffer || imageBuffer.length === 0) {
+            res.status(400).json({ error: 'Wgrany plik ma nieprawidlowy format.' });
+            return;
+        }
+
+        if (imageBuffer.length > IMAGE_LIBRARY_MAX_UPLOAD_BYTES) {
+            res.status(400).json({ error: 'Wgrany plik jest za duzy (max 20 MB).' });
+            return;
+        }
+
+        const detectedMimeType = detectImageMime(imageBuffer);
+        if (!detectedMimeType || detectedMimeType !== expectedMimeType) {
+            res.status(400).json({ error: 'Zawartosc pliku nie zgadza sie z deklarowanym typem obrazu.' });
+            return;
+        }
+
+        if (expectedMimeType === 'image/svg+xml') {
+            validateSvgSafety(imageBuffer);
+        }
+
+        const imageDirectoryPath = resolveImageLibraryDirectoryPath();
+        await mkdir(imageDirectoryPath, { recursive: true });
+
+        const targetFilePath = join(imageDirectoryPath, normalizedFilename);
+        if (existsSync(targetFilePath)) {
+            res.status(409).json({ error: 'Plik o tej nazwie juz istnieje w bibliotece.' });
+            return;
+        }
+
+        await writeFile(targetFilePath, imageBuffer, { flag: 'wx' });
+        const fileStats = statSync(targetFilePath);
+
+        apiLogger.info('IMAGE_LIBRARY_UPLOAD_SUCCESS', 'Dodano obraz do biblioteki grafik.', {
+            actorUserId,
+            imageFilename: normalizedFilename,
+            sizeBytes: fileStats.size,
+        });
+
+        res.json({
+            success: true,
+            entry: {
+                name: normalizedFilename,
+                sizeBytes: fileStats.size,
+                modifiedAt: fileStats.mtimeMs,
+                mimeType: expectedMimeType,
+                url: `/img/${encodeURIComponent(normalizedFilename)}`,
+            },
+        });
+    } catch (error) {
+        if (isClientValidationError(error)) {
+            res.status(400).json({
+                error: error instanceof Error ? error.message : 'Nieprawidlowe dane obrazu.',
+            });
+            return;
+        }
+
+        apiLogger.error('IMAGE_LIBRARY_UPLOAD_FAILED', 'Nie udalo sie dodac obrazu do biblioteki.', {
+            actorUserId,
+        }, error);
+        res.status(500).json({ error: 'Nie udalo sie dodac obrazu do biblioteki.' });
+    }
+});
+
+// PATCH /api/images/rename — rename image in /img library
+apiRouter.patch('/images/rename', requireCurrentDashboardRole, async (req, res) => {
+    const parsedBody = imageLibraryRenameSchema.safeParse(req.body);
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const actorUserId = req.session.user?.id;
+    if (!actorUserId) {
+        res.status(401).json({ error: 'Brak autoryzacji.' });
+        return;
+    }
+
+    try {
+        const normalizedFilename = resolveSafeImageFilename(parsedBody.data.filename);
+        if (!normalizedFilename) {
+            res.status(400).json({ error: 'Nieprawidlowa nazwa pliku.' });
+            return;
+        }
+
+        const normalizedNewFilenameBase = resolveSafeImageFilename(parsedBody.data.newFilename);
+        if (!normalizedNewFilenameBase) {
+            res.status(400).json({ error: 'Nieprawidlowa nowa nazwa pliku.' });
+            return;
+        }
+
+        const oldExtension = resolveImageLibraryExtension(normalizedFilename);
+        const newExtension = resolveImageLibraryExtension(normalizedNewFilenameBase);
+        const normalizedNewFilename = newExtension
+            ? normalizedNewFilenameBase
+            : `${normalizedNewFilenameBase}${oldExtension}`;
+
+        const finalExtension = resolveImageLibraryExtension(normalizedNewFilename);
+        if (!IMAGE_LIBRARY_ALLOWED_EXTENSIONS.has(finalExtension)) {
+            res.status(400).json({ error: 'Nieobslugiwany format pliku graficznego.' });
+            return;
+        }
+
+        if (normalizedFilename === normalizedNewFilename) {
+            res.status(400).json({ error: 'Nowa nazwa pliku musi byc inna niz obecna.' });
+            return;
+        }
+
+        const imageDirectoryPath = resolveImageLibraryDirectoryPath();
+        const sourcePath = join(imageDirectoryPath, normalizedFilename);
+        const destinationPath = join(imageDirectoryPath, normalizedNewFilename);
+
+        if (!existsSync(sourcePath)) {
+            res.status(404).json({ error: 'Nie znaleziono pliku do zmiany nazwy.' });
+            return;
+        }
+
+        if (existsSync(destinationPath)) {
+            res.status(409).json({ error: 'Plik o docelowej nazwie juz istnieje.' });
+            return;
+        }
+
+        await rename(sourcePath, destinationPath);
+        const fileStats = statSync(destinationPath);
+
+        apiLogger.info('IMAGE_LIBRARY_RENAME_SUCCESS', 'Zmieniono nazwe obrazu w bibliotece grafik.', {
+            actorUserId,
+            previousFilename: normalizedFilename,
+            nextFilename: normalizedNewFilename,
+        });
+
+        res.json({
+            success: true,
+            entry: {
+                name: normalizedNewFilename,
+                sizeBytes: fileStats.size,
+                modifiedAt: fileStats.mtimeMs,
+                mimeType: IMAGE_LIBRARY_MIME_BY_EXTENSION[finalExtension] ?? 'application/octet-stream',
+                url: `/img/${encodeURIComponent(normalizedNewFilename)}`,
+            },
+        });
+    } catch (error) {
+        apiLogger.error('IMAGE_LIBRARY_RENAME_FAILED', 'Nie udalo sie zmienic nazwy obrazu.', {
+            actorUserId,
+            filename: parsedBody.data.filename,
+            newFilename: parsedBody.data.newFilename,
+        }, error);
+        res.status(500).json({ error: 'Nie udalo sie zmienic nazwy obrazu.' });
+    }
+});
+
+// DELETE /api/images/:filename — delete image from /img library
+apiRouter.delete('/images/:filename', requireCurrentDashboardRole, async (req, res) => {
+    const actorUserId = req.session.user?.id;
+    if (!actorUserId) {
+        res.status(401).json({ error: 'Brak autoryzacji.' });
+        return;
+    }
+
+    try {
+        const normalizedFilename = resolveSafeImageFilename(String(req.params.filename ?? ''));
+        if (!normalizedFilename) {
+            res.status(400).json({ error: 'Nieprawidlowa nazwa pliku.' });
+            return;
+        }
+
+        const extension = resolveImageLibraryExtension(normalizedFilename);
+        if (!IMAGE_LIBRARY_ALLOWED_EXTENSIONS.has(extension)) {
+            res.status(400).json({ error: 'Nieobslugiwany format pliku graficznego.' });
+            return;
+        }
+
+        const imageDirectoryPath = resolveImageLibraryDirectoryPath();
+        const targetFilePath = join(imageDirectoryPath, normalizedFilename);
+
+        if (!existsSync(targetFilePath)) {
+            res.status(404).json({ error: 'Nie znaleziono pliku do usuniecia.' });
+            return;
+        }
+
+        await unlink(targetFilePath);
+
+        apiLogger.info('IMAGE_LIBRARY_DELETE_SUCCESS', 'Usunieto obraz z biblioteki grafik.', {
+            actorUserId,
+            imageFilename: normalizedFilename,
+        });
+
+        res.json({ success: true, deletedFilename: normalizedFilename });
+    } catch (error) {
+        apiLogger.error('IMAGE_LIBRARY_DELETE_FAILED', 'Nie udalo sie usunac obrazu z biblioteki.', {
+            actorUserId,
+            filename: req.params.filename,
+        }, error);
+        res.status(500).json({ error: 'Nie udalo sie usunac obrazu z biblioteki.' });
+    }
+});
+
+// GET /api/tickets/history — list closed ticket history records
+apiRouter.get('/tickets/history', requireCurrentDashboardRole, async (req, res) => {
+    try {
+        const search = normalizeTrimmedString(req.query.search);
+        const pageRequested = parsePositiveIntQuery(req.query.page, 1);
+        const pageSizeRequested = parsePositiveIntQuery(req.query.pageSize, TICKET_HISTORY_PAGE_SIZE_DEFAULT);
+        const pageSize = Math.max(1, Math.min(TICKET_HISTORY_PAGE_SIZE_MAX, pageSizeRequested));
+
+        const result = await listTicketHistoryEntries({
+            page: pageRequested,
+            pageSize,
+            search,
+        });
+
+        res.json({
+            success: true,
+            entries: result.entries,
+            pagination: {
+                page: result.page,
+                pageSize: result.pageSize,
+                totalItems: result.totalItems,
+                totalPages: result.totalPages,
+            },
+            search,
+        });
+    } catch (error) {
+        apiLogger.error('TICKET_HISTORY_LIST_FAILED', 'Nie udalo sie pobrac historii ticketow.', {
+            actorUserId: req.session.user?.id,
+        }, error);
+        res.status(500).json({ error: 'Nie udalo sie pobrac historii ticketow.' });
+    }
+});
+
+// GET /api/tickets/transcripts/:fileName — download saved ticket transcript
+apiRouter.get('/tickets/transcripts/:fileName', requireCurrentDashboardRole, (req, res) => {
+    try {
+        const fileName = normalizeTrimmedString(req.params.fileName);
+        const transcriptPath = resolveTicketTranscriptFilePath(fileName);
+        if (!transcriptPath) {
+            res.status(400).json({ error: 'Nieprawidlowa nazwa transkryptu.' });
+            return;
+        }
+
+        if (!existsSync(transcriptPath)) {
+            res.status(404).json({ error: 'Nie znaleziono transkryptu ticketu.' });
+            return;
+        }
+
+        res.sendFile(transcriptPath);
+    } catch (error) {
+        apiLogger.error('TICKET_TRANSCRIPT_DOWNLOAD_FAILED', 'Nie udalo sie pobrac transkryptu ticketu.', {
+            actorUserId: req.session.user?.id,
+            transcriptFileName: req.params.fileName,
+        }, error);
+        res.status(500).json({ error: 'Nie udalo sie pobrac transkryptu ticketu.' });
     }
 });
 

@@ -900,12 +900,14 @@ export function hasRequiredRole(member: DiscordGuildMember): boolean {
     return hasSupportRole(member) || hasDevRole(member);
 }
 
-const ALLOWED_IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif']);
+const ALLOWED_IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
 const IMG_MIME: Record<string, string> = {
     '.png':  'image/png',
     '.jpg':  'image/jpeg',
     '.jpeg': 'image/jpeg',
     '.gif':  'image/gif',
+    '.webp': 'image/webp',
+    '.svg':  'image/svg+xml',
 };
 
 function imgDir(): string {

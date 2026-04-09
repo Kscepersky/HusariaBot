@@ -1,5 +1,9 @@
 import { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { mkdir, unlink, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import express from 'express';
 import type { NextFunction, Request, Response as ExpressResponse } from 'express';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -100,6 +104,11 @@ vi.mock('../watchparty-publisher.js', () => ({
     deleteWatchpartyChannel: vi.fn(),
 }));
 
+vi.mock('../../tickets/history-store.js', () => ({
+    listTicketHistoryEntries: vi.fn(),
+    resolveTicketTranscriptFilePath: vi.fn(),
+}));
+
 vi.mock('../scheduler/store.js', () => ({
     insertScheduledPost: vi.fn(),
     updateScheduledPost: vi.fn(),
@@ -135,6 +144,7 @@ import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
 import { publishDashboardPost } from '../publish-flow.js';
 import { insertScheduledPost, updateScheduledPost } from '../scheduler/store.js';
 import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
+import { listTicketHistoryEntries, resolveTicketTranscriptFilePath } from '../../tickets/history-store.js';
 import { apiRouter } from './api.js';
 
 function buildConfig(overrides: Partial<EconomyConfig> = {}): EconomyConfig {
@@ -181,7 +191,7 @@ function buildEmbedPayload(overrides: Record<string, unknown> = {}): Record<stri
 
 async function withServer(run: (baseUrl: string) => Promise<void>): Promise<void> {
     const app = express();
-    app.use(express.json({ limit: '1mb' }));
+    app.use(express.json({ limit: '32mb' }));
     app.use('/api', apiRouter);
 
     const server = await new Promise<Server>((resolve) => {
@@ -231,6 +241,29 @@ async function parseJsonResponse(response: globalThis.Response): Promise<Record<
     }
 
     return JSON.parse(text) as Record<string, unknown>;
+}
+
+function resolveImageLibraryTestDir(): string {
+    return join(__dirname, '..', '..', '..', 'img');
+}
+
+function buildPngSignatureBuffer(): Buffer {
+    return Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+}
+
+async function ensureTestImageFile(filename: string, content: Buffer = buildPngSignatureBuffer()): Promise<string> {
+    const imageDir = resolveImageLibraryTestDir();
+    await mkdir(imageDir, { recursive: true });
+
+    const targetPath = join(imageDir, filename);
+    await writeFile(targetPath, content);
+    return targetPath;
+}
+
+async function removeTestImageFile(path: string): Promise<void> {
+    if (existsSync(path)) {
+        await unlink(path);
+    }
 }
 
 describe('api economy settings routes', () => {
@@ -1754,6 +1787,342 @@ describe('api economy settings routes', () => {
             expect(vi.mocked(addGuildMemberRole)).toHaveBeenCalledTimes(1);
             expect(vi.mocked(sendDirectMessage)).toHaveBeenCalledTimes(1);
         });
+    });
+
+    it('zwraca 403 dla /api/images gdy uzytkownik nie ma wymaganej roli dashboardowej', async () => {
+        vi.mocked(hasRequiredRole).mockReturnValue(false);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/images`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(403);
+            expect(body.error).toBe('Brak uprawnień do wykonania tej operacji.');
+        });
+    });
+
+    it('zwraca historie ticketow przez /api/tickets/history', async () => {
+        vi.mocked(listTicketHistoryEntries).mockResolvedValue({
+            entries: [
+                {
+                    id: '1:ticket',
+                    guildId: '123456789012345678',
+                    channelId: '999999999999999999',
+                    channelName: 'zgloszenie-test-01',
+                    ownerId: '888888888888888888',
+                    closeType: 'admin',
+                    closeReason: 'Test close',
+                    closedByUserId: 'user-1',
+                    closedByTag: 'Admin#0001',
+                    closedAt: Date.now(),
+                    transcriptFileName: 'test-transcript.html',
+                },
+            ],
+            page: 1,
+            pageSize: 20,
+            totalItems: 1,
+            totalPages: 1,
+        } as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/tickets/history?search=test&page=1&pageSize=20`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(Array.isArray(body.entries)).toBe(true);
+            expect((body.entries as Array<{ channelName: string }>)[0]?.channelName).toBe('zgloszenie-test-01');
+            expect(body.pagination).toMatchObject({ page: 1, pageSize: 20, totalItems: 1, totalPages: 1 });
+            expect(vi.mocked(listTicketHistoryEntries)).toHaveBeenCalledWith({
+                page: 1,
+                pageSize: 20,
+                search: 'test',
+            });
+        });
+    });
+
+    it('pobiera transkrypt ticketu przez /api/tickets/transcripts/:fileName', async () => {
+        const transcriptDir = join(process.cwd(), 'data', 'ticket-transcripts');
+        await mkdir(transcriptDir, { recursive: true });
+        const transcriptPath = join(transcriptDir, `vitest-transcript-${randomUUID()}.html`);
+        await writeFile(transcriptPath, '<h1>ok</h1>', 'utf8');
+
+        try {
+            vi.mocked(resolveTicketTranscriptFilePath).mockReturnValue(transcriptPath);
+
+            await withServer(async (baseUrl) => {
+                const response = await fetch(`${baseUrl}/api/tickets/transcripts/test.html`);
+                const body = await response.text();
+
+                expect(response.status).toBe(200);
+                expect(body).toContain('<h1>ok</h1>');
+            });
+        } finally {
+            await removeTestImageFile(transcriptPath);
+        }
+    });
+
+    it('zwraca 400 gdy nazwa transkryptu ticketu jest nieprawidlowa', async () => {
+        vi.mocked(resolveTicketTranscriptFilePath).mockReturnValue(null);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/tickets/transcripts/invalid`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(body.error).toBe('Nieprawidlowa nazwa transkryptu.');
+        });
+    });
+
+    it('zwraca 404 gdy transkrypt ticketu nie istnieje', async () => {
+        const nonexistentPath = join(process.cwd(), 'data', 'ticket-transcripts', `missing-${randomUUID()}.html`);
+        vi.mocked(resolveTicketTranscriptFilePath).mockReturnValue(nonexistentPath);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/tickets/transcripts/missing.html`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(404);
+            expect(body.error).toBe('Nie znaleziono transkryptu ticketu.');
+        });
+    });
+
+    it('zwraca stronicowana liste obrazow z filtrem i sortowaniem', async () => {
+        const testPrefix = `vitest-api-images-${randomUUID()}`;
+        const firstFilename = `${testPrefix}-b.png`;
+        const secondFilename = `${testPrefix}-a.png`;
+
+        const firstPath = await ensureTestImageFile(firstFilename);
+        const secondPath = await ensureTestImageFile(secondFilename);
+
+        try {
+            await withServer(async (baseUrl) => {
+                const response = await fetch(
+                    `${baseUrl}/api/images?search=${encodeURIComponent(testPrefix)}&sortBy=name_asc&page=1&pageSize=1`,
+                );
+                const body = await parseJsonResponse(response);
+
+                expect(response.status).toBe(200);
+                expect(body.success).toBe(true);
+                expect(Array.isArray(body.entries)).toBe(true);
+                expect((body.entries as Array<{ name: string }>)[0]?.name).toBe(secondFilename);
+                expect(body.pagination).toMatchObject({
+                    page: 1,
+                    pageSize: 1,
+                    totalItems: 2,
+                    totalPages: 2,
+                });
+            });
+        } finally {
+            await Promise.all([
+                removeTestImageFile(firstPath),
+                removeTestImageFile(secondPath),
+            ]);
+        }
+    });
+
+    it('zwraca 400 gdy upload SVG zawiera niedozwolony skrypt', async () => {
+        const filename = `vitest-api-images-${randomUUID()}.svg`;
+        const uploadBase64 = `data:image/svg+xml;base64,${Buffer.from('<svg><script>alert(1)</script></svg>').toString('base64')}`;
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/images/upload`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    filename,
+                    uploadMimeType: 'image/svg+xml',
+                    uploadBase64,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(typeof body.error).toBe('string');
+            expect(String(body.error)).toContain('niedozwolone');
+        });
+    });
+
+    it('dodaje obraz do biblioteki przez /api/images/upload', async () => {
+        const filename = `vitest-api-images-${randomUUID()}.png`;
+        const targetPath = join(resolveImageLibraryTestDir(), filename);
+        const uploadBase64 = `data:image/png;base64,${buildPngSignatureBuffer().toString('base64')}`;
+
+        try {
+            await withServer(async (baseUrl) => {
+                const response = await fetch(`${baseUrl}/api/images/upload`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        filename,
+                        uploadMimeType: 'image/png',
+                        uploadBase64,
+                    }),
+                });
+
+                const body = await parseJsonResponse(response);
+
+                expect(response.status).toBe(200);
+                expect(body.success).toBe(true);
+                expect(body.entry).toMatchObject({
+                    name: filename,
+                    mimeType: 'image/png',
+                    url: `/img/${encodeURIComponent(filename)}`,
+                });
+                expect(existsSync(targetPath)).toBe(true);
+            });
+        } finally {
+            await removeTestImageFile(targetPath);
+        }
+    });
+
+    it('odrzuca upload obrazu gdy MIME nie zgadza sie z rozszerzeniem pliku', async () => {
+        const filename = `vitest-api-images-${randomUUID()}.png`;
+        const uploadBase64 = `data:image/png;base64,${buildPngSignatureBuffer().toString('base64')}`;
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/images/upload`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    filename,
+                    uploadMimeType: 'image/jpeg',
+                    uploadBase64,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(body.error).toBe('Typ MIME nie zgadza sie z rozszerzeniem pliku.');
+        });
+    });
+
+    it('odrzuca upload obrazu wiekszego niz 20 MB', async () => {
+        const filename = `vitest-api-images-${randomUUID()}.png`;
+        const oversizedBuffer = Buffer.alloc((20 * 1024 * 1024) + 1, 0);
+        buildPngSignatureBuffer().copy(oversizedBuffer, 0);
+        const uploadBase64 = `data:image/png;base64,${oversizedBuffer.toString('base64')}`;
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/images/upload`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    filename,
+                    uploadMimeType: 'image/png',
+                    uploadBase64,
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(body.error).toBe('Wgrany plik jest za duzy (max 20 MB).');
+        });
+    });
+
+    it('zmienia nazwe obrazu przez /api/images/rename', async () => {
+        const oldFilename = `vitest-api-images-${randomUUID()}-old.png`;
+        const newFilenameWithoutExtension = `vitest-api-images-${randomUUID()}-new`;
+        const expectedNewFilename = `${newFilenameWithoutExtension}.png`;
+
+        const oldPath = await ensureTestImageFile(oldFilename);
+        const newPath = join(resolveImageLibraryTestDir(), expectedNewFilename);
+
+        try {
+            await withServer(async (baseUrl) => {
+                const response = await fetch(`${baseUrl}/api/images/rename`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        filename: oldFilename,
+                        newFilename: newFilenameWithoutExtension,
+                    }),
+                });
+
+                const body = await parseJsonResponse(response);
+
+                expect(response.status).toBe(200);
+                expect(body.success).toBe(true);
+                expect(body.entry).toMatchObject({
+                    name: expectedNewFilename,
+                    mimeType: 'image/png',
+                });
+                expect(existsSync(oldPath)).toBe(false);
+                expect(existsSync(newPath)).toBe(true);
+            });
+        } finally {
+            await Promise.all([
+                removeTestImageFile(oldPath),
+                removeTestImageFile(newPath),
+            ]);
+        }
+    });
+
+    it('zwraca 409 przy zmianie nazwy obrazu na juz istniejaca', async () => {
+        const sourceFilename = `vitest-api-images-${randomUUID()}-source.png`;
+        const destinationFilename = `vitest-api-images-${randomUUID()}-destination.png`;
+
+        const sourcePath = await ensureTestImageFile(sourceFilename);
+        const destinationPath = await ensureTestImageFile(destinationFilename);
+
+        try {
+            await withServer(async (baseUrl) => {
+                const response = await fetch(`${baseUrl}/api/images/rename`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        filename: sourceFilename,
+                        newFilename: destinationFilename,
+                    }),
+                });
+
+                const body = await parseJsonResponse(response);
+
+                expect(response.status).toBe(409);
+                expect(body.error).toBe('Plik o docelowej nazwie juz istnieje.');
+            });
+        } finally {
+            await Promise.all([
+                removeTestImageFile(sourcePath),
+                removeTestImageFile(destinationPath),
+            ]);
+        }
+    });
+
+    it('usuwa obraz o nazwie zawierajacej znak procenta', async () => {
+        const filename = `vitest-api-images-${randomUUID()}-100%real.png`;
+        const filePath = await ensureTestImageFile(filename);
+
+        try {
+            await withServer(async (baseUrl) => {
+                const response = await fetch(`${baseUrl}/api/images/${encodeURIComponent(filename)}`, {
+                    method: 'DELETE',
+                });
+
+                const body = await parseJsonResponse(response);
+
+                expect(response.status).toBe(200);
+                expect(body.success).toBe(true);
+                expect(body.deletedFilename).toBe(filename);
+            });
+        } finally {
+            await removeTestImageFile(filePath);
+        }
     });
 
     it('zdejmuje timeout przez dashboard i aktualizuje role', async () => {

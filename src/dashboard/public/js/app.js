@@ -5,16 +5,20 @@ const COLOR_MAP = {
   złoty: '#ffd700',
 }
 
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 const MAX_ECONOMY_CSV_IMPORT_BYTES = 2_000_000
 const TIMEOUT_DURATION_UNITS = new Set(['s', 'm', 'h', 'd', 'mo', 'y'])
-const ALLOWED_UPLOAD_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif'])
-const ALLOWED_UPLOAD_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif'])
+const ALLOWED_UPLOAD_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'])
+const ALLOWED_UPLOAD_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
+const CREATOR_IMAGE_PAGE_SIZE = 8
+const IMAGE_LIBRARY_PAGE_SIZE = 12
 const UPLOAD_MIME_BY_EXT = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
 }
 
 const ECONOMY_RANK_TIERS = [
@@ -45,6 +49,26 @@ let selectedImageName = null
 let selectedUploadFile = null
 let selectedUploadPreviewUrl = null
 let scheduledStoredUpload = null
+let creatorImageEntries = []
+let creatorImageSearch = ''
+let creatorImagePage = 1
+let creatorImageTotalPages = 1
+let creatorImageTotalItems = 0
+let creatorImageLoadRequestId = 0
+let libraryImageEntries = []
+let libraryImageSearch = ''
+let libraryImageSortBy = 'newest'
+let libraryImagePage = 1
+let libraryImageTotalPages = 1
+let libraryImageTotalItems = 0
+let libraryImageLoadRequestId = 0
+let ticketHistoryEntries = []
+let ticketHistorySearch = ''
+let ticketHistoryPage = 1
+let ticketHistoryTotalPages = 1
+let ticketHistoryTotalItems = 0
+let ticketHistoryLoadRequestId = 0
+let ticketHistorySearchDebounceId = null
 let mentionChannelSearchDebounceId = null
 let mentionRoleSearchDebounceId = null
 let mentionUserSearchDebounceId = null
@@ -59,6 +83,8 @@ let g2SectionBound = false
 let economySectionBound = false
 let economyLeaderboardSectionBound = false
 let timeoutSectionBound = false
+let imageLibrarySectionBound = false
+let ticketHistorySectionBound = false
 let currentSection = 'embed-creator'
 let scheduledPosts = []
 let sentPosts = []
@@ -128,6 +154,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initEconomySection()
   await initEconomyLeaderboardSection()
   await initTimeoutSection()
+  await initTicketHistorySection()
+  await initImageLibrarySection()
   await loadG2Matches({ silent: true })
   switchSection('embed-creator')
 })
@@ -311,6 +339,14 @@ function switchSection(section) {
     void loadTimeoutList({ silent: false })
   }
 
+  if (section === 'ticket-history') {
+    void loadTicketHistory({ silent: false })
+  }
+
+  if (section === 'image-library') {
+    void loadImageLibraryPage({ silent: false })
+  }
+
   if (typeof window.onDashboardSectionChanged === 'function') {
     window.onDashboardSectionChanged(section)
   }
@@ -320,13 +356,13 @@ async function initEmbedSection() {
   await Promise.all([
     loadChannels(),
     loadRoles(),
-    loadImages(),
+    loadImages({ silent: true }),
     loadEmojis(),
   ])
 
   renderChannelSelector()
   renderPingRoleSelector()
-  renderImageLibrary(images)
+  renderImageLibrary()
   renderEmojiList('')
   renderMentionChannelResults([])
   renderMentionRoleResults([])
@@ -425,6 +461,28 @@ async function initTimeoutSection() {
   }
 
   await loadTimeoutList({ silent: true })
+}
+
+async function initTicketHistorySection() {
+  renderTicketHistory()
+
+  if (!ticketHistorySectionBound) {
+    ticketHistorySectionBound = true
+    bindTicketHistorySectionListeners()
+  }
+
+  await loadTicketHistory({ silent: true })
+}
+
+async function initImageLibrarySection() {
+  renderImageLibraryPage()
+
+  if (!imageLibrarySectionBound) {
+    imageLibrarySectionBound = true
+    bindImageLibrarySectionListeners()
+  }
+
+  await loadImageLibraryPage({ silent: true })
 }
 
 function bindEmbedSectionListeners() {
@@ -572,10 +630,39 @@ function bindEmbedSectionListeners() {
   pingSelect?.addEventListener('change', updateSendButton)
 
   const imageModeSelect = document.getElementById('image-mode-select')
+  const imageLibrarySearchInput = document.getElementById('image-library-search')
+  const imageLibraryPrevButton = document.getElementById('image-library-prev-btn')
+  const imageLibraryNextButton = document.getElementById('image-library-next-btn')
   imageModeSelect?.addEventListener('change', () => {
     updateImagePanels()
     updatePreview()
     updateSendButton()
+
+    if ((imageModeSelect.value ?? 'none') === 'library') {
+      void loadImages({ page: 1, silent: true })
+    }
+  })
+
+  imageLibrarySearchInput?.addEventListener('input', () => {
+    creatorImageSearch = String(imageLibrarySearchInput.value ?? '').trim()
+    creatorImagePage = 1
+    void loadImages({ page: 1, silent: true })
+  })
+
+  imageLibraryPrevButton?.addEventListener('click', () => {
+    if (creatorImagePage <= 1) {
+      return
+    }
+
+    void loadImages({ page: creatorImagePage - 1, silent: true })
+  })
+
+  imageLibraryNextButton?.addEventListener('click', () => {
+    if (creatorImagePage >= creatorImageTotalPages) {
+      return
+    }
+
+    void loadImages({ page: creatorImagePage + 1, silent: true })
   })
 
   const uploadInput = document.getElementById('image-upload-input')
@@ -585,14 +672,14 @@ function bindEmbedSectionListeners() {
     scheduledStoredUpload = null
 
     if (selectedUploadFile && !isAllowedUploadFile(selectedUploadFile)) {
-      showToast('Dozwolone formaty pliku: JPEG, PNG, GIF.', 'error')
+      showToast('Dozwolone formaty pliku: JPEG, PNG, GIF, WebP, SVG.', 'error')
       uploadInput.value = ''
       selectedUploadFile = null
       clearUploadPreviewUrl()
     }
 
     if (selectedUploadFile && selectedUploadFile.size > MAX_UPLOAD_BYTES) {
-      showToast('Plik jest za duży. Maksymalny rozmiar to 8 MB.', 'error')
+      showToast('Plik jest za duży. Maksymalny rozmiar to 20 MB.', 'error')
       uploadInput.value = ''
       selectedUploadFile = null
       clearUploadPreviewUrl()
@@ -890,6 +977,182 @@ function bindEventsSectionListeners() {
   })
 }
 
+function bindImageLibrarySectionListeners() {
+  const searchInput = document.getElementById('image-library-tab-search')
+  const sortSelect = document.getElementById('image-library-tab-sort')
+  const refreshButton = document.getElementById('image-library-tab-refresh-btn')
+  const uploadFileInput = document.getElementById('image-library-upload-file')
+  const uploadNameInput = document.getElementById('image-library-upload-name')
+  const uploadButton = document.getElementById('image-library-upload-btn')
+  const listContainer = document.getElementById('image-library-tab-list')
+  const prevButton = document.getElementById('image-library-tab-prev-btn')
+  const nextButton = document.getElementById('image-library-tab-next-btn')
+
+  searchInput?.addEventListener('input', () => {
+    libraryImageSearch = String(searchInput.value ?? '').trim()
+    libraryImagePage = 1
+    void loadImageLibraryPage({ page: 1, silent: true })
+  })
+
+  sortSelect?.addEventListener('change', () => {
+    libraryImageSortBy = String(sortSelect.value ?? 'newest') === 'name_asc' ? 'name_asc' : 'newest'
+    libraryImagePage = 1
+    void loadImageLibraryPage({ page: 1, silent: true })
+  })
+
+  refreshButton?.addEventListener('click', () => {
+    void syncImageLibraryWithCreator({ silent: true })
+  })
+
+  uploadFileInput?.addEventListener('change', () => {
+    if (!(uploadNameInput instanceof HTMLInputElement) || !(uploadFileInput instanceof HTMLInputElement)) {
+      return
+    }
+
+    const selectedFile = uploadFileInput.files?.[0]
+    if (!selectedFile) {
+      return
+    }
+
+    uploadNameInput.value = selectedFile.name
+  })
+
+  uploadButton?.addEventListener('click', async () => {
+    await uploadImageToLibrary()
+  })
+
+  prevButton?.addEventListener('click', () => {
+    if (libraryImagePage <= 1) {
+      return
+    }
+
+    void loadImageLibraryPage({ page: libraryImagePage - 1, silent: true })
+  })
+
+  nextButton?.addEventListener('click', () => {
+    if (libraryImagePage >= libraryImageTotalPages) {
+      return
+    }
+
+    void loadImageLibraryPage({ page: libraryImagePage + 1, silent: true })
+  })
+
+  listContainer?.addEventListener('click', async (event) => {
+    const actionButton = event.target.closest('[data-image-action]')
+    if (!actionButton) {
+      return
+    }
+
+    const action = String(actionButton.dataset.imageAction ?? '')
+    const filename = String(actionButton.dataset.filename ?? '')
+    if (!action || !filename) {
+      return
+    }
+
+    if (action === 'rename') {
+      await renameImageInLibrary(filename)
+      return
+    }
+
+    if (action === 'delete') {
+      await deleteImageFromLibrary(filename)
+    }
+  })
+}
+
+function bindTicketHistorySectionListeners() {
+  const searchInput = document.getElementById('ticket-history-search')
+  const refreshButton = document.getElementById('ticket-history-refresh-btn')
+  const prevButton = document.getElementById('ticket-history-prev-btn')
+  const nextButton = document.getElementById('ticket-history-next-btn')
+
+  searchInput?.addEventListener('input', () => {
+    ticketHistorySearch = String(searchInput.value ?? '').trim()
+    ticketHistoryPage = 1
+    if (ticketHistorySearchDebounceId) {
+      clearTimeout(ticketHistorySearchDebounceId)
+    }
+
+    ticketHistorySearchDebounceId = setTimeout(() => {
+      void loadTicketHistory({ page: 1, silent: true })
+    }, 300)
+  })
+
+  refreshButton?.addEventListener('click', () => {
+    void loadTicketHistory({ silent: true })
+  })
+
+  prevButton?.addEventListener('click', () => {
+    if (ticketHistoryPage <= 1) {
+      return
+    }
+
+    void loadTicketHistory({ page: ticketHistoryPage - 1, silent: true })
+  })
+
+  nextButton?.addEventListener('click', () => {
+    if (ticketHistoryPage >= ticketHistoryTotalPages) {
+      return
+    }
+
+    void loadTicketHistory({ page: ticketHistoryPage + 1, silent: true })
+  })
+}
+
+async function loadTicketHistory(options = {}) {
+  const requestId = ++ticketHistoryLoadRequestId
+  const nextPage = Number.isFinite(Number(options.page))
+    ? Math.max(1, Number(options.page))
+    : ticketHistoryPage
+  const silent = options.silent === true
+
+  const params = new URLSearchParams({
+    page: String(nextPage),
+    pageSize: '20',
+    search: ticketHistorySearch,
+  })
+
+  try {
+    const response = await fetch(`/api/tickets/history?${params.toString()}`)
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie pobrac historii ticketow.')
+    }
+
+    if (requestId !== ticketHistoryLoadRequestId) {
+      return
+    }
+
+    ticketHistoryEntries = Array.isArray(payload.entries) ? payload.entries : []
+    ticketHistoryPage = Number.isFinite(Number(payload.pagination?.page))
+      ? Math.max(1, Number(payload.pagination.page))
+      : 1
+    ticketHistoryTotalPages = Number.isFinite(Number(payload.pagination?.totalPages))
+      ? Math.max(1, Number(payload.pagination.totalPages))
+      : 1
+    ticketHistoryTotalItems = Number.isFinite(Number(payload.pagination?.totalItems))
+      ? Math.max(0, Number(payload.pagination.totalItems))
+      : ticketHistoryEntries.length
+
+    renderTicketHistory()
+  } catch (error) {
+    if (requestId !== ticketHistoryLoadRequestId) {
+      return
+    }
+
+    ticketHistoryEntries = []
+    ticketHistoryPage = 1
+    ticketHistoryTotalPages = 1
+    ticketHistoryTotalItems = 0
+    renderTicketHistory()
+
+    if (!silent) {
+      const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac historii ticketow.'
+      showToast(`❌ ${message}`, 'error')
+    }
+  }
+}
+
 async function loadScheduledPosts() {
   try {
     const response = await fetch('/api/scheduled')
@@ -945,6 +1208,71 @@ async function loadDashboardEvents() {
     const message = error instanceof Error ? error.message : 'Nieznany błąd'
     showToast(`❌ ${message}`, 'error')
   }
+}
+
+function renderTicketHistory() {
+  const list = document.getElementById('ticket-history-list')
+  const countLabel = document.getElementById('ticket-history-count-label')
+  const pageLabel = document.getElementById('ticket-history-page-label')
+  const pagination = document.getElementById('ticket-history-pagination')
+  const prevButton = document.getElementById('ticket-history-prev-btn')
+  const nextButton = document.getElementById('ticket-history-next-btn')
+
+  if (!list) {
+    return
+  }
+
+  if (countLabel) {
+    countLabel.textContent = `Elementy: ${ticketHistoryTotalItems}`
+  }
+
+  if (pageLabel) {
+    pageLabel.textContent = `Strona ${ticketHistoryPage}/${ticketHistoryTotalPages}`
+  }
+
+  if (pagination) {
+    pagination.hidden = ticketHistoryTotalPages <= 1
+  }
+
+  if (prevButton instanceof HTMLButtonElement) {
+    prevButton.disabled = ticketHistoryPage <= 1
+  }
+
+  if (nextButton instanceof HTMLButtonElement) {
+    nextButton.disabled = ticketHistoryPage >= ticketHistoryTotalPages
+  }
+
+  if (ticketHistoryEntries.length === 0) {
+    const emptyMessage = ticketHistorySearch
+      ? `Brak historii pasujacej do zapytania: "${escapeHtml(ticketHistorySearch)}".`
+      : 'Brak zamknietych ticketow zapisanych po wdrozeniu historii.'
+    list.innerHTML = `<div class="scheduled-empty">${emptyMessage}</div>`
+    return
+  }
+
+  list.innerHTML = ticketHistoryEntries.map((entry) => {
+    const closeType = String(entry.closeType ?? '') === 'admin' ? 'Administracja' : 'Autor ticketu'
+    const ownerId = entry.ownerId ? `<@${escapeHtml(String(entry.ownerId))}>` : 'nieznany'
+    const transcriptLink = `/api/tickets/transcripts/${encodeURIComponent(String(entry.transcriptFileName ?? ''))}`
+
+    return `
+      <article class="scheduled-card">
+        <div class="scheduled-card-header">
+          <span class="scheduled-card-title">${escapeHtml(String(entry.channelName ?? 'ticket'))}</span>
+          <span class="scheduled-chip">${escapeHtml(closeType)}</span>
+        </div>
+        <div class="scheduled-card-meta">
+          <span class="scheduled-chip">Ticket channel: ${escapeHtml(String(entry.channelId ?? ''))}</span>
+          <span class="scheduled-chip">Owner: ${ownerId}</span>
+          <span class="scheduled-chip">Zamknal: ${escapeHtml(String(entry.closedByTag ?? ''))}</span>
+          <span class="scheduled-chip">Kiedy: ${escapeHtml(formatTimestampInWarsaw(Number(entry.closedAt ?? 0)))}</span>
+        </div>
+        <div class="scheduled-preview">${renderMarkdown(String(entry.closeReason ?? 'Brak powodu.')) || '<span style="opacity:.45">Brak powodu.</span>'}</div>
+        <div class="scheduled-actions">
+          <a class="btn-secondary" href="${transcriptLink}" target="_blank" rel="noopener noreferrer">Otworz transkrypt</a>
+        </div>
+      </article>`
+  }).join('')
 }
 
 function renderScheduledPosts() {
@@ -1473,7 +1801,7 @@ function applyPostPayloadToCreator(payload) {
 
   updateModeUI()
   updateImagePanels()
-  renderImageLibrary(images)
+  renderImageLibrary()
 
   document.querySelectorAll('.color-swatch').forEach((swatch) => {
     swatch.classList.toggle('active', swatch.dataset.color === selectedColor)
@@ -3626,17 +3954,153 @@ async function loadRoles() {
   }
 }
 
-async function loadImages() {
-  try {
-    const resp = await fetch('/api/images')
-    if (!resp.ok) throw new Error('fetch failed')
+function normalizeImageSortBy(sortBy) {
+  return String(sortBy ?? '').trim() === 'name_asc' ? 'name_asc' : 'newest'
+}
 
-    const json = await resp.json()
-    images = Array.isArray(json.images) ? json.images : []
-  } catch {
-    images = []
-    showToast('Nie udało się pobrać obrazów z /img.', 'error')
+async function fetchImagePageData({ page, pageSize, search, sortBy }) {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+    search: String(search ?? '').trim(),
+    sortBy: normalizeImageSortBy(sortBy),
+  })
+
+  const response = await fetch(`/api/images?${params.toString()}`)
+  const payload = await parseApiResponse(response)
+  if (!response.ok) {
+    throw new Error(payload.error ?? 'Nie udało się pobrać obrazów z /img.')
   }
+
+  const entries = Array.isArray(payload.entries) ? payload.entries : []
+  const pagination = payload.pagination && typeof payload.pagination === 'object'
+    ? payload.pagination
+    : {}
+
+  const totalPages = Number.isFinite(Number(pagination.totalPages))
+    ? Math.max(1, Number(pagination.totalPages))
+    : 1
+  const totalItems = Number.isFinite(Number(pagination.totalItems))
+    ? Math.max(0, Number(pagination.totalItems))
+    : entries.length
+  const nextPage = Number.isFinite(Number(pagination.page))
+    ? Math.max(1, Math.min(totalPages, Number(pagination.page)))
+    : 1
+
+  return {
+    entries,
+    page: nextPage,
+    totalPages,
+    totalItems,
+  }
+}
+
+async function loadImages(options = {}) {
+  const requestId = ++creatorImageLoadRequestId
+  const nextPage = Number.isFinite(Number(options.page))
+    ? Math.max(1, Number(options.page))
+    : creatorImagePage
+  const silent = options.silent === true
+
+  try {
+    const result = await fetchImagePageData({
+      page: nextPage,
+      pageSize: CREATOR_IMAGE_PAGE_SIZE,
+      search: creatorImageSearch,
+      sortBy: 'newest',
+    })
+
+    if (requestId !== creatorImageLoadRequestId) {
+      return
+    }
+
+    creatorImageEntries = result.entries
+    images = creatorImageEntries.map((entry) => String(entry.name ?? ''))
+    creatorImagePage = result.page
+    creatorImageTotalPages = result.totalPages
+    creatorImageTotalItems = result.totalItems
+
+    if (selectedImageName && !images.includes(selectedImageName)) {
+      const selectedExistsInLibrary = creatorImageTotalItems > 0
+      if (!selectedExistsInLibrary) {
+        selectedImageName = null
+      }
+    }
+
+    renderImageLibrary()
+  } catch (error) {
+    if (requestId !== creatorImageLoadRequestId) {
+      return
+    }
+
+    creatorImageEntries = []
+    images = []
+    creatorImagePage = 1
+    creatorImageTotalPages = 1
+    creatorImageTotalItems = 0
+    renderImageLibrary()
+
+    if (!silent) {
+      const message = error instanceof Error ? error.message : 'Nie udało się pobrać obrazów z /img.'
+      showToast(`❌ ${message}`, 'error')
+    }
+  }
+}
+
+async function loadImageLibraryPage(options = {}) {
+  const requestId = ++libraryImageLoadRequestId
+  const nextPage = Number.isFinite(Number(options.page))
+    ? Math.max(1, Number(options.page))
+    : libraryImagePage
+  const silent = options.silent === true
+
+  try {
+    const result = await fetchImagePageData({
+      page: nextPage,
+      pageSize: IMAGE_LIBRARY_PAGE_SIZE,
+      search: libraryImageSearch,
+      sortBy: libraryImageSortBy,
+    })
+
+    if (requestId !== libraryImageLoadRequestId) {
+      return
+    }
+
+    libraryImageEntries = result.entries
+    libraryImagePage = result.page
+    libraryImageTotalPages = result.totalPages
+    libraryImageTotalItems = result.totalItems
+    renderImageLibraryPage()
+  } catch (error) {
+    if (requestId !== libraryImageLoadRequestId) {
+      return
+    }
+
+    libraryImageEntries = []
+    libraryImagePage = 1
+    libraryImageTotalPages = 1
+    libraryImageTotalItems = 0
+    renderImageLibraryPage()
+
+    if (!silent) {
+      const message = error instanceof Error ? error.message : 'Nie udało się pobrać biblioteki grafik.'
+      showToast(`❌ ${message}`, 'error')
+    }
+  }
+}
+
+async function syncImageLibraryWithCreator(options = {}) {
+  const silent = options.silent === true
+  const creatorPage = options.creatorPage ?? creatorImagePage
+  const libraryPage = options.libraryPage ?? libraryImagePage
+
+  await Promise.all([
+    loadImages({ page: creatorPage, silent }),
+    loadImageLibraryPage({ page: libraryPage, silent }),
+  ])
+
+  updatePreview()
+  updateSendButton()
 }
 
 async function loadEmojis() {
@@ -3886,31 +4350,95 @@ function renderPingRoleSelector() {
   select.value = previous
 }
 
-function renderImageLibrary(imageList) {
-  const grid = document.getElementById('image-grid')
-  if (!grid) return
+function formatImageSizeLabel(sizeBytes) {
+  const size = Number(sizeBytes)
+  if (!Number.isFinite(size) || size <= 0) {
+    return '0 B'
+  }
 
-  if (!imageList.length) {
-    grid.innerHTML = '<p class="img-empty">Brak obrazów w folderze /img.</p>'
+  if (size < 1024) {
+    return `${size} B`
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatImageModifiedAtLabel(modifiedAt) {
+  const value = Number(modifiedAt)
+  if (!Number.isFinite(value) || value <= 0) {
+    return 'nieznana data'
+  }
+
+  return formatTimestampInWarsaw(value)
+}
+
+function renderImageLibrary() {
+  const grid = document.getElementById('image-grid')
+  const paginationContainer = document.getElementById('image-library-pagination')
+  const pageLabel = document.getElementById('image-library-page-label')
+  const prevButton = document.getElementById('image-library-prev-btn')
+  const nextButton = document.getElementById('image-library-next-btn')
+
+  if (!grid) {
     return
   }
 
-  grid.innerHTML = imageList.map((name) => `
-    <div class="img-card${selectedImageName === name ? ' selected' : ''}" data-name="${escapeHtml(name)}" title="${escapeHtml(name)}">
-      <img src="/img/${encodeURIComponent(name)}" alt="${escapeHtml(name)}" loading="lazy">
-      <span class="img-card-name">${escapeHtml(name)}</span>
-    </div>`).join('')
+  if (pageLabel) {
+    pageLabel.textContent = `Strona ${creatorImagePage}/${creatorImageTotalPages}`
+  }
+
+  if (paginationContainer) {
+    paginationContainer.hidden = creatorImageTotalPages <= 1
+  }
+
+  if (prevButton instanceof HTMLButtonElement) {
+    prevButton.disabled = creatorImagePage <= 1
+  }
+
+  if (nextButton instanceof HTMLButtonElement) {
+    nextButton.disabled = creatorImagePage >= creatorImageTotalPages
+  }
+
+  if (creatorImageEntries.length === 0) {
+    const emptyMessage = creatorImageSearch
+      ? `Brak grafik pasujacych do wyszukiwania: "${escapeHtml(creatorImageSearch)}".`
+      : 'Brak obrazow w folderze /img.'
+    grid.innerHTML = `<p class="img-empty">${emptyMessage}</p>`
+    return
+  }
+
+  grid.innerHTML = creatorImageEntries
+    .map((entry) => {
+      const name = String(entry?.name ?? '')
+      if (!name) {
+        return ''
+      }
+
+      return `
+      <div class="img-card${selectedImageName === name ? ' selected' : ''}" data-name="${escapeHtml(name)}" title="${escapeHtml(name)}">
+        <img src="/img/${encodeURIComponent(name)}" alt="${escapeHtml(name)}" loading="lazy">
+        <span class="img-card-name">${escapeHtml(name)}</span>
+      </div>`
+    })
+    .join('')
 
   grid.querySelectorAll('.img-card').forEach((card) => {
     card.addEventListener('click', () => {
       const nextName = card.dataset.name
-      if (!nextName) return
+      if (!nextName) {
+        return
+      }
 
       selectedImageName = nextName
       selectedUploadFile = null
+      clearUploadPreviewUrl()
 
       const uploadInput = document.getElementById('image-upload-input')
-      if (uploadInput) {
+      if (uploadInput instanceof HTMLInputElement) {
         uploadInput.value = ''
       }
 
@@ -3919,11 +4447,217 @@ function renderImageLibrary(imageList) {
         fileNameElement.textContent = 'Nie wybrano pliku.'
       }
 
-      renderImageLibrary(images)
+      renderImageLibrary()
       updatePreview()
       updateSendButton()
     })
   })
+}
+
+function renderImageLibraryPage() {
+  const listContainer = document.getElementById('image-library-tab-list')
+  const paginationContainer = document.getElementById('image-library-tab-pagination')
+  const pageLabel = document.getElementById('image-library-tab-page-label')
+  const countLabel = document.getElementById('image-library-tab-count-label')
+  const prevButton = document.getElementById('image-library-tab-prev-btn')
+  const nextButton = document.getElementById('image-library-tab-next-btn')
+
+  if (!listContainer) {
+    return
+  }
+
+  if (pageLabel) {
+    pageLabel.textContent = `Strona ${libraryImagePage}/${libraryImageTotalPages}`
+  }
+
+  if (countLabel) {
+    countLabel.textContent = `Elementy: ${libraryImageTotalItems}`
+  }
+
+  if (paginationContainer) {
+    paginationContainer.hidden = libraryImageTotalPages <= 1
+  }
+
+  if (prevButton instanceof HTMLButtonElement) {
+    prevButton.disabled = libraryImagePage <= 1
+  }
+
+  if (nextButton instanceof HTMLButtonElement) {
+    nextButton.disabled = libraryImagePage >= libraryImageTotalPages
+  }
+
+  if (libraryImageEntries.length === 0) {
+    const emptyMessage = libraryImageSearch
+      ? `Brak grafik pasujacych do wyszukiwania: "${escapeHtml(libraryImageSearch)}".`
+      : 'Biblioteka grafik jest pusta.'
+    listContainer.innerHTML = `<div class="scheduled-empty">${emptyMessage}</div>`
+    return
+  }
+
+  listContainer.innerHTML = `
+    <div class="image-library-cards">
+      ${libraryImageEntries.map((entry) => {
+    const name = String(entry?.name ?? '')
+    if (!name) {
+      return ''
+    }
+
+    return `
+          <article class="image-library-card">
+            <div class="image-library-card-preview">
+              <img src="/img/${encodeURIComponent(name)}" alt="${escapeHtml(name)}" loading="lazy">
+            </div>
+            <div class="image-library-card-meta">
+              <strong class="image-library-card-name">${escapeHtml(name)}</strong>
+              <span class="image-library-card-details">${formatImageSizeLabel(entry.sizeBytes)} • ${formatImageModifiedAtLabel(entry.modifiedAt)}</span>
+            </div>
+            <div class="image-library-card-actions">
+              <a class="btn-secondary image-library-download-link" href="/img/${encodeURIComponent(name)}" download="${escapeHtml(name)}">Pobierz</a>
+              <button type="button" class="btn-secondary" data-image-action="rename" data-filename="${escapeHtml(name)}">Zmien nazwe</button>
+              <button type="button" class="btn-danger" data-image-action="delete" data-filename="${escapeHtml(name)}">Usun</button>
+            </div>
+          </article>`
+  }).join('')}
+    </div>`
+}
+
+async function uploadImageToLibrary() {
+  const uploadFileInput = document.getElementById('image-library-upload-file')
+  const uploadNameInput = document.getElementById('image-library-upload-name')
+  const selectedFile = uploadFileInput instanceof HTMLInputElement
+    ? uploadFileInput.files?.[0]
+    : null
+
+  if (!selectedFile) {
+    showToast('Wybierz plik, ktory chcesz dodac do biblioteki.', 'error')
+    return
+  }
+
+  if (!isAllowedUploadFile(selectedFile)) {
+    showToast('Dozwolone sa tylko pliki PNG, JPG, GIF, WebP i SVG.', 'error')
+    return
+  }
+
+  if (selectedFile.size > MAX_UPLOAD_BYTES) {
+    showToast('Plik jest za duzy. Maksymalny rozmiar to 20 MB.', 'error')
+    return
+  }
+
+  const customFilename = uploadNameInput instanceof HTMLInputElement
+    ? String(uploadNameInput.value ?? '').trim()
+    : ''
+  const targetFilename = customFilename || selectedFile.name
+  const uploadMimeType = normalizeUploadMimeType(selectedFile.type, selectedFile.name)
+  const uploadBase64 = await fileToDataUrl(selectedFile)
+
+  try {
+    const response = await fetchWithCsrf('/api/images/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: targetFilename,
+        uploadBase64,
+        uploadMimeType,
+      }),
+    })
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie dodac obrazu do biblioteki.')
+    }
+
+    if (uploadFileInput instanceof HTMLInputElement) {
+      uploadFileInput.value = ''
+    }
+
+    if (uploadNameInput instanceof HTMLInputElement) {
+      uploadNameInput.value = ''
+    }
+
+    await syncImageLibraryWithCreator({ silent: true })
+    showToast('✅ Grafika zostala dodana do biblioteki.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udalo sie dodac obrazu do biblioteki.'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
+async function renameImageInLibrary(filename) {
+  const trimmedFilename = String(filename ?? '').trim()
+  if (!trimmedFilename) {
+    return
+  }
+
+  const prompted = window.prompt('Podaj nowa nazwe pliku:', trimmedFilename)
+  if (prompted === null) {
+    return
+  }
+
+  const nextFilename = prompted.trim()
+  if (!nextFilename) {
+    showToast('Nowa nazwa pliku nie moze byc pusta.', 'error')
+    return
+  }
+
+  try {
+    const response = await fetchWithCsrf('/api/images/rename', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: trimmedFilename,
+        newFilename: nextFilename,
+      }),
+    })
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie zmienic nazwy obrazu.')
+    }
+
+    const renamedTo = String(payload.entry?.name ?? '').trim()
+    if (selectedImageName === trimmedFilename && renamedTo) {
+      selectedImageName = renamedTo
+    }
+
+    await syncImageLibraryWithCreator({ silent: true })
+    showToast('✅ Nazwa grafiki zostala zaktualizowana.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udalo sie zmienic nazwy obrazu.'
+    showToast(`❌ ${message}`, 'error')
+  }
+}
+
+async function deleteImageFromLibrary(filename) {
+  const trimmedFilename = String(filename ?? '').trim()
+  if (!trimmedFilename) {
+    return
+  }
+
+  const shouldDelete = window.confirm(`Czy na pewno usunac obraz "${trimmedFilename}" z biblioteki?`)
+  if (!shouldDelete) {
+    return
+  }
+
+  try {
+    const response = await fetchWithCsrf(`/api/images/${encodeURIComponent(trimmedFilename)}`, {
+      method: 'DELETE',
+    })
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie usunac obrazu.')
+    }
+
+    if (selectedImageName === trimmedFilename) {
+      selectedImageName = null
+    }
+
+    await syncImageLibraryWithCreator({ silent: true })
+    showToast('🗑️ Grafika zostala usunieta z biblioteki.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nie udalo sie usunac obrazu.'
+    showToast(`❌ ${message}`, 'error')
+  }
 }
 
 function updateModeUI() {
@@ -3962,7 +4696,7 @@ function updateImagePanels() {
 
   if (mode !== 'library') {
     selectedImageName = null
-    renderImageLibrary(images)
+    renderImageLibrary()
   }
 
   if (mode !== 'upload') {
@@ -4317,7 +5051,7 @@ async function publishMessage() {
 
     if (payload.imageMode === 'upload') {
       await loadImages()
-      renderImageLibrary(images)
+      renderImageLibrary()
     }
 
     await loadSentPosts()

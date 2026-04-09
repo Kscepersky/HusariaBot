@@ -38,7 +38,7 @@ const REQUIRED_ENV = [
     'PANDASCORE_API_KEY',
 ];
 
-const DASHBOARD_BODY_LIMIT = '12mb';
+const DASHBOARD_BODY_LIMIT = '32mb';
 const DEFAULT_SESSION_TTL_HOURS = 24;
 const dashboardLogger = createLogger('dashboard:server');
 

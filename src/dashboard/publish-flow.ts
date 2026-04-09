@@ -20,12 +20,16 @@ const ALLOWED_UPLOAD_MIME = new Set([
     'image/png',
     'image/jpeg',
     'image/gif',
+    'image/webp',
+    'image/svg+xml',
 ]);
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MIME_EXTENSION: Record<string, string> = {
     'image/png': '.png',
     'image/jpeg': '.jpg',
     'image/gif': '.gif',
+    'image/webp': '.webp',
+    'image/svg+xml': '.svg',
 };
 
 interface PreparedUpload {
@@ -124,7 +128,31 @@ function detectImageMime(buffer: Buffer): string | null {
         }
     }
 
+    if (buffer.length >= 12) {
+        const riffHeader = buffer.toString('ascii', 0, 4);
+        const webpHeader = buffer.toString('ascii', 8, 12);
+        if (riffHeader === 'RIFF' && webpHeader === 'WEBP') {
+            return 'image/webp';
+        }
+    }
+
+    const svgProbe = buffer.toString('utf8', 0, Math.min(buffer.length, 4096)).trimStart();
+    if (svgProbe.startsWith('<?xml') || svgProbe.startsWith('<svg') || svgProbe.includes('<svg')) {
+        return 'image/svg+xml';
+    }
+
     return null;
+}
+
+function validateSvgSafety(buffer: Buffer): void {
+    const svgContent = buffer.toString('utf8');
+    if (/<script[\s>]/i.test(svgContent) || /\son[a-z]+\s*=\s*/i.test(svgContent)) {
+        throw new Error('Plik SVG zawiera niedozwolone skrypty.');
+    }
+
+    if (/xlink:href\s*=\s*['"]\s*javascript:/i.test(svgContent)) {
+        throw new Error('Plik SVG zawiera niedozwolone odwolania JavaScript.');
+    }
 }
 
 export async function publishDashboardPost(
@@ -185,12 +213,16 @@ export async function publishDashboardPost(
         }
 
         if (imageBuffer.length > MAX_UPLOAD_BYTES) {
-            throw new Error('Wgrany plik jest za duży (max 8 MB).');
+            throw new Error('Wgrany plik jest za duzy (max 20 MB).');
         }
 
         const detectedMime = detectImageMime(imageBuffer);
         if (!detectedMime || detectedMime !== normalizedUploadMimeType) {
             throw new Error('Zawartość pliku nie zgadza się z typem obrazu.');
+        }
+
+        if (detectedMime === 'image/svg+xml') {
+            validateSvgSafety(imageBuffer);
         }
 
         preparedUpload = {

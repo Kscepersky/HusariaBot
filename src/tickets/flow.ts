@@ -5,6 +5,7 @@ import {
     ButtonStyle,
     ChannelType,
     EmbedBuilder,
+    Message,
     MessageFlags,
     ModalBuilder,
     ModalSubmitInteraction,
@@ -21,7 +22,12 @@ import {
 } from '../utils/role-access.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
 import { getGuildEmoji } from '../utils/guild-emojis.js';
+import { createLogger } from '../utils/logger.js';
 import { formatTicketNumber, getNextTicketNumber, sanitizeTicketUsername } from './counter-store.js';
+import {
+    persistTicketClosureRecord,
+    type TicketTranscriptMessageRecord,
+} from './history-store.js';
 import {
     SUPPORT_CATEGORY_ID,
     TICKET_CLOSE_ADMIN_BUTTON_ID,
@@ -42,6 +48,7 @@ import {
 
 const TICKET_TOPIC_OWNER_PREFIX = 'ticketOwnerId=';
 const openTicketLocks = new Map<string, Promise<unknown>>();
+const ticketLogger = createLogger('tickets:flow');
 
 async function withUserTicketOpenLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
     const previous = openTicketLocks.get(key) ?? Promise.resolve();
@@ -129,6 +136,84 @@ async function notifyTicketOwner(client: ButtonInteraction['client'], ownerId: s
         await owner.send(content);
     } catch {
         // Ignorujemy błąd DM i zamykamy ticket dalej.
+    }
+}
+
+function toTranscriptMessageRecord(message: Message<true>): TicketTranscriptMessageRecord {
+    return {
+        id: message.id,
+        authorId: message.author.id,
+        authorTag: message.author.tag,
+        content: message.cleanContent ?? '',
+        createdAt: message.createdTimestamp,
+        attachments: [...message.attachments.values()].map((attachment) => attachment.url),
+    };
+}
+
+async function collectTicketTranscriptMessages(channel: TextChannel): Promise<TicketTranscriptMessageRecord[]> {
+    const transcriptMessages: TicketTranscriptMessageRecord[] = [];
+    let beforeMessageId: string | undefined;
+
+    for (;;) {
+        const batch = await channel.messages.fetch({ limit: 100, before: beforeMessageId });
+        if (batch.size === 0) {
+            break;
+        }
+
+        const orderedBatch = [...batch.values()]
+            .filter((message): message is Message<true> => message.inGuild())
+            .sort((left, right) => left.createdTimestamp - right.createdTimestamp)
+            .map(toTranscriptMessageRecord);
+
+        transcriptMessages.push(...orderedBatch);
+
+        const oldestMessage = batch.last();
+        if (!oldestMessage || batch.size < 100) {
+            break;
+        }
+
+        beforeMessageId = oldestMessage.id;
+    }
+
+    return [...transcriptMessages].sort((left, right) => {
+        if (left.createdAt !== right.createdAt) {
+            return left.createdAt - right.createdAt;
+        }
+
+        return left.id.localeCompare(right.id);
+    });
+}
+
+async function archiveTicketClosure(params: {
+    channel: TextChannel;
+    ownerId: string | null;
+    closeType: 'user' | 'admin';
+    closeReason: string;
+    closedByUserId: string;
+    closedByTag: string;
+}): Promise<void> {
+    try {
+        const transcriptMessages = await collectTicketTranscriptMessages(params.channel);
+        await persistTicketClosureRecord({
+            guildId: params.channel.guild.id,
+            channelId: params.channel.id,
+            channelName: params.channel.name,
+            ownerId: params.ownerId,
+            closeType: params.closeType,
+            closeReason: params.closeReason,
+            closedByUserId: params.closedByUserId,
+            closedByTag: params.closedByTag,
+            closedAt: Date.now(),
+            transcriptMessages,
+        });
+    } catch (error) {
+        ticketLogger.error('TICKET_HISTORY_ARCHIVE_FAILED', 'Nie udalo sie zapisac historii ticketu.', {
+            guildId: params.channel.guild.id,
+            channelId: params.channel.id,
+            closedByUserId: params.closedByUserId,
+            closeType: params.closeType,
+        }, error);
+        throw error;
     }
 }
 
@@ -413,6 +498,27 @@ export async function handleUserCloseTicketConfirm(interaction: ButtonInteractio
         `${husariaEmoji} **G2 Hussars**: Zamknąłeś ticket o nazwie **${interaction.channel.name}**.`,
     );
 
+    try {
+        await archiveTicketClosure({
+            channel: interaction.channel,
+            ownerId,
+            closeType: 'user',
+            closeReason: 'Ticket zostal zamkniety przez autora.',
+            closedByUserId: interaction.user.id,
+            closedByTag: interaction.user.tag,
+        });
+    } catch {
+        await interaction.followUp({
+            content: '❌ Nie udalo sie zapisac historii ticketu. Ticket nie zostal zamkniety. Sprobuj ponownie za chwile.',
+            flags: MessageFlags.Ephemeral,
+        });
+        return;
+    }
+
+    if (!interaction.channel.deletable) {
+        return;
+    }
+
     await interaction.channel.delete('Ticket closed by owner');
 }
 
@@ -440,6 +546,28 @@ export async function handleUserCloseTicketDmConfirm(interaction: ButtonInteract
         interaction.user.id,
         `${husariaEmoji} **G2 Hussars**: Zamknąłeś ticket o nazwie **${ticketChannel.name}**.`,
     );
+
+    const ownerId = extractTicketOwnerId(ticketChannel.topic);
+    try {
+        await archiveTicketClosure({
+            channel: ticketChannel,
+            ownerId,
+            closeType: 'user',
+            closeReason: 'Ticket zostal zamkniety przez autora (panel prywatny).',
+            closedByUserId: interaction.user.id,
+            closedByTag: interaction.user.tag,
+        });
+    } catch {
+        await interaction.followUp({
+            content: '❌ Nie udalo sie zapisac historii ticketu. Ticket nie zostal zamkniety. Sprobuj ponownie za chwile.',
+            flags: MessageFlags.Ephemeral,
+        });
+        return;
+    }
+
+    if (!ticketChannel.deletable) {
+        return;
+    }
 
     await ticketChannel.delete('Ticket closed by owner from private control');
 }
@@ -546,6 +674,27 @@ export async function handleAdminCloseReasonModalSubmit(interaction: ModalSubmit
             ownerId,
             `${husariaEmoji} **G2 Hussars**: Ticket o nazwie **${interaction.channel.name}** został zamknięty przez <@${interaction.user.id}>. Powód: **${reason}**.`,
         );
+    }
+
+    try {
+        await archiveTicketClosure({
+            channel: interaction.channel,
+            ownerId,
+            closeType: 'admin',
+            closeReason: reason,
+            closedByUserId: interaction.user.id,
+            closedByTag: interaction.user.tag,
+        });
+    } catch {
+        await interaction.followUp({
+            content: '❌ Nie udalo sie zapisac historii ticketu. Ticket nie zostal zamkniety. Sprobuj ponownie za chwile.',
+            flags: MessageFlags.Ephemeral,
+        });
+        return;
+    }
+
+    if (!interaction.channel.deletable) {
+        return;
     }
 
     await interaction.channel.delete(`Ticket closed by admin: ${interaction.user.tag}`);

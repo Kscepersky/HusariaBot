@@ -113,6 +113,17 @@ export const sendImageSchema = z.object({
     channelId: z.string().regex(/^\d{17,20}$/),
 }).strip();
 
+export const imageLibraryUploadSchema = z.object({
+    filename: z.string().trim().min(1).max(255),
+    uploadMimeType: z.string().trim().min(1).max(100),
+    uploadBase64: z.string().trim().min(1).max(30_000_000),
+}).strip();
+
+export const imageLibraryRenameSchema = z.object({
+    filename: z.string().trim().min(1).max(255),
+    newFilename: z.string().trim().min(1).max(255),
+}).strip();
+
 export const embedPayloadSchema = z.object({
     mode: optionalStringSchema,
     channelId: optionalStringSchema,
