@@ -12,6 +12,7 @@ import {
     getGuildRoles,
     getGuildEmojis,
     getGuildMember,
+    getDiscordUserById,
     addGuildMemberRole,
     removeGuildMemberRole,
     updateGuildMemberRoles,
@@ -77,6 +78,12 @@ import type { EconomyLeaderboardPage, EconomyLeaderboardSortBy } from '../../eco
 import { parseTimeoutDurationParts } from '../../timeouts/duration.js';
 import { listTicketHistoryEntries, resolveTicketTranscriptFilePath } from '../../tickets/history-store.js';
 import { createLogger } from '../../utils/logger.js';
+import { listDashboardLogs } from '../../utils/log-reader.js';
+import {
+    getStoredLeaderboardProfile,
+    pruneStoredLeaderboardProfiles,
+    upsertStoredLeaderboardProfile,
+} from '../leaderboard-profile-cache-store.js';
 
 config();
 
@@ -84,9 +91,14 @@ export const apiRouter = Router();
 
 const LEADERBOARD_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
 const LEADERBOARD_PROFILE_FAILURE_CACHE_TTL_MS = 30 * 1000;
+const LEADERBOARD_PROFILE_STALE_GRACE_MS = 60 * 60 * 1000;
+const LEADERBOARD_PROFILE_PERSISTED_TTL_MS = 24 * 60 * 60 * 1000;
+const LEADERBOARD_PROFILE_STORE_PRUNE_INTERVAL_MS = 30 * 60 * 1000;
 const LEADERBOARD_PROFILE_CACHE_MAX_ENTRIES = 1500;
-const LEADERBOARD_PROFILE_CONCURRENCY_LIMIT = 5;
+const LEADERBOARD_PROFILE_CONCURRENCY_LIMIT = 2;
 const LEADERBOARD_PROFILE_LOOKUP_TIMEOUT_MS = 3_000;
+const LEADERBOARD_PROFILE_FALLBACK_LOOKUP_TIMEOUT_MS = 1_000;
+const LEADERBOARD_PROFILE_RATE_LIMIT_MIN_BACKOFF_MS = 2 * 60 * 1000;
 const IMAGE_LIBRARY_PAGE_SIZE_DEFAULT = 8;
 const IMAGE_LIBRARY_PAGE_SIZE_MAX = 64;
 const IMAGE_LIBRARY_MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
@@ -119,6 +131,7 @@ interface LeaderboardProfileCacheEntry {
 
 const leaderboardProfileCache = new Map<string, LeaderboardProfileCacheEntry>();
 const leaderboardProfileInFlight = new Map<string, Promise<{ displayName: string; avatarUrl: string | null }>>();
+let leaderboardProfileStoreLastPruneAtMs = 0;
 
 function isClientValidationError(error: unknown): boolean {
     if (!(error instanceof Error)) {
@@ -501,7 +514,7 @@ function getLeaderboardProfileCacheKey(guildId: string, userId: string): string 
 
 function cleanupLeaderboardProfileCache(now: number): void {
     for (const [cacheKey, cacheEntry] of leaderboardProfileCache.entries()) {
-        if (cacheEntry.expiresAt <= now) {
+        if (cacheEntry.expiresAt + LEADERBOARD_PROFILE_STALE_GRACE_MS <= now) {
             leaderboardProfileCache.delete(cacheKey);
         }
     }
@@ -517,6 +530,31 @@ function cleanupLeaderboardProfileCache(now: number): void {
     for (const [cacheKey] of overflowEntries) {
         leaderboardProfileCache.delete(cacheKey);
     }
+}
+
+function getLeaderboardProfileRateLimitBackoffMs(error: unknown): number | null {
+    if (error instanceof DiscordRateLimitedError) {
+        return Math.max(
+            LEADERBOARD_PROFILE_RATE_LIMIT_MIN_BACKOFF_MS,
+            Math.ceil(error.retryAfterSeconds * 1000),
+        );
+    }
+
+    if (!(error instanceof Error)) {
+        return null;
+    }
+
+    const guildMemberStatusMatch = /failed to fetch guild member:\s*(\d{3})/i.exec(error.message);
+    if (!guildMemberStatusMatch) {
+        return null;
+    }
+
+    const statusCode = Number.parseInt(guildMemberStatusMatch[1] ?? '', 10);
+    if (!Number.isFinite(statusCode) || statusCode !== 429) {
+        return null;
+    }
+
+    return LEADERBOARD_PROFILE_RATE_LIMIT_MIN_BACKOFF_MS;
 }
 
 function resolveDiscordAvatarUrl(userId: string, avatarHash: string | null | undefined): string | null {
@@ -571,10 +609,114 @@ function resolveLeaderboardDisplayName(member: Awaited<ReturnType<typeof getGuil
     return fallbackName;
 }
 
+function resolveLeaderboardDisplayNameFromUser(user: Awaited<ReturnType<typeof getDiscordUserById>>, userId: string): string {
+    const fallbackName = `Uzytkownik ${userId}`;
+
+    if (!user) {
+        return fallbackName;
+    }
+
+    const normalizedGlobalName = normalizeTrimmedString(user.global_name);
+    if (normalizedGlobalName) {
+        return normalizedGlobalName;
+    }
+
+    const normalizedUsername = normalizeTrimmedString(user.username);
+    if (normalizedUsername) {
+        return normalizedUsername;
+    }
+
+    return fallbackName;
+}
+
+async function resolveFallbackDiscordUserProfile(userId: string): Promise<{ displayName: string; avatarUrl: string | null } | null> {
+    const fallbackUser = await withTimeout(
+        getDiscordUserById(userId),
+        LEADERBOARD_PROFILE_FALLBACK_LOOKUP_TIMEOUT_MS,
+        `Timeout while loading fallback leaderboard profile for user ${userId}`,
+    );
+
+    if (!fallbackUser) {
+        return null;
+    }
+
+    return {
+        displayName: resolveLeaderboardDisplayNameFromUser(fallbackUser, userId),
+        avatarUrl: resolveDiscordAvatarUrl(fallbackUser.id, fallbackUser.avatar),
+    };
+}
+
+function shouldSkipLeaderboardGlobalFallback(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+
+    const errorMessage = error.message.toLowerCase();
+    if (errorMessage.includes('timeout while loading leaderboard profile')) {
+        return true;
+    }
+
+    const guildMemberStatusMatch = /failed to fetch guild member:\s*(\d{3})/.exec(errorMessage);
+    if (!guildMemberStatusMatch) {
+        return false;
+    }
+
+    const parsedStatus = Number.parseInt(guildMemberStatusMatch[1] ?? '', 10);
+    if (!Number.isFinite(parsedStatus)) {
+        return false;
+    }
+
+    return parsedStatus === 429 || parsedStatus >= 500;
+}
+
+function persistLeaderboardProfileToStore(
+    guildId: string,
+    userId: string,
+    profile: { displayName: string; avatarUrl: string | null },
+): void {
+    const expiresAt = Date.now() + LEADERBOARD_PROFILE_PERSISTED_TTL_MS;
+
+    void upsertStoredLeaderboardProfile({
+        guildId,
+        userId,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatarUrl,
+        expiresAt,
+    }).catch((error) => {
+        apiLogger.debug('LEADERBOARD_PROFILE_STORE_UPSERT_FAILED', 'Nie udalo sie zapisac profilu leaderboardu do trwałego cache SQLite.', {
+            guildId,
+            userId,
+            errorMessage: error instanceof Error ? error.message : String(error),
+        });
+    });
+}
+
+function pruneLeaderboardProfileStoreIfNeeded(now: number): void {
+    if (now - leaderboardProfileStoreLastPruneAtMs < LEADERBOARD_PROFILE_STORE_PRUNE_INTERVAL_MS) {
+        return;
+    }
+
+    leaderboardProfileStoreLastPruneAtMs = now;
+    const staleThreshold = now - LEADERBOARD_PROFILE_STALE_GRACE_MS;
+
+    void pruneStoredLeaderboardProfiles(staleThreshold).catch((error) => {
+        apiLogger.debug('LEADERBOARD_PROFILE_STORE_PRUNE_FAILED', 'Nie udalo sie wyczyscic starych wpisow cache profili leaderboardu.', {
+            staleThreshold,
+            errorMessage: error instanceof Error ? error.message : String(error),
+        });
+    });
+}
+
 async function resolveLeaderboardProfile(guildId: string, userId: string): Promise<{ displayName: string; avatarUrl: string | null }> {
     const cacheKey = getLeaderboardProfileCacheKey(guildId, userId);
     const now = Date.now();
     const cachedEntry = leaderboardProfileCache.get(cacheKey);
+    let staleCachedProfile = cachedEntry
+        ? {
+            displayName: cachedEntry.displayName,
+            avatarUrl: cachedEntry.avatarUrl,
+        }
+        : null;
 
     if (cachedEntry && cachedEntry.expiresAt > now) {
         return {
@@ -592,31 +734,127 @@ async function resolveLeaderboardProfile(guildId: string, userId: string): Promi
     if (inflight) {
         return inflight;
     }
-
     const resolutionPromise = (async () => {
+        const resolveFallbackProfileSafe = async (): Promise<{ displayName: string; avatarUrl: string | null } | null> => {
+            try {
+                return await resolveFallbackDiscordUserProfile(userId);
+            } catch (fallbackError) {
+                apiLogger.debug('LEADERBOARD_PROFILE_FALLBACK_RESOLVE_FAILED', 'Nie udalo sie pobrac fallback profilu z endpointu globalnego Discord.', {
+                    guildId,
+                    userId,
+                    errorMessage: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+                });
+                return null;
+            }
+        };
+
         try {
+            try {
+                const storedProfile = await getStoredLeaderboardProfile(guildId, userId);
+                if (storedProfile) {
+                    const normalizedStoredProfile = {
+                        displayName: storedProfile.displayName,
+                        avatarUrl: storedProfile.avatarUrl,
+                    };
+
+                    if (storedProfile.expiresAt > now) {
+                        leaderboardProfileCache.set(cacheKey, {
+                            ...normalizedStoredProfile,
+                            expiresAt: storedProfile.expiresAt,
+                        });
+
+                        return normalizedStoredProfile;
+                    }
+
+                    if (!staleCachedProfile) {
+                        staleCachedProfile = normalizedStoredProfile;
+                    }
+                }
+            } catch (error) {
+                apiLogger.debug('LEADERBOARD_PROFILE_STORE_READ_FAILED', 'Nie udalo sie odczytac profilu leaderboardu z trwałego cache SQLite.', {
+                    guildId,
+                    userId,
+                    errorMessage: error instanceof Error ? error.message : String(error),
+                });
+            }
+
             const member = await withTimeout(
                 getGuildMember(userId, guildId),
                 LEADERBOARD_PROFILE_LOOKUP_TIMEOUT_MS,
                 `Timeout while loading leaderboard profile for user ${userId}`,
             );
-            const resolvedProfile = {
-                displayName: resolveLeaderboardDisplayName(member, userId),
-                avatarUrl: resolveDiscordAvatarUrl(member?.user?.id ?? userId, member?.user?.avatar),
-            };
+
+            if (member) {
+                const resolvedProfile = {
+                    displayName: resolveLeaderboardDisplayName(member, userId),
+                    avatarUrl: resolveDiscordAvatarUrl(member.user?.id ?? userId, member.user?.avatar),
+                };
+
+                leaderboardProfileCache.set(cacheKey, {
+                    ...resolvedProfile,
+                    expiresAt: Date.now() + LEADERBOARD_PROFILE_CACHE_TTL_MS,
+                });
+                persistLeaderboardProfileToStore(guildId, userId, resolvedProfile);
+
+                return resolvedProfile;
+            }
+
+            const resolvedFallbackProfile = await resolveFallbackProfileSafe();
+            if (resolvedFallbackProfile) {
+                leaderboardProfileCache.set(cacheKey, {
+                    ...resolvedFallbackProfile,
+                    expiresAt: Date.now() + LEADERBOARD_PROFILE_CACHE_TTL_MS,
+                });
+                persistLeaderboardProfileToStore(guildId, userId, resolvedFallbackProfile);
+
+                return resolvedFallbackProfile;
+            }
 
             leaderboardProfileCache.set(cacheKey, {
-                ...resolvedProfile,
-                expiresAt: Date.now() + LEADERBOARD_PROFILE_CACHE_TTL_MS,
+                ...fallbackProfile,
+                expiresAt: Date.now() + LEADERBOARD_PROFILE_FAILURE_CACHE_TTL_MS,
             });
 
-            return resolvedProfile;
+            return fallbackProfile;
         } catch (error) {
-            console.warn('Failed to resolve leaderboard profile:', {
+            const rateLimitBackoffMs = getLeaderboardProfileRateLimitBackoffMs(error);
+            if (rateLimitBackoffMs !== null) {
+                const rateLimitedUntil = Date.now() + rateLimitBackoffMs;
+                const profileDuringBackoff = staleCachedProfile ?? fallbackProfile;
+
+                leaderboardProfileCache.set(cacheKey, {
+                    ...profileDuringBackoff,
+                    expiresAt: rateLimitedUntil,
+                });
+
+                apiLogger.debug('LEADERBOARD_PROFILE_RATE_LIMITED', 'Discord rate limit dla lookupu czlonka leaderboardu; aktywowany backoff.', {
+                    guildId,
+                    userId,
+                    retryAfterMs: rateLimitBackoffMs,
+                    usingStaleCache: Boolean(staleCachedProfile),
+                });
+
+                return profileDuringBackoff;
+            }
+
+            apiLogger.warn('LEADERBOARD_PROFILE_RESOLVE_FAILED', 'Nie udalo sie pobrac profilu leaderboardu z endpointu guild member.', {
                 guildId,
                 userId,
-                error,
-            });
+            }, error);
+
+            const shouldSkipFallback = shouldSkipLeaderboardGlobalFallback(error);
+            const resolvedFallbackProfile = shouldSkipFallback
+                ? null
+                : await resolveFallbackProfileSafe();
+            if (resolvedFallbackProfile) {
+                leaderboardProfileCache.set(cacheKey, {
+                    ...resolvedFallbackProfile,
+                    expiresAt: Date.now() + LEADERBOARD_PROFILE_FAILURE_CACHE_TTL_MS,
+                });
+                persistLeaderboardProfileToStore(guildId, userId, resolvedFallbackProfile);
+
+                return resolvedFallbackProfile;
+            }
 
             leaderboardProfileCache.set(cacheKey, {
                 ...fallbackProfile,
@@ -638,7 +876,9 @@ async function resolveLeaderboardProfilesWithLimit(
     guildId: string,
     userIds: string[],
 ): Promise<Array<readonly [string, { displayName: string; avatarUrl: string | null }]>> {
-    cleanupLeaderboardProfileCache(Date.now());
+    const now = Date.now();
+    cleanupLeaderboardProfileCache(now);
+    pruneLeaderboardProfileStoreIfNeeded(now);
 
     const limitedConcurrency = Math.max(1, LEADERBOARD_PROFILE_CONCURRENCY_LIMIT);
     const pairs: Array<readonly [string, { displayName: string; avatarUrl: string | null }]> = [];
@@ -660,16 +900,22 @@ async function enrichEconomyLeaderboard(
     guildId: string,
     leaderboard: EconomyLeaderboardPage,
 ): Promise<EconomyLeaderboardPage> {
-    const uniqueUserIds = [...new Set(leaderboard.entries.map((entry) => entry.userId).filter((userId) => userId.length > 0))];
+    const uniqueUserIds = [...new Set(
+        leaderboard.entries
+            .map((entry) => normalizeTrimmedString(entry.userId))
+            .filter((userId) => userId.length > 0),
+    )];
     const profilePairs = await resolveLeaderboardProfilesWithLimit(guildId, uniqueUserIds);
 
     const profileByUserId = new Map(profilePairs);
     const enrichedEntries = leaderboard.entries.map((entry) => {
-        const profile = profileByUserId.get(entry.userId);
+        const normalizedUserId = normalizeTrimmedString(entry.userId) || String(entry.userId ?? '');
+        const profile = profileByUserId.get(normalizedUserId);
 
         return {
             ...entry,
-            displayName: profile?.displayName ?? `Uzytkownik ${entry.userId}`,
+            userId: normalizedUserId,
+            displayName: profile?.displayName ?? `Uzytkownik ${normalizedUserId}`,
             avatarUrl: profile?.avatarUrl ?? null,
         };
     });
@@ -1644,6 +1890,49 @@ apiRouter.get('/tickets/transcripts/:fileName', requireCurrentDashboardRole, (re
     }
 });
 
+// GET /api/logs — list structured dashboard/system logs (Dev-only)
+apiRouter.get('/logs', requireCurrentDashboardDevRole, async (req, res) => {
+    const page = parsePositiveIntQuery(req.query.page, 1);
+    const pageSize = Math.max(1, Math.min(100, parsePositiveIntQuery(req.query.pageSize, 25)));
+    const search = normalizeTrimmedString(req.query.search);
+    const levelRaw = normalizeTrimmedString(req.query.level).toLowerCase();
+    const allowedLogLevels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
+    const level = (allowedLogLevels as readonly string[]).includes(levelRaw)
+        ? levelRaw as (typeof allowedLogLevels)[number]
+        : 'all';
+
+    try {
+        const result = await listDashboardLogs({
+            page,
+            pageSize,
+            search,
+            level,
+        });
+
+        res.json({
+            success: true,
+            logs: result.entries,
+            pagination: {
+                page: result.page,
+                pageSize: result.pageSize,
+                totalRows: result.totalRows,
+                totalPages: result.totalPages,
+            },
+            filters: {
+                level,
+                search,
+            },
+        });
+    } catch (error) {
+        apiLogger.error('DASHBOARD_LOGS_LIST_FAILED', 'Nie udalo sie pobrac logow systemowych.', {
+            actorUserId: req.session.user?.id,
+            level,
+            search,
+        }, error);
+        res.status(500).json({ error: 'Nie udalo sie pobrac logow systemowych.' });
+    }
+});
+
 // GET /api/economy/settings — load economy configuration for dashboard
 apiRouter.get('/economy/settings', requireCurrentDashboardDevRole, async (_req, res) => {
     try {
@@ -2108,12 +2397,31 @@ apiRouter.post('/embed', async (req, res) => {
             lastError: warnings.length > 0 ? warnings.join(' | ') : undefined,
         };
 
+        apiLogger.info('EMBED_PUBLISHED_IMMEDIATE', 'Wyslano publikacje z dashboardu (tryb natychmiastowy).', {
+            actorUserId: publisherId,
+            channelId: data.channelId,
+            mode: data.mode,
+            messageId: publishResult.messageId,
+            postId: sentPost.id,
+        });
+
         let insertedPost: ScheduledPost | null = null;
         try {
             insertedPost = await insertScheduledPost(sentPost);
+            apiLogger.info('SENT_POST_HISTORY_PERSISTED', 'Zapisano wpis historii wyslanego posta.', {
+                actorUserId: publisherId,
+                postId: insertedPost.id,
+                channelId: data.channelId,
+                source: sentPost.source,
+            });
         } catch (persistError) {
             console.error('Failed to persist sent post history:', persistError);
             warnings.push('Post został wysłany, ale nie udało się zapisać go w historii wysłanych postów.');
+            apiLogger.warn('SENT_POST_HISTORY_PERSIST_FAILED', 'Nie udalo sie zapisac historii wyslanego posta.', {
+                actorUserId: publisherId,
+                postId: sentPost.id,
+                channelId: data.channelId,
+            }, persistError);
         }
 
         if (insertedPost && data.watchpartyDraft?.enabled) {

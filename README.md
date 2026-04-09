@@ -12,10 +12,11 @@ Modern Discord bot written in TypeScript with an admin dashboard, ticket system,
 6. Environment Configuration
 7. Bot Commands
 8. Dashboard
-9. Development Scripts
-10. Security and GitHub Commit Checklist
-11. Troubleshooting
-12. License
+9. Observability and Logging
+10. Development Scripts
+11. Security and GitHub Commit Checklist
+12. Troubleshooting
+13. License
 
 ## Overview
 
@@ -37,7 +38,9 @@ This separates moderation/publishing workflows from in-Discord operations.
 - Discord Scheduled Events management.
 - Optional watchparty voice channel lifecycle (scheduled/open/closed/deleted).
 - Economy module (daily, streak, XP, level, admin mutations, leaderboard in dashboard).
+- Leaderboard profile resilience (rate-limit aware backoff + persistent profile cache in SQLite).
 - G2 matches database based on PandaScore + SQLite.
+- Structured system logs with Dev-only dashboard log viewer.
 - Unit/integration tests with Vitest.
 
 ## Architecture
@@ -178,8 +181,9 @@ Dashboard modules:
 - Discord Scheduled Events management (CRUD).
 - G2 matches (PandaScore sync, filters, refresh).
 - Economy settings (daily, leveling, text/voice XP, reset users, strict CSV import snapshot, role rewards per level).
-- Economy leaderboard (XP/coins sorting, pagination, Discord display names/avatars, message and voice-minute stats).
+- Economy leaderboard (XP/coins sorting, pagination, Discord display names/avatars, message and voice-minute stats, persistent profile cache fallback).
 - Timeout system (create/list/remove) with user search and duration fields: `durationAmount + durationUnit` (`s`, `m`, `h`, `d`, `mo`, `y`).
+- System logs (Dev-only): filter/search/paginate dashboard and bot activity.
 - Economy access policy: settings/mutations/import/level-role mappings are Dev-only; leaderboard is available for Admin/Moderator/CommunityManager/Dev.
 
 Timeout safety rules:
@@ -202,6 +206,28 @@ Dashboard scripts:
 
 - `npm run dashboard`
 - `npm run dashboard:dev`
+
+## Observability and Logging
+
+Logging behavior:
+
+- Structured JSON logs are written daily to `logs/system-YYYY-MM-DD.jsonl`.
+- Human-readable logs are written daily to `logs/system-YYYY-MM-DD.log`.
+- `error` and `fatal` events can be sent to a webhook (`LOG_ALERT_WEBHOOK_URL`).
+- Dashboard has a Dev-only `System Logs` tab backed by `/api/logs` (search, level filter, pagination).
+
+What is logged:
+
+- Dashboard auth flow (login started/success/denied/failure, logout success/failure).
+- Scheduled/sent post lifecycle actions.
+- Immediate publish actions and sent-history persistence.
+- Timeout actions and selected moderation warnings.
+
+Leaderboard reliability notes:
+
+- Guild-member profile lookups are rate-limit aware.
+- On Discord 429, the dashboard applies backoff and avoids repeated hot-loop lookups.
+- Profile snapshots are persisted in SQLite (`dashboard_leaderboard_profile_cache`) and reused during Discord/API pressure.
 
 ## Development Scripts
 
@@ -238,6 +264,7 @@ Additional security rules:
 - CSRF tokens are required for mutating API endpoints.
 - Multi-layer rate limiting is enabled (global + OAuth callback + API mutations).
 - Dashboard sessions are stored in SQLite (not MemoryStore).
+- Sensitive log context fields are redacted before dashboard log rendering.
 - Do not publish logs containing environment data.
 - Before push, verify runtime data files (`data/*.json`, sqlite files) are intentional; avoid committing live counters/state snapshots.
 

@@ -62,6 +62,10 @@
         <span class="sidebar-icon">🖼️</span>
         <span>Biblioteka Grafik</span>
       </a>
+      <a href="#" class="sidebar-item" id="system-logs-nav-item" data-section="system-logs" style="display:none;">
+        <span class="sidebar-icon">🧾</span>
+        <span>Logi systemowe</span>
+      </a>
     </nav>
   </aside>
 
@@ -807,6 +811,40 @@
             <span class="preview-note" id="ticket-history-page-label">Strona 1/1</span>
             <button id="ticket-history-next-btn" class="btn-secondary" type="button">Nastepna ➡</button>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="section-system-logs" class="section-panel">
+      <div class="section-header">
+        <h2>🧾 Logi systemowe</h2>
+        <p>Widok tylko dla roli Dev. Szybki podglad akcji dashboardu i bota bez czytania surowego JSONL.</p>
+      </div>
+
+      <div class="creator-form-card">
+        <div class="scheduled-toolbar image-library-toolbar">
+          <input id="system-logs-search" type="text" class="form-input" placeholder="Szukaj po akcji, tresci, userId, channelId...">
+          <select id="system-logs-level" class="form-select">
+            <option value="all">Poziom: wszystkie</option>
+            <option value="trace">TRACE</option>
+            <option value="debug">DEBUG</option>
+            <option value="info">INFO</option>
+            <option value="warn">WARN</option>
+            <option value="error">ERROR</option>
+            <option value="fatal">FATAL</option>
+          </select>
+          <button id="system-logs-refresh-btn" class="btn-secondary" type="button">Odswiez</button>
+        </div>
+
+        <div id="system-logs-list" class="scheduled-list"></div>
+
+        <div class="scheduled-toolbar">
+          <div class="image-pagination" id="system-logs-pagination" hidden>
+            <button id="system-logs-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
+            <span class="preview-note" id="system-logs-page-label">Strona 1/1</span>
+            <button id="system-logs-next-btn" class="btn-secondary" type="button">Nastepna ➡</button>
+          </div>
+          <span class="preview-note" id="system-logs-count-label">Wpisy: 0</span>
         </div>
       </div>
     </div>

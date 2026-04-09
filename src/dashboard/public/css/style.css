@@ -1438,6 +1438,65 @@ input[name="colorName"] { display: none }
   color: var(--text-secondary);
 }
 
+/* ─── System Logs ────────────────────────────────────────────────────── */
+.log-card {
+  border-left: 3px solid var(--border-hover);
+}
+
+.log-level-trace {
+  background: rgba(128, 128, 128, 0.18);
+}
+
+.log-level-debug {
+  background: rgba(70, 130, 180, 0.22);
+}
+
+.log-level-info {
+  background: rgba(34, 139, 34, 0.22);
+}
+
+.log-level-warn {
+  background: rgba(255, 140, 0, 0.22);
+}
+
+.log-level-error,
+.log-level-fatal {
+  background: rgba(220, 20, 60, 0.25);
+}
+
+.log-error {
+  margin-top: 8px;
+  color: #ff8c94;
+  font-size: 13px;
+}
+
+.log-context-details {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.log-context-details summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+  user-select: none;
+}
+
+.log-context-pre {
+  margin-top: 8px;
+  margin-bottom: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 @media (max-width: 700px) {
   .btn-secondary {
     width: 100%;

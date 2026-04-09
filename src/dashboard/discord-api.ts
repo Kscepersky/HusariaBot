@@ -217,12 +217,57 @@ export async function getDiscordUser(accessToken: string): Promise<DiscordUser> 
     return resp.json() as Promise<DiscordUser>;
 }
 
+export async function getDiscordUserById(userId: string): Promise<DiscordUser | null> {
+    const normalizedUserId = userId.trim();
+    if (!isValidDiscordId(normalizedUserId)) {
+        return null;
+    }
+
+    const resp = await fetch(`${DISCORD_API}/users/${encodeURIComponent(normalizedUserId)}`, {
+        headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+    });
+
+    if (resp.status === 404) {
+        return null;
+    }
+
+    if (!resp.ok) {
+        throw new Error(`Failed to fetch Discord user by id: ${resp.status}`);
+    }
+
+    return resp.json() as Promise<DiscordUser>;
+}
+
 export async function getGuildMember(userId: string, guildId: string): Promise<DiscordGuildMember | null> {
     const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}`, {
         headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
     });
 
     if (resp.status === 404) return null;
+    if (resp.status === 429) {
+        const retryAfterHeader = resp.headers.get('retry-after');
+        const retryAfterFromHeader = retryAfterHeader ? Number.parseFloat(retryAfterHeader) : Number.NaN;
+        const retryAfterFromBody = await resp.json()
+            .then((payload) => {
+                if (!payload || typeof payload !== 'object') {
+                    return Number.NaN;
+                }
+
+                const maybeRetryAfter = (payload as DiscordRateLimitPayload).retry_after;
+                if (typeof maybeRetryAfter !== 'number' || !Number.isFinite(maybeRetryAfter)) {
+                    return Number.NaN;
+                }
+
+                return maybeRetryAfter;
+            })
+            .catch(() => Number.NaN);
+
+        const retryAfterSeconds = Number.isFinite(retryAfterFromHeader)
+            ? retryAfterFromHeader
+            : (Number.isFinite(retryAfterFromBody) ? retryAfterFromBody : 1);
+
+        throw new DiscordRateLimitedError(Math.max(1, retryAfterSeconds));
+    }
     if (!resp.ok) throw new Error(`Failed to fetch guild member: ${resp.status}`);
     return resp.json() as Promise<DiscordGuildMember>;
 }

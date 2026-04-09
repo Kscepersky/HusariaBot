@@ -7,6 +7,7 @@ import {
     hasRequiredRole,
 } from '../discord-api.js';
 import type { SessionUser } from '../types.js';
+import { createLogger } from '../../utils/logger.js';
 
 config();
 
@@ -14,10 +15,13 @@ export const authRouter = Router();
 
 const SCOPES      = 'identify';
 const GUILD_ID    = process.env.GUILD_ID!;
+const authLogger = createLogger('dashboard:auth');
 
 authRouter.get('/discord', (req, res) => {
     const state = crypto.randomUUID();
     req.session.oauthState = state;
+
+    authLogger.info('DASHBOARD_LOGIN_INITIATED', 'Uzytkownik rozpoczal logowanie do dashboardu.');
 
     const params = new URLSearchParams({
         client_id:     process.env.CLIENT_ID!,
@@ -34,6 +38,10 @@ authRouter.get('/discord/callback', async (req, res) => {
     const { code, state } = req.query as { code?: string; state?: string };
 
     if (!code || !state || state !== req.session.oauthState) {
+        authLogger.warn('DASHBOARD_LOGIN_INVALID_STATE', 'Odrzucono logowanie dashboardu przez nieprawidlowy OAuth state.', {
+            hasCode: Boolean(code),
+            hasState: Boolean(state),
+        });
         res.redirect('/auth/error?msg=invalid_state');
         return;
     }
@@ -46,11 +54,17 @@ authRouter.get('/discord/callback', async (req, res) => {
         const member       = await getGuildMember(discordUser.id, GUILD_ID);
 
         if (!member) {
+            authLogger.warn('DASHBOARD_LOGIN_NOT_MEMBER', 'Odrzucono logowanie: uzytkownik nie jest czlonkiem guildii.', {
+                targetUserId: discordUser.id,
+            });
             res.redirect('/auth/error?msg=not_member');
             return;
         }
 
         if (!hasRequiredRole(member)) {
+            authLogger.warn('DASHBOARD_LOGIN_NO_ACCESS', 'Odrzucono logowanie: brak wymaganej roli dashboardu.', {
+                targetUserId: discordUser.id,
+            });
             res.redirect('/auth/error?msg=no_access');
             return;
         }
@@ -73,21 +87,34 @@ authRouter.get('/discord/callback', async (req, res) => {
         });
 
         req.session.user = sessionUser;
+        authLogger.info('DASHBOARD_LOGIN_SUCCESS', 'Uzytkownik zalogowal sie do dashboardu.', {
+            actorUserId: sessionUser.id,
+            username: sessionUser.username,
+        });
         res.redirect('/');
     } catch (err) {
         console.error('OAuth2 callback error:', err);
+        authLogger.error('DASHBOARD_LOGIN_FAILED', 'Logowanie do dashboardu zakonczone bledem.', undefined, err);
         res.redirect('/auth/error?msg=auth_failed');
     }
 });
 
 authRouter.post('/logout', (req, res) => {
+    const actorUserId = req.session.user?.id;
+
     req.session.destroy((err) => {
         if (err) {
             console.error('Session destroy error:', err);
+            authLogger.error('DASHBOARD_LOGOUT_FAILED', 'Nie udalo sie zakonczyc sesji dashboardu.', {
+                actorUserId,
+            }, err);
             res.status(500).json({ error: 'Nie udało się zakończyć sesji.' });
             return;
         }
 
+        authLogger.info('DASHBOARD_LOGOUT_SUCCESS', 'Uzytkownik wylogowal sie z dashboardu.', {
+            actorUserId,
+        });
         res.json({ success: true });
     });
 });

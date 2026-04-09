@@ -61,6 +61,7 @@ vi.mock('../discord-api.js', () => ({
     getGuildTextChannels: vi.fn(),
     getGuildRoles: vi.fn(),
     getGuildEmojis: vi.fn(),
+    getDiscordUserById: vi.fn(),
     getGuildMember: vi.fn(),
     addGuildMemberRole: vi.fn(),
     removeGuildMemberRole: vi.fn(),
@@ -114,6 +115,16 @@ vi.mock('../scheduler/store.js', () => ({
     updateScheduledPost: vi.fn(),
 }));
 
+vi.mock('../leaderboard-profile-cache-store.js', () => ({
+    getStoredLeaderboardProfile: vi.fn(),
+    upsertStoredLeaderboardProfile: vi.fn(),
+    pruneStoredLeaderboardProfiles: vi.fn(),
+}));
+
+vi.mock('../../utils/log-reader.js', () => ({
+    listDashboardLogs: vi.fn(),
+}));
+
 import {
     addCoinsByAdmin,
     addLevelsByAdmin,
@@ -133,6 +144,8 @@ import {
 } from '../../economy/repository.js';
 import {
     addGuildMemberRole,
+    DiscordRateLimitedError,
+    getDiscordUserById,
     getGuildMember,
     hasDevRole,
     hasRequiredRole,
@@ -145,6 +158,12 @@ import { publishDashboardPost } from '../publish-flow.js';
 import { insertScheduledPost, updateScheduledPost } from '../scheduler/store.js';
 import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
 import { listTicketHistoryEntries, resolveTicketTranscriptFilePath } from '../../tickets/history-store.js';
+import {
+    getStoredLeaderboardProfile,
+    pruneStoredLeaderboardProfiles,
+    upsertStoredLeaderboardProfile,
+} from '../leaderboard-profile-cache-store.js';
+import { listDashboardLogs } from '../../utils/log-reader.js';
 import { apiRouter } from './api.js';
 
 function buildConfig(overrides: Partial<EconomyConfig> = {}): EconomyConfig {
@@ -276,8 +295,93 @@ describe('api economy settings routes', () => {
         process.env.DEV_ROLE_ID = '910000000000000004';
         process.env.SERVER_MUTE_ROLE_ID = '910000000000000005';
         vi.mocked(getGuildMember).mockResolvedValue({ roles: ['admin-role'] } as any);
+        vi.mocked(getDiscordUserById).mockResolvedValue(null as any);
         vi.mocked(hasDevRole).mockReturnValue(true);
         vi.mocked(hasRequiredRole).mockReturnValue(true);
+        vi.mocked(getStoredLeaderboardProfile).mockResolvedValue(null);
+        vi.mocked(upsertStoredLeaderboardProfile).mockResolvedValue(undefined);
+        vi.mocked(pruneStoredLeaderboardProfiles).mockResolvedValue(undefined);
+        vi.mocked(listDashboardLogs).mockResolvedValue({
+            entries: [],
+            page: 1,
+            pageSize: 25,
+            totalRows: 0,
+            totalPages: 1,
+        });
+    });
+
+    it('zwraca logi systemowe dla uzytkownika z rola dev i przekazuje filtry', async () => {
+        vi.mocked(listDashboardLogs).mockResolvedValue({
+            entries: [
+                {
+                    timestampIso: '2026-04-08T20:45:00.000Z',
+                    timestampMs: 1_775_682_700_000,
+                    level: 'info',
+                    action: 'SCHEDULED_POST_CREATED',
+                    scope: 'dashboard:scheduled-routes',
+                    message: 'Utworzono zaplanowany post.',
+                    context: {
+                        actorUserId: 'user-1',
+                        postId: 'post-1',
+                    },
+                },
+            ],
+            page: 2,
+            pageSize: 25,
+            totalRows: 31,
+            totalPages: 2,
+        } as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/logs?page=2&pageSize=25&level=error&search=scheduled`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(Array.isArray(body.logs)).toBe(true);
+            expect(body.pagination).toEqual({
+                page: 2,
+                pageSize: 25,
+                totalRows: 31,
+                totalPages: 2,
+            });
+            expect(body.filters).toEqual({
+                level: 'error',
+                search: 'scheduled',
+            });
+
+            expect(vi.mocked(listDashboardLogs)).toHaveBeenCalledWith({
+                page: 2,
+                pageSize: 25,
+                search: 'scheduled',
+                level: 'error',
+            });
+        });
+    });
+
+    it('zwraca 403 dla logow systemowych gdy uzytkownik utracil role dev', async () => {
+        vi.mocked(hasDevRole).mockReturnValue(false);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/logs`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(403);
+            expect(body.error).toBe('Brak uprawnień do wykonania tej operacji.');
+            expect(vi.mocked(listDashboardLogs)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('zwraca 500 dla logow systemowych gdy odczyt logow konczy sie bledem', async () => {
+        vi.mocked(listDashboardLogs).mockRejectedValueOnce(new Error('read failed'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/logs`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(500);
+            expect(body.error).toBe('Nie udalo sie pobrac logow systemowych.');
+        });
     });
 
     it('zwraca ustawienia ekonomii', async () => {
@@ -1291,6 +1395,445 @@ describe('api economy settings routes', () => {
         });
     });
 
+    it('laduje profil z globalnego endpointu Discord gdy czlonek nie istnieje na guildzie', async () => {
+        const globalUserId = '888888888888888881';
+        const leaderboardPayload = {
+            sortBy: 'xp',
+            page: 1,
+            pageSize: 10,
+            totalRows: 1,
+            totalPages: 1,
+            entries: [
+                { rank: 1, userId: globalUserId, xp: 800, level: 6, coins: 250 },
+            ],
+        };
+
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return {
+                    roles: ['admin-role'],
+                    nick: null,
+                    user: {
+                        id: 'user-1',
+                        username: 'Admin',
+                        global_name: 'Admin',
+                        avatar: null,
+                        discriminator: '0',
+                    },
+                } as any;
+            }
+
+            if (userId === globalUserId) {
+                return null;
+            }
+
+            return null;
+        });
+
+        vi.mocked(getDiscordUserById).mockImplementation(async (userId: string) => {
+            if (userId === globalUserId) {
+                return {
+                    id: globalUserId,
+                    username: 'global-user',
+                    global_name: 'Global User',
+                    avatar: 'avatarhash-global',
+                    discriminator: '0',
+                } as any;
+            }
+
+            return null;
+        });
+
+        vi.mocked(getEconomyLeaderboardPage).mockResolvedValue(leaderboardPayload as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/leaderboard`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.leaderboard).toEqual({
+                ...leaderboardPayload,
+                entries: [
+                    {
+                        rank: 1,
+                        userId: globalUserId,
+                        xp: 800,
+                        level: 6,
+                        coins: 250,
+                        displayName: 'Global User',
+                        avatarUrl: `https://cdn.discordapp.com/avatars/${globalUserId}/avatarhash-global.png?size=64`,
+                    },
+                ],
+            });
+            expect(vi.mocked(getDiscordUserById)).toHaveBeenCalledWith(globalUserId);
+        });
+    });
+
+    it('laduje profil z globalnego endpointu Discord gdy lookup czlonka rzuca bled i fallback jest dostepny', async () => {
+        const globalUserId = '888888888888888882';
+        const leaderboardPayload = {
+            sortBy: 'xp',
+            page: 1,
+            pageSize: 10,
+            totalRows: 1,
+            totalPages: 1,
+            entries: [
+                { rank: 1, userId: globalUserId, xp: 610, level: 5, coins: 190 },
+            ],
+        };
+
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return {
+                    roles: ['admin-role'],
+                    nick: null,
+                    user: {
+                        id: 'user-1',
+                        username: 'Admin',
+                        global_name: 'Admin',
+                        avatar: null,
+                        discriminator: '0',
+                    },
+                } as any;
+            }
+
+            if (userId === globalUserId) {
+                throw new Error('discord member failed');
+            }
+
+            return null;
+        });
+
+        vi.mocked(getDiscordUserById).mockImplementation(async (userId: string) => {
+            if (userId === globalUserId) {
+                return {
+                    id: globalUserId,
+                    username: 'error-global-user',
+                    global_name: 'Error Global User',
+                    avatar: 'avatarhash-error-global',
+                    discriminator: '0',
+                } as any;
+            }
+
+            return null;
+        });
+
+        vi.mocked(getEconomyLeaderboardPage).mockResolvedValue(leaderboardPayload as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/leaderboard`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.leaderboard).toEqual({
+                ...leaderboardPayload,
+                entries: [
+                    {
+                        rank: 1,
+                        userId: globalUserId,
+                        xp: 610,
+                        level: 5,
+                        coins: 190,
+                        displayName: 'Error Global User',
+                        avatarUrl: `https://cdn.discordapp.com/avatars/${globalUserId}/avatarhash-error-global.png?size=64`,
+                    },
+                ],
+            });
+            expect(vi.mocked(getDiscordUserById)).toHaveBeenCalledWith(globalUserId);
+        });
+    });
+
+    it('pomija globalny fallback leaderboardu dla bledow operacyjnych lookupu guild member', async () => {
+        const unstableUserId = '888888888888888883';
+        const leaderboardPayload = {
+            sortBy: 'xp',
+            page: 1,
+            pageSize: 10,
+            totalRows: 1,
+            totalPages: 1,
+            entries: [
+                { rank: 1, userId: unstableUserId, xp: 250, level: 2, coins: 70 },
+            ],
+        };
+
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return {
+                    roles: ['admin-role'],
+                    nick: null,
+                    user: {
+                        id: 'user-1',
+                        username: 'Admin',
+                        global_name: 'Admin',
+                        avatar: null,
+                        discriminator: '0',
+                    },
+                } as any;
+            }
+
+            if (userId === unstableUserId) {
+                throw new Error('Failed to fetch guild member: 500');
+            }
+
+            return null;
+        });
+
+        vi.mocked(getDiscordUserById).mockResolvedValue({
+            id: unstableUserId,
+            username: 'should-not-be-used',
+            global_name: 'Should Not Be Used',
+            avatar: 'avatarhash-should-not-be-used',
+            discriminator: '0',
+        } as any);
+        vi.mocked(getEconomyLeaderboardPage).mockResolvedValue(leaderboardPayload as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/leaderboard`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.leaderboard).toEqual({
+                ...leaderboardPayload,
+                entries: [
+                    {
+                        rank: 1,
+                        userId: unstableUserId,
+                        xp: 250,
+                        level: 2,
+                        coins: 70,
+                        displayName: `Uzytkownik ${unstableUserId}`,
+                        avatarUrl: null,
+                    },
+                ],
+            });
+            expect(vi.mocked(getDiscordUserById)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('pomija globalny fallback leaderboardu gdy lookup guild member timeoutuje', async () => {
+        const timeoutUserId = '888888888888888884';
+        const leaderboardPayload = {
+            sortBy: 'xp',
+            page: 1,
+            pageSize: 10,
+            totalRows: 1,
+            totalPages: 1,
+            entries: [
+                { rank: 1, userId: timeoutUserId, xp: 275, level: 2, coins: 71 },
+            ],
+        };
+
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return {
+                    roles: ['admin-role'],
+                    nick: null,
+                    user: {
+                        id: 'user-1',
+                        username: 'Admin',
+                        global_name: 'Admin',
+                        avatar: null,
+                        discriminator: '0',
+                    },
+                } as any;
+            }
+
+            if (userId === timeoutUserId) {
+                throw new Error(`Timeout while loading leaderboard profile for user ${timeoutUserId}`);
+            }
+
+            return null;
+        });
+
+        vi.mocked(getDiscordUserById).mockResolvedValue({
+            id: timeoutUserId,
+            username: 'should-not-be-used-timeout',
+            global_name: 'Should Not Be Used Timeout',
+            avatar: 'avatarhash-should-not-be-used-timeout',
+            discriminator: '0',
+        } as any);
+        vi.mocked(getEconomyLeaderboardPage).mockResolvedValue(leaderboardPayload as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/leaderboard`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.leaderboard).toEqual({
+                ...leaderboardPayload,
+                entries: [
+                    {
+                        rank: 1,
+                        userId: timeoutUserId,
+                        xp: 275,
+                        level: 2,
+                        coins: 71,
+                        displayName: `Uzytkownik ${timeoutUserId}`,
+                        avatarUrl: null,
+                    },
+                ],
+            });
+            expect(vi.mocked(getDiscordUserById)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('pomija globalny fallback leaderboardu gdy lookup guild member zwraca 429', async () => {
+        const rateLimitedUserId = '888888888888888885';
+        const leaderboardPayload = {
+            sortBy: 'xp',
+            page: 1,
+            pageSize: 10,
+            totalRows: 1,
+            totalPages: 1,
+            entries: [
+                { rank: 1, userId: rateLimitedUserId, xp: 290, level: 2, coins: 72 },
+            ],
+        };
+
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return {
+                    roles: ['admin-role'],
+                    nick: null,
+                    user: {
+                        id: 'user-1',
+                        username: 'Admin',
+                        global_name: 'Admin',
+                        avatar: null,
+                        discriminator: '0',
+                    },
+                } as any;
+            }
+
+            if (userId === rateLimitedUserId) {
+                throw new Error('Failed to fetch guild member: 429');
+            }
+
+            return null;
+        });
+
+        vi.mocked(getDiscordUserById).mockResolvedValue({
+            id: rateLimitedUserId,
+            username: 'should-not-be-used-429',
+            global_name: 'Should Not Be Used 429',
+            avatar: 'avatarhash-should-not-be-used-429',
+            discriminator: '0',
+        } as any);
+        vi.mocked(getEconomyLeaderboardPage).mockResolvedValue(leaderboardPayload as any);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/leaderboard`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.leaderboard).toEqual({
+                ...leaderboardPayload,
+                entries: [
+                    {
+                        rank: 1,
+                        userId: rateLimitedUserId,
+                        xp: 290,
+                        level: 2,
+                        coins: 72,
+                        displayName: `Uzytkownik ${rateLimitedUserId}`,
+                        avatarUrl: null,
+                    },
+                ],
+            });
+            expect(vi.mocked(getDiscordUserById)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('stosuje backoff po 429 i nie powtarza lookupu guild member przy kolejnym odswiezeniu leaderboardu', async () => {
+        const rateLimitedUserId = '888888888888888886';
+        const leaderboardPayload = {
+            sortBy: 'xp',
+            page: 1,
+            pageSize: 10,
+            totalRows: 1,
+            totalPages: 1,
+            entries: [
+                { rank: 1, userId: rateLimitedUserId, xp: 315, level: 3, coins: 83 },
+            ],
+        };
+
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return {
+                    roles: ['admin-role'],
+                    nick: null,
+                    user: {
+                        id: 'user-1',
+                        username: 'Admin',
+                        global_name: 'Admin',
+                        avatar: null,
+                        discriminator: '0',
+                    },
+                } as any;
+            }
+
+            if (userId === rateLimitedUserId) {
+                throw new DiscordRateLimitedError(5);
+            }
+
+            return null;
+        });
+
+        vi.mocked(getDiscordUserById).mockResolvedValue({
+            id: rateLimitedUserId,
+            username: 'should-not-be-used-rate-limit-backoff',
+            global_name: 'Should Not Be Used Rate Limit Backoff',
+            avatar: 'avatarhash-should-not-be-used-rate-limit-backoff',
+            discriminator: '0',
+        } as any);
+        vi.mocked(getEconomyLeaderboardPage).mockResolvedValue(leaderboardPayload as any);
+
+        await withServer(async (baseUrl) => {
+            const firstResponse = await fetch(`${baseUrl}/api/economy/leaderboard`);
+            const firstBody = await parseJsonResponse(firstResponse);
+
+            expect(firstResponse.status).toBe(200);
+            expect(firstBody.leaderboard).toEqual({
+                ...leaderboardPayload,
+                entries: [
+                    {
+                        rank: 1,
+                        userId: rateLimitedUserId,
+                        xp: 315,
+                        level: 3,
+                        coins: 83,
+                        displayName: `Uzytkownik ${rateLimitedUserId}`,
+                        avatarUrl: null,
+                    },
+                ],
+            });
+
+            const secondResponse = await fetch(`${baseUrl}/api/economy/leaderboard`);
+            const secondBody = await parseJsonResponse(secondResponse);
+
+            expect(secondResponse.status).toBe(200);
+            expect(secondBody.leaderboard).toEqual({
+                ...leaderboardPayload,
+                entries: [
+                    {
+                        rank: 1,
+                        userId: rateLimitedUserId,
+                        xp: 315,
+                        level: 3,
+                        coins: 83,
+                        displayName: `Uzytkownik ${rateLimitedUserId}`,
+                        avatarUrl: null,
+                    },
+                ],
+            });
+
+            const memberCallsForRateLimitedUser = vi.mocked(getGuildMember).mock.calls
+                .filter(([userId]) => userId === rateLimitedUserId);
+            expect(memberCallsForRateLimitedUser).toHaveLength(1);
+            expect(vi.mocked(getDiscordUserById)).not.toHaveBeenCalled();
+        });
+    });
+
     it('rollbackuje utworzony kanał watchparty gdy zapis statusu po /api/embed nie powiedzie się', async () => {
         vi.mocked(publishDashboardPost).mockResolvedValue({
             messageId: 'message-1',
@@ -1443,6 +1986,62 @@ describe('api economy settings routes', () => {
             const cachedProfileLookups = vi.mocked(getGuildMember).mock.calls
                 .filter((call) => call[0] === cachedUserId);
             expect(cachedProfileLookups).toHaveLength(1);
+        });
+    });
+
+    it('uzywa trwalego cache profilu leaderboardu z SQLite bez lookupu membera Discord', async () => {
+        const storedUserId = 'u-stored-cache-hit';
+        const now = Date.now();
+        const leaderboardPayload = {
+            sortBy: 'xp',
+            page: 1,
+            pageSize: 10,
+            totalRows: 1,
+            totalPages: 1,
+            entries: [
+                { rank: 1, userId: storedUserId, xp: 712, level: 6, coins: 241 },
+            ],
+        };
+
+        vi.mocked(getEconomyLeaderboardPage).mockResolvedValue(leaderboardPayload as any);
+        vi.mocked(getStoredLeaderboardProfile).mockImplementation(async (_guildId: string, userId: string) => {
+            if (userId === storedUserId) {
+                return {
+                    guildId: '123456789012345678',
+                    userId: storedUserId,
+                    displayName: 'Stored Cache User',
+                    avatarUrl: 'https://cdn.discordapp.com/avatars/stored/cache.png?size=64',
+                    expiresAt: now + (60 * 60 * 1000),
+                    updatedAt: now,
+                };
+            }
+
+            return null;
+        });
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/leaderboard`);
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.leaderboard).toEqual({
+                ...leaderboardPayload,
+                entries: [
+                    {
+                        rank: 1,
+                        userId: storedUserId,
+                        xp: 712,
+                        level: 6,
+                        coins: 241,
+                        displayName: 'Stored Cache User',
+                        avatarUrl: 'https://cdn.discordapp.com/avatars/stored/cache.png?size=64',
+                    },
+                ],
+            });
+
+            const memberCallsForStoredUser = vi.mocked(getGuildMember).mock.calls
+                .filter(([userId]) => userId === storedUserId);
+            expect(memberCallsForStoredUser).toHaveLength(0);
         });
     });
 

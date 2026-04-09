@@ -70,6 +70,28 @@ function resolveDailyLogFilePath(timestampMs: number): string {
     return join(LOG_DIRECTORY_PATH, `system-${formatDatePart(timestampMs)}.jsonl`);
 }
 
+function resolveDailyReadableLogFilePath(timestampMs: number): string {
+    return join(LOG_DIRECTORY_PATH, `system-${formatDatePart(timestampMs)}.log`);
+}
+
+function formatReadableContext(context: LogContext): string {
+    const entries = Object.entries(context)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => `${key}=${JSON.stringify(value)}`);
+
+    if (entries.length === 0) {
+        return '';
+    }
+
+    return ` | ${entries.join(' ')}`;
+}
+
+function formatReadableLine(entry: StructuredLogEntry): string {
+    const errorLabel = entry.error ? ` | error=${entry.error.name}: ${entry.error.message}` : '';
+    const contextLabel = formatReadableContext(entry.context);
+    return `${entry.timestampIso} [${entry.level.toUpperCase()}] [${entry.action}] [${entry.scope}] ${entry.message}${contextLabel}${errorLabel}`;
+}
+
 function normalizeError(error: unknown): StructuredLogEntry['error'] {
     if (error instanceof Error) {
         return {
@@ -139,9 +161,11 @@ async function appendEntryToFile(entry: StructuredLogEntry): Promise<void> {
     }
 
     await withLogWriteLock(async () => {
-        const filePath = resolveDailyLogFilePath(entry.timestampMs);
-        await mkdir(dirname(filePath), { recursive: true });
-        await appendFile(filePath, `${JSON.stringify(entry)}\n`, 'utf8');
+        const jsonlFilePath = resolveDailyLogFilePath(entry.timestampMs);
+        const readableFilePath = resolveDailyReadableLogFilePath(entry.timestampMs);
+        await mkdir(dirname(jsonlFilePath), { recursive: true });
+        await appendFile(jsonlFilePath, `${JSON.stringify(entry)}\n`, 'utf8');
+        await appendFile(readableFilePath, `${formatReadableLine(entry)}\n`, 'utf8');
     });
 }
 

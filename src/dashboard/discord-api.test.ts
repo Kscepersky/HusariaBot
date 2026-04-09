@@ -271,3 +271,41 @@ describe('updateGuildMemberRoles', () => {
     )).resolves.toBe('not_found')
   })
 })
+
+describe('getDiscordUserById', () => {
+  it('returns null and skips fetch for invalid user id', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    const fetchMock = vi.fn(async () => jsonResponse({}))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { getDiscordUserById } = await import('./discord-api.js')
+
+    await expect(getDiscordUserById('not-a-snowflake')).resolves.toBeNull()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('getGuildMember', () => {
+  it('throws DiscordRateLimitedError with retry-after when Discord responds 429', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({
+        message: 'You are being rate limited.',
+        retry_after: 3,
+      }),
+      {
+        status: 429,
+        headers: {
+          'Content-Type': 'application/json',
+          'retry-after': '3',
+        },
+      },
+    )))
+
+    const { getGuildMember, DiscordRateLimitedError } = await import('./discord-api.js')
+
+    await expect(getGuildMember('987654321098765432', '123456789012345678')).rejects.toBeInstanceOf(DiscordRateLimitedError)
+  })
+})

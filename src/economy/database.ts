@@ -229,6 +229,21 @@ async function initializeSchema(db: Database): Promise<void> {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_economy_timeouts_active_user
             ON economy_timeouts(guild_id, user_id)
             WHERE is_active = 1;
+
+        CREATE TABLE IF NOT EXISTS dashboard_leaderboard_profile_cache (
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            avatar_url TEXT,
+            expires_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, user_id),
+            CHECK (expires_at >= 0),
+            CHECK (updated_at >= 0)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_dashboard_leaderboard_profile_cache_expires
+            ON dashboard_leaderboard_profile_cache(expires_at ASC);
     `);
 
     await ensureEconomyConfigColumns(db);

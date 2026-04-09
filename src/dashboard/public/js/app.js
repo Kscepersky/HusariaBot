@@ -12,6 +12,9 @@ const ALLOWED_UPLOAD_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'i
 const ALLOWED_UPLOAD_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
 const CREATOR_IMAGE_PAGE_SIZE = 8
 const IMAGE_LIBRARY_PAGE_SIZE = 12
+const ECONOMY_LEADERBOARD_AUTO_REFRESH_MS = 60_000
+const DASHBOARD_LOGS_PAGE_SIZE = 25
+const DASHBOARD_LOGS_SEARCH_DEBOUNCE_MS = 300
 const UPLOAD_MIME_BY_EXT = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -76,6 +79,8 @@ let mentionChannelSearchRequestId = 0
 let mentionRoleSearchRequestId = 0
 let mentionUserSearchRequestId = 0
 let embedSectionBound = false
+let creatorPreviewScrollSyncBound = false
+let creatorPreviewScrollSyncRafId = null
 let scheduledSectionBound = false
 let sentSectionBound = false
 let eventsSectionBound = false
@@ -85,6 +90,7 @@ let economyLeaderboardSectionBound = false
 let timeoutSectionBound = false
 let imageLibrarySectionBound = false
 let ticketHistorySectionBound = false
+let systemLogsSectionBound = false
 let currentSection = 'embed-creator'
 let scheduledPosts = []
 let sentPosts = []
@@ -102,6 +108,16 @@ let economyLeaderboardTotalRows = 0
 let economyLeaderboardEntries = []
 let economyLeaderboardLoadError = null
 let economyLeaderboardLoadRequestId = 0
+let economyLeaderboardAutoRefreshIntervalId = null
+let dashboardLogEntries = []
+let dashboardLogsPage = 1
+let dashboardLogsTotalPages = 1
+let dashboardLogsTotalRows = 0
+let dashboardLogsSearch = ''
+let dashboardLogsLevel = 'all'
+let dashboardLogsLoadRequestId = 0
+let dashboardLogsSearchDebounceId = null
+let dashboardLogsAbortController = null
 let economyLevelRoleMappings = []
 let economyLevelRoleMappingsLoaded = false
 let economyHasDevAccess = null
@@ -156,6 +172,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initTimeoutSection()
   await initTicketHistorySection()
   await initImageLibrarySection()
+  await initSystemLogsSection()
   await loadG2Matches({ silent: true })
   switchSection('embed-creator')
 })
@@ -303,6 +320,17 @@ function switchSection(section) {
 
   currentSection = section
 
+  if (section === 'economy-leaderboard') {
+    startEconomyLeaderboardAutoRefresh()
+  } else {
+    stopEconomyLeaderboardAutoRefresh()
+  }
+
+  if (section !== 'system-logs') {
+    clearDashboardLogsSearchDebounce()
+    cancelDashboardLogsRequest()
+  }
+
   document.querySelectorAll('.sidebar-item[data-section]').forEach((item) => {
     item.classList.toggle('active', item.dataset.section === section)
   })
@@ -347,9 +375,117 @@ function switchSection(section) {
     void loadImageLibraryPage({ silent: false })
   }
 
+  if (section === 'system-logs') {
+    void loadDashboardLogs({ silent: false })
+  }
+
   if (typeof window.onDashboardSectionChanged === 'function') {
     window.onDashboardSectionChanged(section)
   }
+
+  scheduleCreatorPreviewScrollSync()
+}
+
+function startEconomyLeaderboardAutoRefresh() {
+  if (economyLeaderboardAutoRefreshIntervalId !== null) {
+    return
+  }
+
+  economyLeaderboardAutoRefreshIntervalId = setInterval(() => {
+    if (currentSection !== 'economy-leaderboard') {
+      return
+    }
+
+    void loadEconomyLeaderboard({ silent: true })
+  }, ECONOMY_LEADERBOARD_AUTO_REFRESH_MS)
+}
+
+function stopEconomyLeaderboardAutoRefresh() {
+  if (economyLeaderboardAutoRefreshIntervalId === null) {
+    return
+  }
+
+  clearInterval(economyLeaderboardAutoRefreshIntervalId)
+  economyLeaderboardAutoRefreshIntervalId = null
+}
+
+function resetCreatorPreviewScrollTransform() {
+  const previewCard = document.getElementById('creator-preview-card')
+  if (!(previewCard instanceof HTMLElement)) {
+    return
+  }
+
+  if (previewCard.style.transform) {
+    previewCard.style.transform = ''
+  }
+}
+
+function scheduleCreatorPreviewScrollSync() {
+  const isDesktopViewport = window.matchMedia('(min-width: 1001px)').matches
+  const isEmbedCreatorSection = currentSection === 'embed-creator'
+  if (!isDesktopViewport || !isEmbedCreatorSection) {
+    resetCreatorPreviewScrollTransform()
+    return
+  }
+
+  if (creatorPreviewScrollSyncRafId !== null) {
+    return
+  }
+
+  creatorPreviewScrollSyncRafId = window.requestAnimationFrame(() => {
+    creatorPreviewScrollSyncRafId = null
+    syncCreatorPreviewScrollPosition()
+  })
+}
+
+function syncCreatorPreviewScrollPosition() {
+  const previewCard = document.getElementById('creator-preview-card')
+  const formCard = document.getElementById('creator-form-card')
+
+  if (!(previewCard instanceof HTMLElement) || !(formCard instanceof HTMLElement)) {
+    return
+  }
+
+  const isDesktopViewport = window.matchMedia('(min-width: 1001px)').matches
+  if (!isDesktopViewport || currentSection !== 'embed-creator') {
+    resetCreatorPreviewScrollTransform()
+    return
+  }
+
+  const currentScrollTop = getDocumentScrollTop()
+  const formRect = formCard.getBoundingClientRect()
+  const formTopInDocument = formRect.top + currentScrollTop
+  const formBottomInDocument = formTopInDocument + formCard.offsetHeight
+  const viewportHeight = Math.max(window.innerHeight || 0, 1)
+  const maxOffset = Math.max(0, formCard.scrollHeight - previewCard.offsetHeight)
+  if (maxOffset === 0) {
+    resetCreatorPreviewScrollTransform()
+    return
+  }
+
+  const availableScroll = formBottomInDocument - formTopInDocument - viewportHeight
+  if (availableScroll <= 0) {
+    resetCreatorPreviewScrollTransform()
+    return
+  }
+
+  const progressRaw = (currentScrollTop - formTopInDocument) / availableScroll
+  const progress = Math.min(1, Math.max(0, progressRaw))
+  const translateY = Math.round(maxOffset * progress)
+  previewCard.style.transform = `translateY(${translateY}px)`
+}
+
+function getDocumentScrollTop() {
+  if (typeof window.scrollY === 'number') {
+    return window.scrollY
+  }
+
+  const documentElement = document.documentElement
+  if (documentElement && typeof documentElement.scrollTop === 'number') {
+    return documentElement.scrollTop
+  }
+
+  return document.body?.scrollTop ?? 0
 }
 
 async function initEmbedSection() {
@@ -483,6 +619,15 @@ async function initImageLibrarySection() {
   }
 
   await loadImageLibraryPage({ silent: true })
+}
+
+async function initSystemLogsSection() {
+  renderDashboardLogs()
+
+  if (!systemLogsSectionBound) {
+    systemLogsSectionBound = true
+    bindSystemLogsSectionListeners()
+  }
 }
 
 function bindEmbedSectionListeners() {
@@ -875,7 +1020,21 @@ function bindEmbedSectionListeners() {
   const sendButton = document.getElementById('send-btn')
   sendButton?.addEventListener('click', publishMessage)
 
+  if (!creatorPreviewScrollSyncBound) {
+    creatorPreviewScrollSyncBound = true
+    window.addEventListener('scroll', scheduleCreatorPreviewScrollSync, { passive: true })
+    window.addEventListener('resize', scheduleCreatorPreviewScrollSync)
+    document.querySelectorAll('#section-embed-creator details').forEach((detailsElement) => {
+      detailsElement.addEventListener('toggle', scheduleCreatorPreviewScrollSync)
+    })
+  }
+
+  scheduleCreatorPreviewScrollSync()
+
   window.addEventListener('beforeunload', () => {
+    stopEconomyLeaderboardAutoRefresh()
+    clearDashboardLogsSearchDebounce()
+    cancelDashboardLogsRequest()
     clearUploadPreviewUrl()
   })
 }
@@ -1099,6 +1258,147 @@ function bindTicketHistorySectionListeners() {
   })
 }
 
+function bindSystemLogsSectionListeners() {
+  const searchInput = document.getElementById('system-logs-search')
+  const levelSelect = document.getElementById('system-logs-level')
+  const refreshButton = document.getElementById('system-logs-refresh-btn')
+  const prevButton = document.getElementById('system-logs-prev-btn')
+  const nextButton = document.getElementById('system-logs-next-btn')
+
+  searchInput?.addEventListener('input', () => {
+    dashboardLogsSearch = String(searchInput.value ?? '').trim()
+    dashboardLogsPage = 1
+    clearDashboardLogsSearchDebounce()
+    dashboardLogsSearchDebounceId = setTimeout(() => {
+      void loadDashboardLogs({ page: 1, silent: true })
+    }, DASHBOARD_LOGS_SEARCH_DEBOUNCE_MS)
+  })
+
+  levelSelect?.addEventListener('change', () => {
+    clearDashboardLogsSearchDebounce()
+    dashboardLogsLevel = normalizeDashboardLogLevel(String(levelSelect.value ?? 'all').toLowerCase(), true)
+    dashboardLogsPage = 1
+    void loadDashboardLogs({ page: 1, silent: true })
+  })
+
+  refreshButton?.addEventListener('click', () => {
+    clearDashboardLogsSearchDebounce()
+    void loadDashboardLogs({ silent: true })
+  })
+
+  prevButton?.addEventListener('click', () => {
+    if (dashboardLogsPage <= 1) {
+      return
+    }
+
+    clearDashboardLogsSearchDebounce()
+    void loadDashboardLogs({ page: dashboardLogsPage - 1, silent: true })
+  })
+
+  nextButton?.addEventListener('click', () => {
+    if (dashboardLogsPage >= dashboardLogsTotalPages) {
+      return
+    }
+
+    clearDashboardLogsSearchDebounce()
+    void loadDashboardLogs({ page: dashboardLogsPage + 1, silent: true })
+  })
+}
+
+function clearDashboardLogsSearchDebounce() {
+  if (dashboardLogsSearchDebounceId) {
+    clearTimeout(dashboardLogsSearchDebounceId)
+    dashboardLogsSearchDebounceId = null
+  }
+}
+
+function cancelDashboardLogsRequest() {
+  if (dashboardLogsAbortController) {
+    dashboardLogsAbortController.abort()
+    dashboardLogsAbortController = null
+  }
+}
+
+function normalizeDashboardLogLevel(value, allowAll = false) {
+  const normalized = String(value ?? '').toLowerCase()
+  const allowed = new Set(['trace', 'debug', 'info', 'warn', 'error', 'fatal'])
+  if (allowed.has(normalized)) {
+    return normalized
+  }
+
+  return allowAll ? 'all' : 'info'
+}
+
+async function loadDashboardLogs(options = {}) {
+  const requestId = ++dashboardLogsLoadRequestId
+  const nextPage = Number.isFinite(Number(options.page))
+    ? Math.max(1, Number(options.page))
+    : dashboardLogsPage
+  const silent = options.silent === true
+
+  const params = new URLSearchParams({
+    page: String(nextPage),
+    pageSize: String(DASHBOARD_LOGS_PAGE_SIZE),
+    search: dashboardLogsSearch,
+    level: dashboardLogsLevel,
+  })
+
+  cancelDashboardLogsRequest()
+  const abortController = new AbortController()
+  dashboardLogsAbortController = abortController
+
+  try {
+    const response = await fetch(`/api/logs?${params.toString()}`, {
+      signal: abortController.signal,
+    })
+    const payload = await parseApiResponse(response)
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie pobrac logow systemowych.')
+    }
+
+    if (requestId !== dashboardLogsLoadRequestId) {
+      return
+    }
+
+    dashboardLogEntries = Array.isArray(payload.logs) ? payload.logs : []
+    dashboardLogsPage = Number.isFinite(Number(payload.pagination?.page))
+      ? Math.max(1, Number(payload.pagination.page))
+      : 1
+    dashboardLogsTotalPages = Number.isFinite(Number(payload.pagination?.totalPages))
+      ? Math.max(1, Number(payload.pagination.totalPages))
+      : 1
+    dashboardLogsTotalRows = Number.isFinite(Number(payload.pagination?.totalRows))
+      ? Math.max(0, Number(payload.pagination.totalRows))
+      : dashboardLogEntries.length
+
+    renderDashboardLogs()
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      return
+    }
+
+    if (requestId !== dashboardLogsLoadRequestId) {
+      return
+    }
+
+    dashboardLogEntries = []
+    dashboardLogsPage = 1
+    dashboardLogsTotalPages = 1
+    dashboardLogsTotalRows = 0
+    renderDashboardLogs()
+
+    if (!silent) {
+      const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac logow systemowych.'
+      showToast(`❌ ${message}`, 'error')
+    }
+  } finally {
+    if (requestId === dashboardLogsLoadRequestId && dashboardLogsAbortController === abortController) {
+      dashboardLogsAbortController = null
+    }
+  }
+}
+
 async function loadTicketHistory(options = {}) {
   const requestId = ++ticketHistoryLoadRequestId
   const nextPage = Number.isFinite(Number(options.page))
@@ -1271,6 +1571,78 @@ function renderTicketHistory() {
         <div class="scheduled-actions">
           <a class="btn-secondary" href="${transcriptLink}" target="_blank" rel="noopener noreferrer">Otworz transkrypt</a>
         </div>
+      </article>`
+  }).join('')
+}
+
+function renderDashboardLogs() {
+  const list = document.getElementById('system-logs-list')
+  const countLabel = document.getElementById('system-logs-count-label')
+  const pageLabel = document.getElementById('system-logs-page-label')
+  const pagination = document.getElementById('system-logs-pagination')
+  const prevButton = document.getElementById('system-logs-prev-btn')
+  const nextButton = document.getElementById('system-logs-next-btn')
+
+  if (!list) {
+    return
+  }
+
+  if (countLabel) {
+    countLabel.textContent = `Wpisy: ${dashboardLogsTotalRows}`
+  }
+
+  if (pageLabel) {
+    pageLabel.textContent = `Strona ${dashboardLogsPage}/${dashboardLogsTotalPages}`
+  }
+
+  if (pagination) {
+    pagination.hidden = dashboardLogsTotalPages <= 1
+  }
+
+  if (prevButton instanceof HTMLButtonElement) {
+    prevButton.disabled = dashboardLogsPage <= 1
+  }
+
+  if (nextButton instanceof HTMLButtonElement) {
+    nextButton.disabled = dashboardLogsPage >= dashboardLogsTotalPages
+  }
+
+  if (dashboardLogEntries.length === 0) {
+    const emptyMessage = dashboardLogsSearch
+      ? `Brak logow pasujacych do zapytania: "${escapeHtml(dashboardLogsSearch)}".`
+      : 'Brak logow systemowych dla wybranych filtrow.'
+    list.innerHTML = `<div class="scheduled-empty">${emptyMessage}</div>`
+    return
+  }
+
+  list.innerHTML = dashboardLogEntries.map((entry) => {
+    const level = normalizeDashboardLogLevel(entry.level)
+    const levelLabel = escapeHtml(level.toUpperCase())
+    const action = escapeHtml(String(entry.action ?? 'UNKNOWN'))
+    const scope = escapeHtml(String(entry.scope ?? 'system'))
+    const message = escapeHtml(String(entry.message ?? 'Brak tresci'))
+    const timestamp = formatTimestampInWarsaw(Number(entry.timestampMs ?? Date.now()))
+    const contextJson = escapeHtml(JSON.stringify(entry.context ?? {}, null, 2))
+    const errorLabel = entry.error?.message
+      ? `<div class="log-error">Blad: ${escapeHtml(String(entry.error.message))}</div>`
+      : ''
+
+    return `
+      <article class="scheduled-card log-card">
+        <div class="scheduled-card-header">
+          <span class="scheduled-card-title">${timestamp}</span>
+          <span class="scheduled-chip log-level-${level}">${levelLabel}</span>
+        </div>
+        <div class="scheduled-card-meta">
+          <span class="scheduled-chip">Akcja: ${action}</span>
+          <span class="scheduled-chip">Zakres: ${scope}</span>
+        </div>
+        <div class="scheduled-preview">${message}</div>
+        ${errorLabel}
+        <details class="log-context-details">
+          <summary>Szczegoly kontekstu</summary>
+          <pre class="log-context-pre">${contextJson}</pre>
+        </details>
       </article>`
   }).join('')
 }
@@ -2717,6 +3089,8 @@ function applyEconomySettingsAccessState() {
   const accessNotice = document.getElementById('economy-dev-only-notice')
   const settingsNavItem = document.getElementById('economy-settings-nav-item')
     ?? document.querySelector('.sidebar-item[data-section="economy-settings"]')
+  const logsNavItem = document.getElementById('system-logs-nav-item')
+    ?? document.querySelector('.sidebar-item[data-section="system-logs"]')
   const hasDevAccess = economyHasDevAccess === true
   const isAccessDenied = economyHasDevAccess !== true
   const shouldShowDeniedNotice = economyHasDevAccess === false
@@ -2733,7 +3107,15 @@ function applyEconomySettingsAccessState() {
     settingsNavItem.style.display = isAccessDenied ? 'none' : ''
   }
 
+  if (logsNavItem instanceof HTMLElement) {
+    logsNavItem.style.display = isAccessDenied ? 'none' : ''
+  }
+
   if (isAccessDenied && currentSection === 'economy-settings') {
+    switchSection('economy-leaderboard')
+  }
+
+  if (isAccessDenied && currentSection === 'system-logs') {
     switchSection('economy-leaderboard')
   }
 }
@@ -4795,6 +5177,7 @@ function updatePreview() {
   }
 
   updateEventPreview(data)
+  scheduleCreatorPreviewScrollSync()
 }
 
 function resolvePingTargetLabel(pingTargetId) {

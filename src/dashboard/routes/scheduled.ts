@@ -30,8 +30,10 @@ import { registerScheduledPost, unregisterScheduledPost } from '../scheduler/ser
 import { registerWatchpartyLifecycle, unregisterWatchpartyLifecycle } from '../watchparty-lifecycle.js';
 import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
 import type { ScheduledPost } from '../scheduler/types.js';
+import { createLogger } from '../../utils/logger.js';
 
 export const scheduledRouter = Router();
+const scheduledLogger = createLogger('dashboard:scheduled-routes');
 
 interface ScheduledPostRequestBody extends Omit<EmbedFormData, 'mentionRoleEnabled'> {
     mentionRoleEnabled?: boolean | string;
@@ -365,6 +367,14 @@ scheduledRouter.post('/', async (req, res) => {
         const inserted = await insertScheduledPost(scheduledPost);
         registerScheduledPost(inserted);
 
+        scheduledLogger.info('SCHEDULED_POST_CREATED', 'Utworzono zaplanowany post z dashboardu.', {
+            actorUserId: req.session.user?.id,
+            postId: inserted.id,
+            channelId: inserted.payload.channelId,
+            scheduledFor: inserted.scheduledFor,
+            mode: inserted.payload.mode,
+        });
+
         res.json({
             success: true,
             post: toListResponsePost(inserted),
@@ -447,6 +457,14 @@ scheduledRouter.patch('/:id', async (req, res) => {
 
         registerScheduledPost(updated);
 
+        scheduledLogger.info('SCHEDULED_POST_UPDATED', 'Zaktualizowano zaplanowany post z dashboardu.', {
+            actorUserId: req.session.user?.id,
+            postId: updated.id,
+            channelId: updated.payload.channelId,
+            scheduledFor: updated.scheduledFor,
+            mode: updated.payload.mode,
+        });
+
         res.json({
             success: true,
             post: toListResponsePost(updated),
@@ -473,6 +491,12 @@ scheduledRouter.delete('/:id', async (req, res) => {
 
         unregisterScheduledPost(postId);
         unregisterWatchpartyLifecycle(postId);
+
+        scheduledLogger.info('SCHEDULED_POST_DELETED', 'Usunieto zaplanowany post z dashboardu.', {
+            actorUserId: req.session.user?.id,
+            postId,
+        });
+
         res.json({ success: true });
     } catch (error) {
         console.error('Failed to delete scheduled post:', error);
@@ -828,6 +852,14 @@ scheduledRouter.patch('/sent/:id', async (req, res) => {
 
         registerWatchpartyLifecycle(responsePost);
 
+        scheduledLogger.info('SENT_POST_EDITED', 'Zedytowano opublikowany post z dashboardu.', {
+            actorUserId: req.session.user?.id,
+            postId,
+            channelId: responsePost.payload.channelId,
+            messageId: responsePost.messageId,
+            mode: responsePost.payload.mode,
+        });
+
         res.json({
             success: true,
             post: toListResponsePost(responsePost),
@@ -929,6 +961,14 @@ scheduledRouter.delete('/sent/:id', async (req, res) => {
         }
 
         unregisterWatchpartyLifecycle(postId);
+
+        scheduledLogger.info('SENT_POST_DELETED', 'Usunieto opublikowany post z dashboardu.', {
+            actorUserId: req.session.user?.id,
+            postId,
+            channelId: post.payload.channelId,
+            messageId: post.messageId,
+            mode: post.payload.mode,
+        });
 
         res.json({ success: true });
     } catch (error) {
