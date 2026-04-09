@@ -1,8 +1,10 @@
 import type { Client, Guild, GuildMember } from 'discord.js';
 import { listExpiredActiveEconomyTimeouts, releaseEconomyTimeout } from '../economy/repository.js';
+import { createLogger } from '../utils/logger.js';
 
 const TIMEOUT_TICK_INTERVAL_MS = 30_000;
 const SYSTEM_TIMEOUT_RELEASE_USER_ID = 'system-timeout-worker';
+const timeoutLogger = createLogger('bot:timeout-runtime');
 
 function isUnknownGuildError(error: unknown): boolean {
     if (!(error instanceof Error)) {
@@ -20,6 +22,15 @@ function isUnknownMemberError(error: unknown): boolean {
 
     const maybeErrorCode = (error as { code?: number }).code;
     return maybeErrorCode === 10007;
+}
+
+function isUnknownRoleError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+
+    const maybeErrorCode = (error as { code?: number }).code;
+    return maybeErrorCode === 10011;
 }
 
 async function resolveGuild(client: Client, guildId: string): Promise<Guild | null> {
@@ -47,11 +58,11 @@ async function resolveMember(guild: Guild, userId: string): Promise<GuildMember 
             return null;
         }
 
-        console.warn('⚠️ Nie udalo sie pobrac czlonka do timeoutu:', {
+        timeoutLogger.warn('TIMEOUT_MEMBER_FETCH_FAILED', 'Nie udalo sie pobrac czlonka do timeoutu.', {
             guildId: guild.id,
-            userId,
-            error,
-        });
+            targetUserId: userId,
+            actorUserId: SYSTEM_TIMEOUT_RELEASE_USER_ID,
+        }, error);
         throw error;
     }
 }
@@ -66,27 +77,39 @@ async function releaseExpiredTimeout(client: Client, timeoutRecord: {
     try {
         guild = await resolveGuild(client, timeoutRecord.guildId);
     } catch (error) {
-        console.warn('⚠️ Nie udalo sie pobrac guild do timeoutu:', {
+        timeoutLogger.warn('TIMEOUT_GUILD_FETCH_FAILED', 'Nie udalo sie pobrac guild do timeoutu.', {
             guildId: timeoutRecord.guildId,
+            actorUserId: SYSTEM_TIMEOUT_RELEASE_USER_ID,
+            targetUserId: timeoutRecord.userId,
             timeoutId: timeoutRecord.id,
-            error,
-        });
+        }, error);
         return;
     }
 
     if (guild) {
         const member = await resolveMember(guild, timeoutRecord.userId);
-        if (member && member.roles.cache.has(timeoutRecord.muteRoleId)) {
+        if (member) {
             try {
                 await member.roles.remove(timeoutRecord.muteRoleId, 'Timeout wygasl automatycznie');
             } catch (error) {
-                console.error('❌ Nie udalo sie zdjac roli mute po wygasnieciu timeoutu:', {
+                if (isUnknownRoleError(error)) {
+                    timeoutLogger.warn('TIMEOUT_ROLE_MISSING_RELEASE_CONTINUE', 'Rola mute nie istnieje, kontynuuje zwolnienie timeoutu.', {
+                        guildId: timeoutRecord.guildId,
+                        actorUserId: SYSTEM_TIMEOUT_RELEASE_USER_ID,
+                        targetUserId: timeoutRecord.userId,
+                        timeoutId: timeoutRecord.id,
+                        muteRoleId: timeoutRecord.muteRoleId,
+                    }, error);
+                } else {
+                timeoutLogger.error('TIMEOUT_ROLE_REMOVE_FAILED', 'Nie udalo sie zdjac roli mute po wygasnieciu timeoutu.', {
                     guildId: timeoutRecord.guildId,
-                    userId: timeoutRecord.userId,
+                    actorUserId: SYSTEM_TIMEOUT_RELEASE_USER_ID,
+                    targetUserId: timeoutRecord.userId,
                     timeoutId: timeoutRecord.id,
-                    error,
-                });
+                    muteRoleId: timeoutRecord.muteRoleId,
+                }, error);
                 return;
+                }
             }
         }
     }
@@ -97,6 +120,14 @@ async function releaseExpiredTimeout(client: Client, timeoutRecord: {
         releasedAt: Date.now(),
         releasedByUserId: SYSTEM_TIMEOUT_RELEASE_USER_ID,
         releaseReason: 'Timeout wygasl automatycznie',
+    });
+
+    timeoutLogger.info('TIMEOUT_RELEASED', 'Timeout zostal zwolniony przez worker wygasania.', {
+        guildId: timeoutRecord.guildId,
+        actorUserId: SYSTEM_TIMEOUT_RELEASE_USER_ID,
+        targetUserId: timeoutRecord.userId,
+        timeoutId: timeoutRecord.id,
+        muteRoleId: timeoutRecord.muteRoleId,
     });
 }
 
@@ -112,12 +143,12 @@ async function processTimeoutExpiryTick(client: Client): Promise<void> {
                 muteRoleId: timeoutRecord.muteRoleId,
             });
         } catch (error) {
-            console.error('❌ Blad obslugi wygasajacego timeoutu:', {
+            timeoutLogger.error('TIMEOUT_EXPIRY_HANDLE_FAILED', 'Blad obslugi wygasajacego timeoutu.', {
                 timeoutId: timeoutRecord.id,
                 guildId: timeoutRecord.guildId,
-                userId: timeoutRecord.userId,
-                error,
-            });
+                targetUserId: timeoutRecord.userId,
+                actorUserId: SYSTEM_TIMEOUT_RELEASE_USER_ID,
+            }, error);
         }
     }
 }
@@ -133,7 +164,9 @@ export function startTimeoutExpiryTicker(client: Client): () => void {
         isTickInProgress = true;
         void processTimeoutExpiryTick(client)
             .catch((error) => {
-                console.error('❌ Blad ticka timeoutow:', error);
+                timeoutLogger.error('TIMEOUT_TICK_FAILED', 'Blad ticka timeoutow.', {
+                    actorUserId: SYSTEM_TIMEOUT_RELEASE_USER_ID,
+                }, error);
             })
             .finally(() => {
                 isTickInProgress = false;

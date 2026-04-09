@@ -49,12 +49,14 @@ import { handleEconomyResetButton } from './economy/admin-reset-buttons.js';
 import { handleEconomyLeaderboardButton } from './economy/leaderboard-buttons.js';
 import { handleEconomyMessageCreate, startEconomyVoiceXpTicker } from './economy/runtime.js';
 import { startTimeoutExpiryTicker } from './timeouts/runtime.js';
+import { createLogger } from './utils/logger.js';
 // Załaduj zmienne środowiskowe z .env
 config();
 
 const BOT_HEARTBEAT_INTERVAL_MS = 60_000;
 let stopEconomyVoiceTicker: (() => void) | null = null;
 let stopTimeoutExpiryTicker: (() => void) | null = null;
+const botLogger = createLogger('bot:runtime');
 
 function isBotDevLogsEnabled(): boolean {
     const forceDisabled = process.env.BOT_DEV_LOGS === '0';
@@ -112,20 +114,30 @@ client.commands.set(muteCommand.data.name, muteCommand);
 
 // Event: Bot jest gotowy
 client.on('clientReady', () => {
-    console.log('──────────────────────────────────────');
-    console.log(`✅  Bot zalogowany jako ${client.user?.tag}`);
-    console.log(`📡  Serwery: ${client.guilds.cache.size}`);
+    botLogger.info('BOT_READY', 'Bot zalogowany.', {
+        botTag: client.user?.tag ?? null,
+        guildCount: client.guilds.cache.size,
+    });
     if (isBotDevLogsEnabled()) {
-        console.log(`🧪  [DEV][BOT] WS=${formatWebSocketState(client.ws.status)} | ping=${client.ws.ping}ms`);
+        botLogger.debug('BOT_DEV_HEALTH', 'Stan websocket po uruchomieniu.', {
+            wsState: formatWebSocketState(client.ws.status),
+            pingMs: client.ws.ping,
+        });
 
         setInterval(() => {
             const uptimeSec = Math.floor(process.uptime());
-            console.log(`💓  [DEV][BOT] active=true | ws=${formatWebSocketState(client.ws.status)} | ping=${client.ws.ping}ms | guilds=${client.guilds.cache.size} | uptime=${uptimeSec}s`);
+            botLogger.debug('BOT_HEARTBEAT', 'Heartbeat procesu bota.', {
+                active: true,
+                wsState: formatWebSocketState(client.ws.status),
+                pingMs: client.ws.ping,
+                guildCount: client.guilds.cache.size,
+                uptimeSec,
+            });
         }, BOT_HEARTBEAT_INTERVAL_MS).unref();
     }
 
     void cleanupOrphanedTemporaryVoiceRecords(client).catch((error) => {
-        console.error('❌  [BOT] Nie udało się posprzątać osieroconych rekordów kanałów voice:', error);
+        botLogger.error('BOT_VOICE_ORPHAN_CLEANUP_FAILED', 'Nie udalo sie posprzatac osieroconych rekordow kanałów voice.', {}, error);
     });
 
     stopEconomyVoiceTicker?.();
@@ -134,17 +146,18 @@ client.on('clientReady', () => {
     stopTimeoutExpiryTicker?.();
     stopTimeoutExpiryTicker = startTimeoutExpiryTicker(client);
 
-    console.log('──────────────────────────────────────');
 });
 
 client.on('warn', (warning) => {
     if (isBotDevLogsEnabled()) {
-        console.warn(`⚠️  [DEV][BOT][WARN] ${warning}`);
+        botLogger.warn('BOT_WARN', 'Discord client warning.', {
+            warning,
+        });
     }
 });
 
 client.on('error', (error) => {
-    console.error('❌  [BOT] Client error:', error);
+    botLogger.error('BOT_CLIENT_ERROR', 'Discord client error.', {}, error);
 });
 
 async function safelyReplyInteractionError<T extends {
@@ -164,7 +177,9 @@ async function safelyReplyInteractionError<T extends {
     } catch (err) {
         const errorCode = (err as { code?: number })?.code;
         if (errorCode !== 10062) {
-            console.error('❌  Nie udało się wysłać odpowiedzi błędu interakcji:', err);
+                botLogger.error('BOT_INTERACTION_ERROR_REPLY_FAILED', 'Nie udalo sie wyslac odpowiedzi bledu interakcji.', {
+                    discordErrorCode: errorCode ?? null,
+                }, err);
         }
     }
 }
@@ -176,14 +191,19 @@ client.on('interactionCreate', async (interaction) => {
         const command = client.commands.get(interaction.commandName);
 
         if (!command) {
-            console.error(`❌  Nie znaleziono komendy: ${interaction.commandName}`);
+            botLogger.error('BOT_COMMAND_NOT_FOUND', 'Nie znaleziono komendy.', {
+                commandName: interaction.commandName,
+            });
             return;
         }
 
         try {
             await command.execute(interaction);
         } catch (error) {
-            console.error(`❌  Błąd w komendzie ${interaction.commandName}:`, error);
+            botLogger.error('BOT_COMMAND_EXECUTION_FAILED', 'Blad wykonania komendy.', {
+                commandName: interaction.commandName,
+                actorUserId: interaction.user.id,
+            }, error);
 
             const reply = { content: '❌ Wystąpił błąd podczas wykonywania komendy.', ephemeral: true as const };
             if (interaction.replied || interaction.deferred) {
@@ -204,7 +224,10 @@ client.on('interactionCreate', async (interaction) => {
                 await handleAdminCloseReasonModalSubmit(interaction);
             }
         } catch (error) {
-            console.error('❌  Błąd w modal submit:', error);
+            botLogger.error('BOT_MODAL_SUBMIT_FAILED', 'Blad obslugi modal submit.', {
+                customId: interaction.customId,
+                actorUserId: interaction.user.id,
+            }, error);
             await safelyReplyInteractionError(interaction, '❌ Wystąpił błąd podczas obsługi formularza.');
         }
         return;
@@ -242,7 +265,10 @@ client.on('interactionCreate', async (interaction) => {
                 await handleAdminCloseTicketCancel(interaction);
             }
         } catch (error) {
-            console.error('❌  Błąd w obsłudze przycisku:', error);
+            botLogger.error('BOT_BUTTON_HANDLER_FAILED', 'Blad obslugi przycisku.', {
+                customId: interaction.customId,
+                actorUserId: interaction.user.id,
+            }, error);
             await safelyReplyInteractionError(interaction, '❌ Wystąpił błąd podczas obsługi przycisku.');
         }
         return;
@@ -253,7 +279,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     try {
         await handleVoiceStateUpdate(oldState, newState);
     } catch (error) {
-        console.error('❌  Błąd obsługi tymczasowych kanałów voice:', error);
+        botLogger.error('BOT_VOICE_STATE_HANDLER_FAILED', 'Blad obslugi tymczasowych kanałow voice.', {
+            guildId: newState.guild.id,
+            actorUserId: newState.member?.id,
+        }, error);
     }
 });
 
@@ -261,7 +290,10 @@ client.on('messageCreate', async (message) => {
     try {
         await handleEconomyMessageCreate(message);
     } catch (error) {
-        console.error('❌  Blad naliczania XP za wiadomosc:', error);
+        botLogger.error('BOT_XP_MESSAGE_HANDLER_FAILED', 'Blad naliczania XP za wiadomosc.', {
+            guildId: message.guildId ?? undefined,
+            actorUserId: message.author.id,
+        }, error);
     }
 });
 
@@ -269,20 +301,22 @@ client.on('messageCreate', async (message) => {
 const discordToken = process.env.DISCORD_TOKEN?.trim();
 
 if (!discordToken) {
-    console.error('❌  Brakuje DISCORD_TOKEN. Bot nie może wystartować.');
+    botLogger.fatal('BOT_TOKEN_MISSING', 'Brakuje DISCORD_TOKEN. Bot nie moze wystartowac.');
     process.exit(1);
 }
 
 if (isBotDevLogsEnabled()) {
-    console.log('🧪  [DEV][BOT] Start inicjalizacji...');
-    console.log(`🧪  [DEV][BOT] DISCORD_TOKEN=${discordToken ? 'OK' : 'MISSING'} | commands=${client.commands.size}`);
+    botLogger.debug('BOT_INIT_START', 'Start inicjalizacji bota.', {
+        hasDiscordToken: Boolean(discordToken),
+        commandCount: client.commands.size,
+    });
 }
 
 void client.login(discordToken).then(() => {
     if (isBotDevLogsEnabled()) {
-        console.log('✅  [DEV][BOT] Login request accepted by Discord Gateway. Czekam na clientReady...');
+        botLogger.debug('BOT_LOGIN_ACCEPTED', 'Login request accepted by Discord Gateway.');
     }
 }).catch((error) => {
-    console.error('❌  [BOT] Nie udało się zalogować do Discorda:', error);
+    botLogger.fatal('BOT_LOGIN_FAILED', 'Nie udalo sie zalogowac do Discorda.', {}, error);
     process.exit(1);
 });

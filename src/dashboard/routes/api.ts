@@ -18,6 +18,7 @@ import {
     searchGuildMembers,
     listImages,
     sendImageToChannel,
+    sendDirectMessage,
     updateGuildScheduledEvent,
     DiscordRateLimitedError,
     type DiscordScheduledEvent,
@@ -69,6 +70,7 @@ import {
 } from '../../economy/repository.js';
 import type { EconomyLeaderboardPage, EconomyLeaderboardSortBy } from '../../economy/types.js';
 import { parseTimeoutDurationParts } from '../../timeouts/duration.js';
+import { createLogger } from '../../utils/logger.js';
 
 config();
 
@@ -79,6 +81,7 @@ const LEADERBOARD_PROFILE_FAILURE_CACHE_TTL_MS = 30 * 1000;
 const LEADERBOARD_PROFILE_CACHE_MAX_ENTRIES = 1500;
 const LEADERBOARD_PROFILE_CONCURRENCY_LIMIT = 5;
 const LEADERBOARD_PROFILE_LOOKUP_TIMEOUT_MS = 3_000;
+const apiLogger = createLogger('dashboard:api');
 
 interface LeaderboardProfileCacheEntry {
     displayName: string;
@@ -114,6 +117,24 @@ function parsePositiveIntQuery(value: unknown, fallback: number): number {
     }
 
     return parsed;
+}
+
+function formatDiscordTimestamp(valueMs: number): string {
+    const timestamp = Math.floor(valueMs / 1000);
+    return `<t:${timestamp}:F> (<t:${timestamp}:R>)`;
+}
+
+function resolveMuteNotificationGuildName(): string {
+    const fromEnv = normalizeTrimmedString(process.env.MUTE_DM_GUILD_NAME);
+    if (fromEnv.length > 0) {
+        return fromEnv;
+    }
+
+    return 'G2 Hussars';
+}
+
+function formatMuteDmMessage(guildName: string, expiresAtMs: number, adminUserId: string, reason: string): string {
+    return `Zostales zmutowany na serwerze **${guildName}** do **${formatDiscordTimestamp(expiresAtMs)}** przez **<@${adminUserId}>** z powodu: **${reason}**`;
 }
 
 interface EconomyCsvImportedUserRow {
@@ -901,6 +922,7 @@ apiRouter.post('/timeouts', requireCurrentDashboardRole, async (req, res) => {
 
     const targetUserId = parsedBody.data.targetUserId;
     const reason = parsedBody.data.reason;
+    const warnings: string[] = [];
 
     let duration;
     try {
@@ -932,12 +954,6 @@ apiRouter.post('/timeouts', requireCurrentDashboardRole, async (req, res) => {
 
         if (member.user?.bot) {
             res.status(400).json({ error: 'Nie mozna nalozyc timeoutu na boty.' });
-            return;
-        }
-
-        const protectedStaffRoleIds = resolveProtectedStaffRoleIds();
-        if (member.roles.some((roleId) => protectedStaffRoleIds.has(roleId))) {
-            res.status(403).json({ error: 'Nie mozna nalozyc timeoutu na czlonka staffu.' });
             return;
         }
 
@@ -974,21 +990,53 @@ apiRouter.post('/timeouts', requireCurrentDashboardRole, async (req, res) => {
 
         muteRoleAssigned = true;
 
+        const muteGuildName = resolveMuteNotificationGuildName();
+        try {
+            await sendDirectMessage(
+                targetUserId,
+                formatMuteDmMessage(muteGuildName, createdTimeout.expiresAt, adminUserId, reason),
+            );
+        } catch (error) {
+            warnings.push('Nie udalo sie wyslac DM do uzytkownika.');
+            apiLogger.warn('MUTE_DM_SEND_FAILED', 'Nie udalo sie wyslac DM o timeoutcie z dashboardu.', {
+                guildId,
+                actorUserId: adminUserId,
+                targetUserId,
+                timeoutId: createdTimeout.id,
+            }, error);
+        }
+
+        apiLogger.info('MUTE_APPLIED_DASHBOARD', 'Timeout zostal pomyslnie nalozony z dashboardu.', {
+            guildId,
+            actorUserId: adminUserId,
+            targetUserId,
+            timeoutId: createdTimeout.id,
+            muteRoleId,
+            expiresAt: createdTimeout.expiresAt,
+        });
+
         res.json({
             success: true,
             timeout: createdTimeout,
             duration: duration.normalized,
+            warnings,
         });
     } catch (error) {
         if (createdTimeoutId !== null && !muteRoleAssigned) {
+            const rollbackTimeoutId = createdTimeoutId;
             await releaseEconomyTimeout({
                 guildId,
-                timeoutId: createdTimeoutId,
+                timeoutId: rollbackTimeoutId,
                 releasedAt: Date.now(),
                 releasedByUserId: adminUserId,
                 releaseReason: 'Rollback timeoutu po bledzie API Discorda',
             }).catch((releaseError) => {
-                console.error('Failed to rollback timeout after API error:', releaseError);
+                apiLogger.error('MUTE_TIMEOUT_ROLLBACK_FAILED', 'Nie udalo sie wycofac timeoutu po bledzie API Discorda.', {
+                    guildId,
+                    actorUserId: adminUserId,
+                    targetUserId,
+                    timeoutId: rollbackTimeoutId,
+                }, releaseError);
             });
         }
 
@@ -998,7 +1046,11 @@ apiRouter.post('/timeouts', requireCurrentDashboardRole, async (req, res) => {
             return;
         }
 
-        console.error('Failed to create timeout from dashboard:', error);
+        apiLogger.error('MUTE_APPLY_FAILED_DASHBOARD', 'Nie udalo sie nalozyc timeoutu z dashboardu.', {
+            guildId,
+            actorUserId: adminUserId,
+            targetUserId,
+        }, error);
         res.status(500).json({ error: 'Nie udalo sie nalozyc timeoutu.' });
     }
 });

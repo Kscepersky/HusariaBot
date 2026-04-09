@@ -719,6 +719,41 @@ export async function sendMessageToChannel(channelId: string, payload: DiscordMe
     return msg.id;
 }
 
+export async function sendDirectMessage(userId: string, content: string): Promise<void> {
+    if (!isValidDiscordId(userId)) {
+        throw new Error('Invalid user ID format.');
+    }
+
+    const openDmChannelResponse = await fetch(`${DISCORD_API}/users/@me/channels`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ recipient_id: userId }),
+    });
+
+    if (!openDmChannelResponse.ok) {
+        const errPayload = await openDmChannelResponse.json().catch(() => ({}));
+        throw new Error(`Failed to open DM channel: ${openDmChannelResponse.status} — ${JSON.stringify(errPayload)}`);
+    }
+
+    const dmChannel = await openDmChannelResponse.json() as { id: string };
+    const sendMessageResponse = await fetch(`${DISCORD_API}/channels/${dmChannel.id}/messages`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content }),
+    });
+
+    if (!sendMessageResponse.ok) {
+        const errPayload = await sendMessageResponse.json().catch(() => ({}));
+        throw new Error(`Failed to send DM: ${sendMessageResponse.status} — ${JSON.stringify(errPayload)}`);
+    }
+}
+
 export async function createGuildVoiceChannel(
     guildId: string,
     input: CreateGuildVoiceChannelInput,

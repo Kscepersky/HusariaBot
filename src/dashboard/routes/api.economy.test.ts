@@ -67,6 +67,7 @@ vi.mock('../discord-api.js', () => ({
     searchGuildMembers: vi.fn(),
     listImages: vi.fn(),
     sendImageToChannel: vi.fn(),
+    sendDirectMessage: vi.fn(),
     updateGuildScheduledEvent: vi.fn(),
     DiscordRateLimitedError: class DiscordRateLimitedError extends Error {
         retryAfterSeconds: number;
@@ -127,6 +128,7 @@ import {
     hasDevRole,
     hasRequiredRole,
     removeGuildMemberRole,
+    sendDirectMessage,
     updateGuildMemberRoles,
 } from '../discord-api.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
@@ -1543,6 +1545,7 @@ describe('api economy settings routes', () => {
         });
         vi.mocked(createEconomyTimeout).mockResolvedValue(createdTimeout as any);
         vi.mocked(addGuildMemberRole).mockResolvedValue('updated' as any);
+        vi.mocked(sendDirectMessage).mockResolvedValue(undefined);
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/timeouts`, {
@@ -1562,11 +1565,17 @@ describe('api economy settings routes', () => {
 
             expect(response.status).toBe(200);
             expect(body.success).toBe(true);
+            expect(body.warnings).toEqual([]);
             expect(vi.mocked(createEconomyTimeout)).toHaveBeenCalledTimes(1);
             expect(vi.mocked(addGuildMemberRole)).toHaveBeenCalledWith(
                 '123456789012345678',
                 '999999999999999999',
                 '910000000000000005',
+            );
+            expect(vi.mocked(sendDirectMessage)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(sendDirectMessage)).toHaveBeenCalledWith(
+                '999999999999999999',
+                expect.stringContaining('Zostales zmutowany na serwerze'),
             );
         });
     });
@@ -1607,7 +1616,23 @@ describe('api economy settings routes', () => {
         });
     });
 
-    it('odrzuca timeout dla czlonka staffu', async () => {
+    it('naklada timeout dla czlonka staffu przez dashboard', async () => {
+        const now = Date.now();
+        const createdTimeout = {
+            id: 58,
+            guildId: '123456789012345678',
+            userId: '999999999999999999',
+            reason: 'Spam',
+            muteRoleId: '910000000000000005',
+            createdByUserId: 'user-1',
+            createdAt: now,
+            expiresAt: now + (60 * 60 * 1000),
+            isActive: true,
+            releasedAt: null,
+            releasedByUserId: null,
+            releaseReason: null,
+        };
+
         vi.mocked(getActiveEconomyTimeoutForUser).mockResolvedValue(null as any);
         vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
             if (userId === 'user-1') {
@@ -1620,6 +1645,9 @@ describe('api economy settings routes', () => {
 
             return null;
         });
+        vi.mocked(createEconomyTimeout).mockResolvedValue(createdTimeout as any);
+        vi.mocked(addGuildMemberRole).mockResolvedValue('updated' as any);
+        vi.mocked(sendDirectMessage).mockResolvedValue(undefined);
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/timeouts`, {
@@ -1637,9 +1665,94 @@ describe('api economy settings routes', () => {
 
             const body = await parseJsonResponse(response);
 
-            expect(response.status).toBe(403);
-            expect(body.error).toBe('Nie mozna nalozyc timeoutu na czlonka staffu.');
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(vi.mocked(createEconomyTimeout)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(addGuildMemberRole)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(sendDirectMessage)).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    it('odrzuca timeout przez dashboard gdy reason to sam whitespace', async () => {
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/timeouts`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '999999999999999999',
+                    durationAmount: 1,
+                    durationUnit: 'h',
+                    reason: '   ',
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(typeof body.error).toBe('string');
             expect(vi.mocked(createEconomyTimeout)).not.toHaveBeenCalled();
+            expect(vi.mocked(addGuildMemberRole)).not.toHaveBeenCalled();
+            expect(vi.mocked(sendDirectMessage)).not.toHaveBeenCalled();
+        });
+    });
+
+    it('zwraca sukces i ostrzezenie gdy DM o timeoutcie z dashboardu nie zostanie dostarczony', async () => {
+        const now = Date.now();
+        const createdTimeout = {
+            id: 59,
+            guildId: '123456789012345678',
+            userId: '999999999999999999',
+            reason: 'Spam',
+            muteRoleId: '910000000000000005',
+            createdByUserId: 'user-1',
+            createdAt: now,
+            expiresAt: now + (60 * 60 * 1000),
+            isActive: true,
+            releasedAt: null,
+            releasedByUserId: null,
+            releaseReason: null,
+        };
+
+        vi.mocked(getActiveEconomyTimeoutForUser).mockResolvedValue(null as any);
+        vi.mocked(getGuildMember).mockImplementation(async (userId: string) => {
+            if (userId === 'user-1') {
+                return { roles: ['admin-role'] } as any;
+            }
+
+            if (userId === '999999999999999999') {
+                return { roles: ['222222222222222222'] } as any;
+            }
+
+            return null;
+        });
+        vi.mocked(createEconomyTimeout).mockResolvedValue(createdTimeout as any);
+        vi.mocked(addGuildMemberRole).mockResolvedValue('updated' as any);
+        vi.mocked(sendDirectMessage).mockRejectedValue(new Error('dm blocked'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/timeouts`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    targetUserId: '999999999999999999',
+                    durationAmount: 1,
+                    durationUnit: 'h',
+                    reason: 'Spam',
+                }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(body.warnings).toEqual(['Nie udalo sie wyslac DM do uzytkownika.']);
+            expect(vi.mocked(createEconomyTimeout)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(addGuildMemberRole)).toHaveBeenCalledTimes(1);
+            expect(vi.mocked(sendDirectMessage)).toHaveBeenCalledTimes(1);
         });
     });
 

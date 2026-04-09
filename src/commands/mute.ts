@@ -2,6 +2,7 @@ import {
     ChatInputCommandInteraction,
     EmbedBuilder,
     MessageFlags,
+    type User,
     SlashCommandBuilder,
 } from 'discord.js';
 import {
@@ -13,8 +14,10 @@ import { resolveEconomyGuildId } from '../economy/discord.js';
 import { parseTimeoutDurationParts, type TimeoutDurationUnit } from '../timeouts/duration.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
 import { ensureSupportRole } from '../utils/role-access.js';
+import { createLogger } from '../utils/logger.js';
 
 const MAX_REASON_LENGTH = 500;
+const muteLogger = createLogger('bot:mute-command');
 
 const TIMEOUT_DURATION_CHOICES: ReadonlyArray<{ name: string; value: TimeoutDurationUnit }> = [
     { name: 'Sekundy', value: 's' },
@@ -24,21 +27,6 @@ const TIMEOUT_DURATION_CHOICES: ReadonlyArray<{ name: string; value: TimeoutDura
     { name: 'Miesiace', value: 'mo' },
     { name: 'Lata', value: 'y' },
 ];
-
-function resolveProtectedStaffRoleIds(): Set<string> {
-    const roleIds = [
-        process.env.ADMIN_ROLE_ID,
-        process.env.MODERATOR_ROLE_ID,
-        process.env.COMMUNITY_MANAGER_ROLE_ID,
-        process.env.DEV_ROLE_ID,
-    ];
-
-    return new Set(
-        roleIds
-            .map((roleId) => String(roleId ?? '').trim())
-            .filter((roleId) => /^\d{17,20}$/.test(roleId)),
-    );
-}
 
 function resolveServerMuteRoleId(): string | null {
     const roleId = process.env.SERVER_MUTE_ROLE_ID?.trim() ?? '';
@@ -52,7 +40,7 @@ function resolveServerMuteRoleId(): string | null {
 function normalizeReason(rawValue: string): string {
     const normalized = rawValue.trim();
     if (normalized.length === 0) {
-        return 'Brak powodu';
+        throw new Error('Powod timeoutu jest wymagany.');
     }
 
     return normalized.slice(0, MAX_REASON_LENGTH);
@@ -60,6 +48,16 @@ function normalizeReason(rawValue: string): string {
 
 function formatDiscordTimestamp(valueMs: number): string {
     return `<t:${Math.floor(valueMs / 1000)}:F> (<t:${Math.floor(valueMs / 1000)}:R>)`;
+}
+
+function formatMuteDmMessage(guildName: string, expiresAtMs: number, adminUserId: string, reason: string): string {
+    return `Zostales zmutowany na serwerze **${guildName}** do **${formatDiscordTimestamp(expiresAtMs)}** przez **<@${adminUserId}>** z powodu: **${reason}**`;
+}
+
+async function sendMuteDm(user: User, guildName: string, expiresAtMs: number, adminUserId: string, reason: string): Promise<void> {
+    await user.send({
+        content: formatMuteDmMessage(guildName, expiresAtMs, adminUserId, reason),
+    });
 }
 
 export const muteCommand = {
@@ -113,7 +111,18 @@ export const muteCommand = {
         const targetUser = interaction.options.getUser('uzytkownik', true);
         const durationAmount = interaction.options.getInteger('ilosc', true);
         const durationUnit = interaction.options.getString('jednostka', true);
-        const reason = normalizeReason(interaction.options.getString('powod', true));
+        let reason: string;
+
+        try {
+            reason = normalizeReason(interaction.options.getString('powod', true));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Powod timeoutu jest wymagany.';
+            await interaction.reply({
+                content: `❌ ${message}`,
+                flags: MessageFlags.Ephemeral,
+            });
+            return;
+        }
 
         if (targetUser.bot) {
             await interaction.reply({
@@ -161,15 +170,6 @@ export const muteCommand = {
             return;
         }
 
-        const protectedStaffRoleIds = resolveProtectedStaffRoleIds();
-        if ([...protectedStaffRoleIds].some((roleId) => member.roles.cache.has(roleId))) {
-            await interaction.editReply({
-                content: '❌ Nie mozna nalozyc timeoutu na czlonka staffu.',
-                embeds: [],
-            });
-            return;
-        }
-
         if (member.roles.cache.has(muteRoleId)) {
             await interaction.editReply({
                 content: '❌ Uzytkownik ma juz role Server Mute.',
@@ -188,7 +188,11 @@ export const muteCommand = {
                 return;
             }
         } catch (error) {
-            console.error('❌ Nie udalo sie sprawdzic aktywnego timeoutu:', error);
+            muteLogger.error('TIMEOUT_ACTIVE_LOOKUP_FAILED', 'Nie udalo sie sprawdzic aktywnego timeoutu.', {
+                guildId,
+                actorUserId: interaction.user.id,
+                targetUserId: targetUser.id,
+            }, error);
             await interaction.editReply({
                 content: '❌ Wystapil blad podczas sprawdzania aktywnego timeoutu.',
                 embeds: [],
@@ -222,7 +226,13 @@ export const muteCommand = {
         try {
             await member.roles.add(muteRoleId, `Timeout: ${reason}`);
         } catch (error) {
-            console.error('❌ Nie udalo sie nadac roli Server Mute:', error);
+            muteLogger.error('MUTE_ROLE_ASSIGN_FAILED', 'Nie udalo sie nadac roli Server Mute.', {
+                guildId,
+                actorUserId: interaction.user.id,
+                targetUserId: targetUser.id,
+                timeoutId: timeoutRecord.id,
+                muteRoleId,
+            }, error);
             await releaseEconomyTimeout({
                 guildId,
                 timeoutId: timeoutRecord.id,
@@ -230,7 +240,12 @@ export const muteCommand = {
                 releasedByUserId: interaction.user.id,
                 releaseReason: 'Nie udalo sie nadac roli Server Mute',
             }).catch((releaseError) => {
-                console.error('❌ Nie udalo sie wycofac timeoutu po bledzie nadawania roli:', releaseError);
+                muteLogger.error('MUTE_TIMEOUT_ROLLBACK_FAILED', 'Nie udalo sie wycofac timeoutu po bledzie nadawania roli.', {
+                    guildId,
+                    actorUserId: interaction.user.id,
+                    targetUserId: targetUser.id,
+                    timeoutId: timeoutRecord.id,
+                }, releaseError);
             });
 
             await interaction.editReply({
@@ -239,6 +254,26 @@ export const muteCommand = {
             });
             return;
         }
+
+        try {
+            await sendMuteDm(targetUser, interaction.guild.name, expiresAt, interaction.user.id, reason);
+        } catch (error) {
+            muteLogger.warn('MUTE_DM_SEND_FAILED', 'Nie udalo sie wyslac DM o timeoutcie.', {
+                guildId,
+                actorUserId: interaction.user.id,
+                targetUserId: targetUser.id,
+                timeoutId: timeoutRecord.id,
+            }, error);
+        }
+
+        muteLogger.info('MUTE_APPLIED', 'Timeout zostal pomyslnie nalozony.', {
+            guildId,
+            actorUserId: interaction.user.id,
+            targetUserId: targetUser.id,
+            timeoutId: timeoutRecord.id,
+            muteRoleId,
+            expiresAt,
+        });
 
         const embed = new EmbedBuilder()
             .setColor(HusariaColors.RED)

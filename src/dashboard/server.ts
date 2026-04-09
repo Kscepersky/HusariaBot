@@ -14,6 +14,7 @@ import { SQLiteSessionStore } from './session/sqlite-store.js';
 import { initializeDashboardScheduler } from './scheduler/service.js';
 import { probePandaScoreApiConnection } from './g2-matches/pandascore-client.js';
 import { probeDiscordBotApi } from './discord-api.js';
+import { createLogger } from '../utils/logger.js';
 
 config();
 
@@ -39,6 +40,7 @@ const REQUIRED_ENV = [
 
 const DASHBOARD_BODY_LIMIT = '12mb';
 const DEFAULT_SESSION_TTL_HOURS = 24;
+const dashboardLogger = createLogger('dashboard:server');
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
     const parsed = Number.parseInt(value ?? '', 10);
@@ -78,7 +80,10 @@ async function probeDashboardApi(port: number): Promise<number> {
 async function runDashboardStartupDiagnostics(port: number): Promise<void> {
     const guildId = process.env.GUILD_ID ?? '';
 
-    console.log('🔎  [DEV][DASHBOARD] Start diagnostyki usług...');
+    dashboardLogger.debug('DASHBOARD_DIAGNOSTICS_START', 'Start diagnostyki uslug dashboardu.', {
+        guildId,
+        port,
+    });
 
     const [discordResult, pandaResult, apiResult] = await Promise.allSettled([
         probeDiscordBotApi(guildId),
@@ -89,24 +94,34 @@ async function runDashboardStartupDiagnostics(port: number): Promise<void> {
     if (discordResult.status === 'fulfilled') {
         const discordProbe = discordResult.value;
         const guildStatus = discordProbe.inGuild ? 'OK' : 'BOT POZA GUILD';
-        console.log(`✅  [DEV][DASHBOARD] Discord Bot API: OK | bot=${discordProbe.username} (${discordProbe.botId}) | guild=${guildStatus}`);
+        dashboardLogger.debug('DASHBOARD_DIAGNOSTICS_DISCORD_OK', 'Discord Bot API probe OK.', {
+            botId: discordProbe.botId,
+            botUsername: discordProbe.username,
+            guildStatus,
+        });
     } else {
-        console.warn(`⚠️  [DEV][DASHBOARD] Discord Bot API: FAIL | ${String(discordResult.reason)}`);
+        dashboardLogger.warn('DASHBOARD_DIAGNOSTICS_DISCORD_FAIL', 'Discord Bot API probe failed.', {
+            guildId,
+        }, discordResult.reason);
     }
 
     if (pandaResult.status === 'fulfilled') {
-        console.log(`✅  [DEV][DASHBOARD] PandaScore API: OK | sampleCount=${pandaResult.value.sampleCount}`);
+        dashboardLogger.debug('DASHBOARD_DIAGNOSTICS_PANDASCORE_OK', 'PandaScore API probe OK.', {
+            sampleCount: pandaResult.value.sampleCount,
+        });
     } else {
-        console.warn(`⚠️  [DEV][DASHBOARD] PandaScore API: FAIL | ${String(pandaResult.reason)}`);
+        dashboardLogger.warn('DASHBOARD_DIAGNOSTICS_PANDASCORE_FAIL', 'PandaScore API probe failed.', {}, pandaResult.reason);
     }
 
     if (apiResult.status === 'fulfilled') {
         const status = apiResult.value;
         const healthy = status === 401 || status === 200;
-        const symbol = healthy ? '✅' : '⚠️';
-        console.log(`${symbol}  [DEV][DASHBOARD] Local API /api/me status=${status}${healthy ? ' (expected before login)' : ''}`);
+        dashboardLogger.debug('DASHBOARD_DIAGNOSTICS_LOCAL_API', 'Local API probe completed.', {
+            status,
+            healthy,
+        });
     } else {
-        console.warn(`⚠️  [DEV][DASHBOARD] Local API probe failed | ${String(apiResult.reason)}`);
+        dashboardLogger.warn('DASHBOARD_DIAGNOSTICS_LOCAL_API_FAIL', 'Local API probe failed.', {}, apiResult.reason);
     }
 }
 
@@ -203,20 +218,26 @@ export function startDashboard(): void {
     const app  = createDashboardApp();
 
     void initializeDashboardScheduler().catch((error) => {
-        console.error('❌  Nie udało się uruchomić schedulera dashboardu:', error);
+        dashboardLogger.error('DASHBOARD_SCHEDULER_START_FAILED', 'Nie udalo sie uruchomic schedulera dashboardu.', {}, error);
     });
 
     const server = app.listen(port, () => {
-        console.log('──────────────────────────────────────');
-        console.log(`🌐  Dashboard dostępny na http://localhost:${port}`);
+        dashboardLogger.info('DASHBOARD_STARTED', 'Dashboard uruchomiony.', {
+            port,
+            url: `http://localhost:${port}`,
+        });
         if (isDevLogsEnabled()) {
-            console.log(`🧪  [DEV][DASHBOARD] NODE_ENV=${process.env.NODE_ENV ?? 'undefined'} | DEV_LOGS=${process.env.DEV_LOGS ?? 'auto'}`);
+            dashboardLogger.debug('DASHBOARD_DEV_FLAGS', 'Tryb developerski dashboardu.', {
+                nodeEnv: process.env.NODE_ENV ?? 'undefined',
+                devLogs: process.env.DEV_LOGS ?? 'auto',
+            });
             void runDashboardStartupDiagnostics(port);
         }
-        console.log('──────────────────────────────────────');
     });
 
     server.on('error', (error) => {
-        console.error('❌  Błąd uruchamiania serwera dashboardu:', error);
+        dashboardLogger.fatal('DASHBOARD_SERVER_ERROR', 'Blad uruchamiania serwera dashboardu.', {
+            port,
+        }, error);
     });
 }
