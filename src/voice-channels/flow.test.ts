@@ -40,6 +40,7 @@ describe('handleVoiceStateUpdate', () => {
         getTemporaryVoiceConfigMock.mockReturnValue({
             triggerChannelId: 'trigger-channel',
             categoryId: 'voice-category',
+            managerRoleIds: ['admin-role', 'moderator-role', 'community-manager-role', 'dev-role'],
         });
     });
 

@@ -19,6 +19,7 @@ vi.mock('./constants.js', () => ({
     getTemporaryVoiceConfig: vi.fn(() => ({
         triggerChannelId: 'trigger-channel',
         categoryId: 'voice-category',
+        managerRoleIds: ['admin-role', 'moderator-role', 'community-manager-role', 'dev-role'],
     })),
 }));
 
@@ -112,8 +113,29 @@ describe('temporary voice service', () => {
             permissionOverwrites: { edit: ReturnType<typeof vi.fn> };
         };
         expect(createPayload.userLimit).toBeUndefined();
+        expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledTimes(5);
         expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
             'user-1',
+            { ManageChannels: true },
+            { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
+        );
+        expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
+            'admin-role',
+            { ManageChannels: true },
+            { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
+        );
+        expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
+            'moderator-role',
+            { ManageChannels: true },
+            { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
+        );
+        expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
+            'community-manager-role',
+            { ManageChannels: true },
+            { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
+        );
+        expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
+            'dev-role',
             { ManageChannels: true },
             { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
         );
@@ -148,6 +170,59 @@ describe('temporary voice service', () => {
 
         expect(deleteCreatedChannelMock).toHaveBeenCalledWith('Nie udalo sie nadac uprawnien wlascicielowi kanalu');
         expect(upsertTemporaryVoiceChannelRecordMock).not.toHaveBeenCalled();
+    });
+
+    it('nie usuwa kanalu gdy nadanie uprawnien staffowi sie nie powiedzie', async () => {
+        const deleteCreatedChannelMock = vi.fn(async () => undefined);
+        const setChannelMock = vi.fn(async () => undefined);
+        const editMock = vi.fn(async (targetId: string) => {
+            if (targetId === 'dev-role') {
+                throw new Error('Brak uprawnien dla roli dev');
+            }
+        });
+
+        const newState = createVoiceState({
+            guild: {
+                id: 'guild-1',
+                channels: {
+                    cache: new Map(),
+                    fetch: vi.fn(async () => null),
+                    create: vi.fn(async () => ({
+                        id: 'created-channel',
+                        type: ChannelType.GuildVoice,
+                        members: new Map(),
+                        permissionOverwrites: {
+                            edit: editMock,
+                        },
+                        delete: deleteCreatedChannelMock,
+                    })),
+                },
+            },
+            member: {
+                id: 'user-1',
+                displayName: 'Test User',
+                user: {
+                    bot: false,
+                    username: 'Test User',
+                    tag: 'TestUser#0001',
+                },
+                voice: {
+                    channelId: 'trigger-channel',
+                    setChannel: setChannelMock,
+                },
+            },
+        });
+
+        await expect(ensureTemporaryVoiceChannelForMember(newState)).resolves.toBeUndefined();
+
+        expect(editMock).toHaveBeenCalledWith(
+            'user-1',
+            { ManageChannels: true },
+            { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
+        );
+        expect(deleteCreatedChannelMock).not.toHaveBeenCalled();
+        expect(upsertTemporaryVoiceChannelRecordMock).toHaveBeenCalledTimes(1);
+        expect(setChannelMock).toHaveBeenCalledTimes(1);
     });
 
     it('nie tworzy kanalu gdy użytkownik opuści trigger przed wykonaniem locka', async () => {

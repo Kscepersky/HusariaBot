@@ -112,6 +112,10 @@ function clearPendingEmptyChannelDeletion(channelId: string): void {
     pendingEmptyChannelDeletionTimers.delete(channelId);
 }
 
+function getManageChannelOverwriteTargets(ownerId: string, managerRoleIds: readonly string[]): string[] {
+    return [...new Set([ownerId, ...managerRoleIds])];
+}
+
 async function deleteTemporaryVoiceChannelIfStillEmpty(guild: Guild, channelId: string): Promise<void> {
     const record = await getTemporaryVoiceChannelRecord(channelId);
     if (!record) {
@@ -185,16 +189,39 @@ export async function ensureTemporaryVoiceChannelForMember(state: VoiceState): P
             reason: `Tymczasowy kanal voice dla ${member.user.tag}`,
         });
 
+        const overwriteTargets = getManageChannelOverwriteTargets(member.id, config.managerRoleIds);
+        const manageChannelReason = `Nadanie zarzadzania kanalem dla ${member.user.tag}`;
+        const managerRoleIds = overwriteTargets.filter((targetId) => targetId !== member.id);
+
         try {
             await createdChannel.permissionOverwrites.edit(
                 member.id,
                 { ManageChannels: true },
-                { reason: `Nadanie zarzadzania kanalem dla ${member.user.tag}` },
+                { reason: manageChannelReason },
             );
         } catch (error: unknown) {
             await createdChannel.delete('Nie udalo sie nadac uprawnien wlascicielowi kanalu').catch(() => undefined);
             throw error;
         }
+
+        const managerOverwriteResults = await Promise.allSettled(managerRoleIds.map((roleId) => createdChannel.permissionOverwrites.edit(
+            roleId,
+            { ManageChannels: true },
+            { reason: manageChannelReason },
+        )));
+
+        managerOverwriteResults.forEach((result, index) => {
+            if (result.status === 'fulfilled') {
+                return;
+            }
+
+            const roleId = managerRoleIds[index] ?? 'unknown-role';
+            console.warn('⚠️  [BOT] Nie udalo sie nadac staff overwrite dla tymczasowego kanalu voice.', {
+                roleId,
+                channelId: createdChannel.id,
+                guildId: guild.id,
+            }, result.reason);
+        });
 
         const createdRecord: TemporaryVoiceChannelRecord = {
             channelId: createdChannel.id,
