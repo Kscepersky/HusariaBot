@@ -5,5 +5,5 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
         next();
         return;
     }
-    res.redirect('/auth/discord');
+    res.redirect('/auth/login');
 }

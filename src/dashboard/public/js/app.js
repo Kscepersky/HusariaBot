@@ -181,7 +181,7 @@ async function loadUserInfo() {
   try {
     const resp = await fetch('/api/me')
     if (!resp.ok) {
-      window.location.href = '/auth/discord'
+      window.location.href = '/auth/login'
       return
     }
 
@@ -205,7 +205,7 @@ async function loadUserInfo() {
       await logoutDashboard()
     })
   } catch {
-    window.location.href = '/auth/discord'
+    window.location.href = '/auth/login'
   }
 }
 
@@ -240,7 +240,7 @@ async function ensureCsrfToken(forceRefresh = false) {
     csrfTokenPromise = (async () => {
       const response = await fetch('/api/csrf-token')
       if (response.status === 401) {
-        window.location.href = '/auth/discord'
+        window.location.href = '/auth/login'
         throw new Error('Sesja wygasła. Zaloguj się ponownie.')
       }
 
@@ -277,7 +277,7 @@ async function fetchWithCsrf(url, options = {}) {
   })
 
   if (firstResponse.status === 401) {
-    window.location.href = '/auth/discord'
+    window.location.href = '/auth/login'
     return firstResponse
   }
 

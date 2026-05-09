@@ -1,7 +1,9 @@
 import rateLimit from 'express-rate-limit';
 import type { NextFunction, Request, Response } from 'express';
+import { createLogger } from '../../utils/logger.js';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const rateLimitLogger = createLogger('dashboard:rate-limit');
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
     const parsed = Number.parseInt(value ?? '', 10);
@@ -26,7 +28,15 @@ const globalLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     skip: () => isRateLimitDisabled(),
-    handler: (_req, res) => {
+    handler: (req, res) => {
+        rateLimitLogger.warn('DASHBOARD_RATE_LIMIT_HIT', 'Rate limit global hit.', {
+            requestId: req.requestId,
+            limiter: 'global',
+            ip: req.ip,
+            method: req.method,
+            path: req.path,
+            userAgent: req.get('user-agent') ?? '',
+        });
         res.status(429).json({ error: 'Zbyt wiele zapytan. Sprobuj ponownie pozniej.' });
     },
 });
@@ -37,7 +47,15 @@ const authCallbackLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     skip: () => isRateLimitDisabled(),
-    handler: (_req, res) => {
+    handler: (req, res) => {
+        rateLimitLogger.warn('DASHBOARD_RATE_LIMIT_HIT', 'Rate limit auth callback hit.', {
+            requestId: req.requestId,
+            limiter: 'auth-callback',
+            ip: req.ip,
+            method: req.method,
+            path: req.path,
+            userAgent: req.get('user-agent') ?? '',
+        });
         res.redirect('/auth/error?msg=too_many_attempts');
     },
 });
@@ -48,7 +66,15 @@ const mutationLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     skip: () => isRateLimitDisabled(),
-    handler: (_req, res) => {
+    handler: (req, res) => {
+        rateLimitLogger.warn('DASHBOARD_RATE_LIMIT_HIT', 'Rate limit mutation hit.', {
+            requestId: req.requestId,
+            limiter: 'mutation',
+            ip: req.ip,
+            method: req.method,
+            path: req.path,
+            userAgent: req.get('user-agent') ?? '',
+        });
         res.status(429).json({ error: 'Zbyt wiele operacji modyfikujacych. Poczekaj chwile.' });
     },
 });

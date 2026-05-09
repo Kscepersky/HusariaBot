@@ -12,3 +12,9 @@ declare module 'express-session' {
         csrfToken?: string;
     }
 }
+
+declare module 'express-serve-static-core' {
+    interface Request {
+        requestId?: string;
+    }
+}

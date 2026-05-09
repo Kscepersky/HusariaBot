@@ -139,12 +139,13 @@ async function notifyTicketOwner(client: ButtonInteraction['client'], ownerId: s
     }
 }
 
-function toTranscriptMessageRecord(message: Message<true>): TicketTranscriptMessageRecord {
+function toTranscriptMessageRecord(message: Message): TicketTranscriptMessageRecord {
+    const author = message.author ?? message.member?.user;
     return {
         id: message.id,
-        authorId: message.author.id,
-        authorTag: message.author.tag,
-        content: message.cleanContent ?? '',
+        authorId: author?.id ?? 'unknown',
+        authorTag: author?.tag ?? 'unknown',
+        content: message.cleanContent || message.content || '',
         createdAt: message.createdTimestamp,
         attachments: [...message.attachments.values()].map((attachment) => attachment.url),
     };
@@ -161,7 +162,6 @@ async function collectTicketTranscriptMessages(channel: TextChannel): Promise<Ti
         }
 
         const orderedBatch = [...batch.values()]
-            .filter((message): message is Message<true> => message.inGuild())
             .sort((left, right) => left.createdTimestamp - right.createdTimestamp)
             .map(toTranscriptMessageRecord);
 
@@ -194,6 +194,14 @@ async function archiveTicketClosure(params: {
 }): Promise<void> {
     try {
         const transcriptMessages = await collectTicketTranscriptMessages(params.channel);
+        if (transcriptMessages.length === 0) {
+            ticketLogger.warn('TICKET_TRANSCRIPT_EMPTY', 'Transcript saved without messages.', {
+                guildId: params.channel.guild.id,
+                channelId: params.channel.id,
+                closeType: params.closeType,
+                closedByUserId: params.closedByUserId,
+            });
+        }
         await persistTicketClosureRecord({
             guildId: params.channel.guild.id,
             channelId: params.channel.id,

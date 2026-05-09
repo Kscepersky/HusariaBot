@@ -1,6 +1,7 @@
 import express from 'express';
 import session from 'express-session';
 import { basename, dirname, isAbsolute, join } from 'path';
+import { randomUUID } from 'node:crypto';
 import { config } from 'dotenv';
 import './types.js';
 import { authRouter }  from './routes/auth.js';
@@ -136,11 +137,10 @@ export function createDashboardApp() {
         filePath: sessionDbPath,
         defaultTtlMs: sessionMaxAgeMs,
     });
+    const slowRequestThresholdMs = parsePositiveInt(process.env.DASHBOARD_SLOW_REQUEST_MS, 1200);
 
     const app = express();
-    if (isEnabled(process.env.DASHBOARD_TRUST_PROXY)) {
-        app.set('trust proxy', 1);
-    }
+    app.set('trust proxy', 1);
 
     // Security headers
     app.use((_req, res, next) => {
@@ -151,6 +151,44 @@ export function createDashboardApp() {
             'Content-Security-Policy',
             "default-src 'self'; img-src 'self' https://cdn.discordapp.com data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
         );
+        next();
+    });
+
+    app.use((req, res, next) => {
+        const requestId = randomUUID();
+        req.requestId = requestId;
+        res.setHeader('X-Request-Id', requestId);
+
+        const startedAt = Date.now();
+
+        res.on('finish', () => {
+            const durationMs = Date.now() - startedAt;
+            const path = req.path;
+            if (!path.startsWith('/api') && !path.startsWith('/auth')) {
+                return;
+            }
+
+            const context = {
+                requestId,
+                method: req.method,
+                path,
+                status: res.statusCode,
+                durationMs,
+                ip: req.ip,
+                userAgent: req.get('user-agent') ?? '',
+                referer: req.get('referer') ?? '',
+            };
+
+            if (res.statusCode >= 500) {
+                dashboardLogger.error('DASHBOARD_REQUEST_FAILED', 'Zgloszono blad odpowiedzi dashboardu.', context);
+                return;
+            }
+
+            if (durationMs >= slowRequestThresholdMs) {
+                dashboardLogger.warn('DASHBOARD_SLOW_REQUEST', 'Wolne zapytanie dashboardu.', context);
+            }
+        });
+
         next();
     });
 

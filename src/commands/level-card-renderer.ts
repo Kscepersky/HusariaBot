@@ -1,4 +1,5 @@
-import { createCanvas, loadImage, type CanvasRenderingContext2D, type Image } from 'canvas';
+import { createCanvas, loadImage, registerFont, type CanvasRenderingContext2D, type Image } from 'canvas';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { HusariaColors } from '../utils/husaria-theme.js';
 
@@ -12,8 +13,61 @@ const PROGRESS_BAR_HEIGHT = 44;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const AVATAR_LOAD_TIMEOUT_MS = 1200;
 const MAX_NAME_LENGTH = 20;
+const FONT_DIR = join(__dirname, '..', '..', 'fonts');
+const FONT_FAMILY_BASE = 'Husaria Sans';
+const FONT_FAMILY_EMOJI = 'Husaria Emoji';
+const FONT_STACK = `"${FONT_FAMILY_BASE}", "${FONT_FAMILY_EMOJI}", "Noto Sans", "Noto Color Emoji", "Segoe UI Emoji", sans-serif`;
 const BACKGROUND_IMAGE_PATH = join(__dirname, '..', '..', 'img', 'hussars_banner.png');
 let cachedBackgroundImagePromise: Promise<Image> | null = null;
+let fontsRegistered = false;
+
+function registerFontsOnce(): void {
+    if (fontsRegistered) {
+        return;
+    }
+
+    fontsRegistered = true;
+
+    const candidates = [
+        { path: join(FONT_DIR, 'NotoSans-Regular.ttf'), family: FONT_FAMILY_BASE, weight: '400' },
+        { path: join(FONT_DIR, 'NotoSans-SemiBold.ttf'), family: FONT_FAMILY_BASE, weight: '600' },
+        { path: join(FONT_DIR, 'NotoSans-Bold.ttf'), family: FONT_FAMILY_BASE, weight: '700' },
+        { path: join(FONT_DIR, 'NotoColorEmoji.ttf'), family: FONT_FAMILY_EMOJI },
+        { path: '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf', family: FONT_FAMILY_BASE, weight: '400' },
+        { path: '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf', family: FONT_FAMILY_BASE, weight: '700' },
+        { path: '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf', family: FONT_FAMILY_EMOJI },
+    ];
+
+    let registeredAny = false;
+    const registeredKeys = new Set<string>();
+
+    for (const candidate of candidates) {
+        if (!existsSync(candidate.path)) {
+            continue;
+        }
+
+        const weight = candidate.weight ?? '400';
+        const key = `${candidate.family}:${weight}`;
+        if (registeredKeys.has(key)) {
+            continue;
+        }
+
+        try {
+            registerFont(candidate.path, {
+                family: candidate.family,
+                ...(candidate.weight ? { weight: candidate.weight } : {}),
+            });
+            registeredAny = true;
+            registeredKeys.add(key);
+        } catch (error) {
+            console.warn('Failed to register font for level card rendering:', candidate.path, error);
+        }
+    }
+
+    if (!registeredAny) {
+        console.warn('No custom fonts found for level card rendering. Falling back to system fonts.');
+    }
+}
 
 export interface LevelCardRenderInput {
     username: string;
@@ -255,33 +309,33 @@ function drawTextAndProgress(context: CanvasRenderingContext2D, data: Normalized
     context.textAlign = 'left';
 
     context.fillStyle = 'rgba(255, 255, 255, 0.84)';
-    context.font = '600 24px sans-serif';
+    context.font = `600 24px ${FONT_STACK}`;
     const rankLabel = data.rank === null ? '#-' : `#${data.rank}`;
     context.fillText(`RANKING XP ${rankLabel}`, textStartX, 84);
 
     context.fillStyle = white;
-    context.font = '700 58px sans-serif';
+    context.font = `700 58px ${FONT_STACK}`;
     context.fillText(data.username, textStartX, 146);
 
     context.textAlign = 'right';
     context.fillStyle = lightGray;
-    context.font = '600 52px sans-serif';
+    context.font = `600 52px ${FONT_STACK}`;
     const levelText = `${data.level}`;
-    context.font = '700 88px sans-serif';
+    context.font = `700 88px ${FONT_STACK}`;
     const levelWidth = context.measureText(levelText).width;
     const levelLabelGap = 26;
     const levelLabelRightX = Math.max(progressX + 280, rightEdgeX - levelWidth - levelLabelGap);
 
     context.fillStyle = lightGray;
-    context.font = '600 52px sans-serif';
+    context.font = `600 52px ${FONT_STACK}`;
     context.fillText('LEVEL', levelLabelRightX, 132);
 
     context.fillStyle = red;
-    context.font = '700 88px sans-serif';
+    context.font = `700 88px ${FONT_STACK}`;
     context.fillText(levelText, rightEdgeX, 132);
 
     context.fillStyle = 'rgba(255, 255, 255, 0.87)';
-    context.font = '600 38px sans-serif';
+    context.font = `600 38px ${FONT_STACK}`;
     context.fillText(`${formatCompactXp(data.xpIntoCurrentLevel)} / ${formatCompactXp(data.xpForNextLevel)} XP`, rightEdgeX, 194);
 
     context.textAlign = 'left';
@@ -306,7 +360,7 @@ function drawTextAndProgress(context: CanvasRenderingContext2D, data: Normalized
     context.strokeStyle = 'rgba(255, 255, 255, 0.16)';
     context.stroke();
 
-    context.font = '600 26px sans-serif';
+    context.font = `600 26px ${FONT_STACK}`;
     context.fillStyle = white;
     context.fillText(`Do kolejnego poziomu: ${data.xpToNextLevel} XP`, progressX, progressY + 88);
 
@@ -316,6 +370,7 @@ function drawTextAndProgress(context: CanvasRenderingContext2D, data: Normalized
 }
 
 export async function renderLevelCard(input: LevelCardRenderInput): Promise<Buffer> {
+    registerFontsOnce();
     const data = normalizeInput(input);
     const canvas = createCanvas(CARD_WIDTH, CARD_HEIGHT);
     const context = canvas.getContext('2d');
