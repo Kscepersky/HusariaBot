@@ -1,6 +1,6 @@
 # HusariaBot
 
-> Bot Discord dla społeczności **Husaria** — system ekonomii z levelami i coinsami, panel administracyjny z kreatorem postów i schedulerem, automatyczne kanały głosowe i tickety, watchparty z XP multiplierem, oraz pełne strukturowane logowanie z alertami.
+> Bot Discord dla społeczności **G2 Hussars** — system ekonomii z levelami i coinsami, panel administracyjny z kreatorem postów i schedulerem, automatyczne kanały głosowe i tickety, watchparty z XP multiplierem, oraz pełne strukturowane logowanie z alertami.
 
 ---
 
