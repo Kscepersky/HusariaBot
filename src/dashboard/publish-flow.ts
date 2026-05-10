@@ -15,6 +15,9 @@ import {
     buildEmbedJson,
     type EmbedFormData,
 } from './embed-handlers.js';
+import { createLogger } from '../utils/logger.js';
+
+const publishLogger = createLogger('dashboard:publish-flow');
 
 const ALLOWED_UPLOAD_MIME = new Set([
     'image/png',
@@ -146,12 +149,37 @@ function detectImageMime(buffer: Buffer): string | null {
 
 function validateSvgSafety(buffer: Buffer): void {
     const svgContent = buffer.toString('utf8');
-    if (/<script[\s>]/i.test(svgContent) || /\son[a-z]+\s*=\s*/i.test(svgContent)) {
+
+    if (/<script[\s>]/i.test(svgContent)) {
         throw new Error('Plik SVG zawiera niedozwolone skrypty.');
     }
 
-    if (/xlink:href\s*=\s*['"]\s*javascript:/i.test(svgContent)) {
+    if (/\son[a-z]+\s*=\s*/i.test(svgContent)) {
+        throw new Error('Plik SVG zawiera niedozwolone atrybuty zdarzen.');
+    }
+
+    if (/(xlink:href|href)\s*=\s*['"]\s*javascript:/i.test(svgContent)) {
         throw new Error('Plik SVG zawiera niedozwolone odwolania JavaScript.');
+    }
+
+    if (/<!DOCTYPE[^>]*\[/i.test(svgContent) || /<!ENTITY/i.test(svgContent)) {
+        throw new Error('Plik SVG zawiera niedozwolone deklaracje XML Entity.');
+    }
+
+    if (/<use[\s>]/i.test(svgContent)) {
+        throw new Error('Plik SVG zawiera niedozwolone elementy use.');
+    }
+
+    if (/<(image|feImage)[\s>]/i.test(svgContent)) {
+        throw new Error('Plik SVG zawiera niedozwolone elementy image.');
+    }
+
+    if (/<style[\s>]/i.test(svgContent)) {
+        throw new Error('Plik SVG zawiera niedozwolone elementy style.');
+    }
+
+    if (/data\s*:\s*text\//i.test(svgContent)) {
+        throw new Error('Plik SVG zawiera niedozwolone data URI z tekstem.');
     }
 }
 
@@ -177,7 +205,11 @@ export async function publishDashboardPost(
                 };
             }
         } catch (roleErr) {
-            console.error('Failed to verify ping role:', roleErr);
+            publishLogger.warn('PING_ROLE_VERIFY_FAILED', 'Nie udalo sie zweryfikowac roli do pingu.', {
+                channelId: publishData.channelId,
+                roleId: pingTarget,
+                publishedByUserId: publisher.publishedByUserId,
+            }, roleErr);
             warnings = [...warnings, 'Nie udało się zweryfikować roli do pingu. Publikacja została wysłana bez pingu.'];
             publishData = {
                 ...publishData,
@@ -240,7 +272,11 @@ export async function publishDashboardPost(
         try {
             pingMessageId = await sendMessageToChannel(publishData.channelId, pingPayload);
         } catch (pingErr) {
-            console.error('Failed to send ping message:', pingErr);
+            publishLogger.error('PING_MESSAGE_SEND_FAILED', 'Nie udalo sie wyslac wiadomosci ping przed postem.', {
+                channelId: publishData.channelId,
+                mode: publishData.mode,
+                publishedByUserId: publisher.publishedByUserId,
+            }, pingErr);
             warnings = [...warnings, 'Nie udało się wysłać pingu. Główna publikacja została wysłana bez pingu.'];
         }
     }
@@ -255,9 +291,18 @@ export async function publishDashboardPost(
                 allowed_mentions: buildDashboardAllowedMentions(normalizedContent),
             });
         } catch (messageErr) {
+            publishLogger.error('EMBED_SEND_FAILED', 'Nie udalo sie wyslac embeda do kanalu Discord.', {
+                channelId: publishData.channelId,
+                mode: publishData.mode,
+                publishedByUserId: publisher.publishedByUserId,
+            }, messageErr);
             if (pingMessageId) {
                 await deleteChannelMessage(publishData.channelId, pingMessageId).catch((deleteErr) => {
-                    console.error('Failed to rollback ping message:', deleteErr);
+                    publishLogger.error('PING_MESSAGE_ROLLBACK_FAILED', 'Nie udalo sie cofnac wiadomosci ping po nieudanym wysylaniu embeda.', {
+                        channelId: publishData.channelId,
+                        pingMessageId,
+                        publishedByUserId: publisher.publishedByUserId,
+                    }, deleteErr);
                 });
             }
             throw messageErr;
@@ -268,9 +313,18 @@ export async function publishDashboardPost(
         try {
             messageId = await sendMessageToChannel(publishData.channelId, messagePayload);
         } catch (messageErr) {
+            publishLogger.error('MESSAGE_SEND_FAILED', 'Nie udalo sie wyslac wiadomosci do kanalu Discord.', {
+                channelId: publishData.channelId,
+                mode: publishData.mode,
+                publishedByUserId: publisher.publishedByUserId,
+            }, messageErr);
             if (pingMessageId) {
                 await deleteChannelMessage(publishData.channelId, pingMessageId).catch((deleteErr) => {
-                    console.error('Failed to rollback ping message:', deleteErr);
+                    publishLogger.error('PING_MESSAGE_ROLLBACK_FAILED', 'Nie udalo sie cofnac wiadomosci ping po nieudanym wysylaniu wiadomosci.', {
+                        channelId: publishData.channelId,
+                        pingMessageId,
+                        publishedByUserId: publisher.publishedByUserId,
+                    }, deleteErr);
                 });
             }
             throw messageErr;
@@ -281,7 +335,12 @@ export async function publishDashboardPost(
         try {
             imageMessageId = await sendImageToChannel(publishData.channelId, publishData.imageFilename);
         } catch (imageErr) {
-            console.error('Failed to send library image:', imageErr);
+            publishLogger.error('LIBRARY_IMAGE_SEND_FAILED', 'Nie udalo sie wyslac grafiki z biblioteki do kanalu Discord.', {
+                channelId: publishData.channelId,
+                imageFilename: publishData.imageFilename,
+                messageId,
+                publishedByUserId: publisher.publishedByUserId,
+            }, imageErr);
             warnings = [...warnings, 'Wiadomość została opublikowana, ale nie udało się wysłać grafiki z biblioteki.'];
         }
     }
@@ -292,12 +351,20 @@ export async function publishDashboardPost(
             storedFilename = await saveUploadToImageLibrary(preparedUpload.buffer, preparedUpload.mimeType);
             imageMessageId = await sendImageToChannel(publishData.channelId, storedFilename);
         } catch (imageErr) {
+            publishLogger.error('UPLOADED_IMAGE_SEND_FAILED', 'Nie udalo sie wyslac wgranej grafiki do kanalu Discord.', {
+                channelId: publishData.channelId,
+                storedFilename,
+                messageId,
+                publishedByUserId: publisher.publishedByUserId,
+            }, imageErr);
             if (storedFilename) {
                 await unlink(join(imgDirPath(), storedFilename)).catch((deleteErr) => {
-                    console.error('Failed to cleanup stored upload after send error:', deleteErr);
+                    publishLogger.warn('UPLOADED_IMAGE_CLEANUP_FAILED', 'Nie udalo sie usunac wgranego pliku po bledzie wysylania.', {
+                        channelId: publishData.channelId,
+                        storedFilename,
+                    }, deleteErr);
                 });
             }
-            console.error('Failed to send uploaded image:', imageErr);
             warnings = [...warnings, 'Wiadomość została opublikowana, ale nie udało się wysłać wgranej grafiki.'];
         }
     }

@@ -31,7 +31,7 @@ export const stankontaCommand = {
             const embed = new EmbedBuilder()
                 .setColor(HusariaColors.RED)
                 .setTitle('💰 Stan konta')
-                .setDescription(`Masz obecnie **${state.coins}** coinow.`)
+                .setDescription(`Masz obecnie **${state.coins}** cebulionów.`)
                 .setTimestamp();
 
             await interaction.editReply({ content: '', embeds: [embed] });

@@ -17,7 +17,7 @@ const FONT_DIR = join(__dirname, '..', '..', 'fonts');
 const FONT_FAMILY_BASE = 'Husaria Sans';
 const FONT_FAMILY_EMOJI = 'Husaria Emoji';
 const FONT_STACK = `"${FONT_FAMILY_BASE}", "${FONT_FAMILY_EMOJI}", "Noto Sans", "Noto Color Emoji", "Segoe UI Emoji", sans-serif`;
-const BACKGROUND_IMAGE_PATH = join(__dirname, '..', '..', 'img', 'hussars_banner.png');
+const BACKGROUND_IMAGE_PATH = join(__dirname, '..', '..', 'img', 'DNA-BANNER.png');
 let cachedBackgroundImagePromise: Promise<Image> | null = null;
 let fontsRegistered = false;
 

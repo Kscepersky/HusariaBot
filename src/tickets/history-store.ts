@@ -1,4 +1,4 @@
-import { mkdir, appendFile, writeFile, readFile } from 'node:fs/promises';
+import { mkdir, appendFile, writeFile, readFile, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export interface TicketTranscriptMessageRecord {
@@ -254,6 +254,16 @@ export async function listTicketHistoryEntries(options: TicketHistoryListOptions
         totalItems,
         totalPages,
     };
+}
+
+export async function clearTicketHistory(): Promise<void> {
+    await writeFile(TICKET_HISTORY_FILE_PATH, '', 'utf8').catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') {
+            throw error;
+        }
+    });
+    await rm(TICKET_TRANSCRIPTS_DIRECTORY_PATH, { recursive: true, force: true });
+    await mkdir(TICKET_TRANSCRIPTS_DIRECTORY_PATH, { recursive: true });
 }
 
 export function resolveTicketTranscriptFilePath(fileName: string): string | null {

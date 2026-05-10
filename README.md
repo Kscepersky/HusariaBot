@@ -1,306 +1,396 @@
-﻿# HusariaBot
+# HusariaBot
 
-Modern Discord bot written in TypeScript with an admin dashboard, ticket system, post publisher, and G2 matches integration (PandaScore + SQLite).
+> Bot Discord dla społeczności **Husaria** — system ekonomii z levelami i coinsami, panel administracyjny z kreatorem postów i schedulerem, automatyczne kanały głosowe i tickety, watchparty z XP multiplierem, oraz pełne strukturowane logowanie z alertami.
 
-## Table of Contents
+---
 
-1. Overview
-2. Key Features
-3. Architecture
-4. Requirements
-5. Quick Start
-6. Environment Configuration
-7. Bot Commands
-8. Dashboard
-9. Observability and Logging
-10. Development Scripts
-11. Security and GitHub Commit Checklist
-12. Troubleshooting
-13. License
+## Spis treści
 
-## Overview
+- [Funkcje](#funkcje)
+- [Stack technologiczny](#stack-technologiczny)
+- [Wymagania](#wymagania)
+- [Instalacja](#instalacja)
+- [Konfiguracja środowiska](#konfiguracja-środowiska)
+- [Komendy slash](#komendy-slash)
+- [Dashboard](#dashboard)
+- [Architektura projektu](#architektura-projektu)
+- [Testy](#testy)
+- [Logowanie](#logowanie)
 
-The project runs as two processes:
+---
 
-1. Discord bot
-2. Web dashboard (Express + Discord OAuth2)
+## Funkcje
 
-This separates moderation/publishing workflows from in-Discord operations.
+### Ekonomia
 
-## Key Features
+- **XP i poziomy** — punkty doświadczenia za aktywność tekstową i głosową; cooldown per user; konfigurowalny krok XP za wiadomość i za minutę głosu
+- **Dwa tryby levelowania** — `progressive` (skala wykładnicza) i `linear`; dwie formuły krzywej (`default`, `formula_v2`) — dobierane przez konfigurację per guild
+- **Cebuliony (coins)** — waluta serwera; przyznawane za level-up, komendy daily i minuty watchparty
+- **Daily z paskiem** — dzienna nagroda z configurowalnym zakresem coinsów, mnożnikiem streak (do konfigurowalnej liczby dni) i grace window
+- **Leaderboard** — ranking top memberów po XP lub coinsach z paginacją, awatarami i wyróżnieniem aktualnego użytkownika
+- **Karty levelów** — generowane graficznie (Canvas) z awatarem, paskiem XP, poziomem i globalną rangą
+- **Import CSV** — masowy import snapshotów bazy: `userId,level,totalxp,messages,voiceMinutes`
+- **Role ekonomiczne** — automatyczne przydzielanie ról Discord po osiągnięciu progu poziomu (konfigurowane z dashboardu)
+- **Ochrona staff** — konfigurowalny zestaw ról zwolnionych z niektórych mechanizmów ekonomii
 
-- Slash commands for staff and members.
-- Ticket system with persistent counter.
-- Temporary voice channels with reconnect grace period.
-- Dashboard post creator (embedded and plain message modes) with preview.
-- Scheduled posting with edit support.
-- Sent-post history with edit, retry, and delete flows.
-- Discord Scheduled Events management.
-- Optional watchparty voice channel lifecycle (scheduled/open/closed/deleted).
-- Economy module (daily, streak, XP, level, admin mutations, leaderboard in dashboard).
-- Leaderboard profile resilience (rate-limit aware backoff + persistent profile cache in SQLite).
-- G2 matches database based on PandaScore + SQLite.
-- Structured system logs with Dev-only dashboard log viewer.
-- Unit/integration tests with Vitest.
+### Watchparty
 
-## Architecture
+- Tworzenie głosowych kanałów watchparty powiązanych z zaplanowanymi postami (własna kategoria Discord)
+- Mnożnik XP i bonus coinów za każdą minutę aktywności na kanale watchparty
+- Pełny lifecycle zarządzany przez bota: kanał otwiera się o zaplanowanej godzinie, zamykany gdy liczba użytkowników spadnie do zera lub upłynie czas
 
-```text
-src/
-  commands/                 Slash commands
-  tickets/                  Ticket logic
-  voice-channels/           Temporary voice channels (create/move/cleanup)
-  economy/                  Economy domain (repo/runtime/admin/leaderboard)
-  embeds/                   Embed templates and builders
-  dashboard/
-    routes/                 Dashboard API routes
-    scheduler/              Post scheduler
-    g2-matches/             PandaScore + SQLite integration
-    public/                 Dashboard frontend assets
-data/                       Local data (SQLite/JSON)
-img/                        Image library
-```
+### Tymczasowe kanały głosowe
 
-## Requirements
+- Wejście na trigger channel → bot tworzy prywatny kanał głosowy dla użytkownika
+- Kanał usuwany automatycznie gdy wszyscy wychodzą
 
-- Node.js 20.17+ (Node.js 22 LTS recommended)
-- npm 9+
-- Discord application + bot configured in Discord Developer Portal
-- For `canvas`: on some environments without prebuilt binaries you may need native build tooling (Windows Build Tools / Python / C++ toolchain)
+### Tickety
 
-## Quick Start
+- Panel ticketów konfigurowalny przez `/ticketyconfig` — publikuje interaktywny embed z przyciskami
+- Historia wszystkich ticketów z persystencją w pliku JSON
+- Licznik ticketów z gwarancją monotoniczności między restartami
 
-1. Install dependencies:
+### Timeouty (mute)
+
+- Komenda `/mute` z wyborem czasu (minuty / godziny / dni) i powodem
+- Realizacja przez dedykowaną rolę `SERVER_MUTE_ROLE_ID`
+- Automatyczne zdjęcie roli po upływie czasu (persystencja przez restart przez SQLite)
+- Historia timeoutów: kto nałożył, na jak długo, z jakim powodem
+
+### Panel administracyjny (Dashboard)
+
+Szczegóły w sekcji [Dashboard](#dashboard).
+
+---
+
+## Stack technologiczny
+
+| Warstwa | Technologia |
+|---|---|
+| Język | TypeScript 6 |
+| Runtime | Node.js |
+| Discord | discord.js v14 |
+| Web (dashboard) | Express v5 |
+| Baza danych | SQLite (`sqlite` + `sqlite3`) |
+| Walidacja wejść | Zod v4 |
+| Generowanie grafik | Canvas |
+| Sesje | express-session + SQLite store |
+| Rate limiting | express-rate-limit |
+| Testy | Vitest |
+| Dev runner | tsx |
+| Build | tsc |
+
+---
+
+## Wymagania
+
+- **Node.js** v20+
+- **npm** v9+
+- Aplikacja w [Discord Developer Portal](https://discord.com/developers/applications) z włączonymi intentami: `GUILD_MEMBERS`, `GUILD_MESSAGES`, `MESSAGE_CONTENT`, `GUILD_VOICE_STATES`
+- (Opcjonalnie) Klucz API [PandaScore](https://pandascore.co/) dla sekcji meczów G2
+
+---
+
+## Instalacja
 
 ```bash
+# 1. Klonuj repo
+git clone https://github.com/Kscepersky/HusariaBot.git
+cd HusariaBot
+
+# 2. Zainstaluj zależności
 npm install
-```
 
-2. Copy environment template:
+# 3. Skonfiguruj środowisko
+cp .env.example .env
+# Otwórz .env i uzupełnij wszystkie wartości
 
-```bash
-copy .env.example .env
-```
-
-3. Fill values in `.env`.
-
-4. Register slash commands:
-
-```bash
+# 4. Zarejestruj komendy slash na serwerze
 npm run deploy
+
+# 5. Uruchom bota i dashboard (dwa osobne procesy)
+npm run dev            # bot — tryb deweloperski (tsx watch)
+npm run dashboard:dev  # dashboard — tryb deweloperski (tsx watch)
+
+# Produkcja:
+npm run build          # kompiluje TypeScript do dist/
+npm start              # uruchamia bota z dist/
+npm run dashboard      # uruchamia dashboard z dist/
 ```
 
-5. Start the bot:
+> Bot i dashboard to dwa niezależne procesy Node.js. W produkcji uruchamiaj je jako osobne serwisy (np. dwie instancje PM2).
 
-```bash
-npm run dev
+---
+
+## Konfiguracja środowiska
+
+Skopiuj `.env.example` do `.env` i uzupełnij wartości:
+
+```env
+# ── Discord Bot ─────────────────────────────────────────────────────────────
+DISCORD_TOKEN=              # Token bota z Discord Developer Portal → Bot → Token
+CLIENT_ID=                  # Application ID (Discord Developer Portal → General)
+GUILD_ID=                   # ID twojego serwera (guild commands rejestrują się natychmiast)
+
+# ── Role IDs ─────────────────────────────────────────────────────────────────
+# Prawy klik na roli w Discordzie → "Kopiuj ID roli"
+ADMIN_ROLE_ID=
+MODERATOR_ROLE_ID=
+COMMUNITY_MANAGER_ROLE_ID=
+DEV_ROLE_ID=
+SERVER_MUTE_ROLE_ID=        # Rola przyznawana przez komendę /mute
+
+# ── Kategorie i kanały ────────────────────────────────────────────────────────
+SUPPORT_CATEGORY_ID=        # Kategoria dla ticketów
+VOICE_TRIGGER_CHANNEL_ID=   # Kanał głosowy — wejście tworzy prywatny kanal
+VOICE_CATEGORY_ID=          # Kategoria dla tymczasowych kanałów głosowych
+WATCHPARTY_CATEGORY_ID=     # Kategoria dla kanałów watchparty
+LEVEL_UP_ANNOUNCE_CHANNEL_ID=   # Kanał ogłoszeń awansów (opcjonalny)
+
+# ── Dashboard OAuth2 ──────────────────────────────────────────────────────────
+# Discord Developer Portal → OAuth2 → General
+DISCORD_CLIENT_SECRET=
+DISCORD_REDIRECT_URI=http://localhost:3000/auth/discord/callback
+DASHBOARD_PORT=3000
+DASHBOARD_BASE_URL=http://localhost:3000
+# Min. 32 losowe znaki: openssl rand -hex 32
+DASHBOARD_SESSION_SECRET=
+DASHBOARD_SESSION_TTL_HOURS=24
+DASHBOARD_TRUST_PROXY=0     # Ustaw 1 jeśli dashboard stoi za reverse proxy (nginx/caddy)
+
+# ── Rate limiting dashboardu ─────────────────────────────────────────────────
+DASHBOARD_RATE_LIMIT_WINDOW_MS=900000
+DASHBOARD_RATE_LIMIT_MAX=240
+DASHBOARD_MUTATION_RATE_LIMIT_WINDOW_MS=60000
+DASHBOARD_MUTATION_RATE_LIMIT_MAX=80
+DASHBOARD_AUTH_RATE_LIMIT_WINDOW_MS=900000
+DASHBOARD_AUTH_RATE_LIMIT_MAX=30
+
+# ── Integracje zewnętrzne ────────────────────────────────────────────────────
+PANDASCORE_API_KEY=             # Klucz PandaScore (opcjonalny — sekcja meczów G2)
+LOG_ALERT_WEBHOOK_URL=          # Webhook Discord na kanał alertów (błędy error/fatal)
+
+# ── Ścieżki (opcjonalne, domyślnie w katalogu roboczym) ─────────────────────
+ECONOMY_DB_PATH=
+DASHBOARD_SESSION_DB_PATH=
+
+# ── Deweloperskie ─────────────────────────────────────────────────────────────
+DEV_LOGS=1
+BOT_DEV_LOGS=1
 ```
 
-6. Start the dashboard (optional):
+---
 
-```bash
-npm run dashboard
-```
+## Komendy slash
 
-## Environment Configuration
+### Dostępne dla wszystkich
 
-Source of truth: `.env.example`.
+| Komenda | Opis |
+|---|---|
+| `/daily` | Odbierz dzienne cebuliony ze streak multiplierem |
+| `/streak-daily` | Sprawdź aktualny streak i mnożnik daily |
+| `/stankonta` | Pokaż aktualny stan swojego konta (cebuliony) |
+| `/level` | Karta levelowa z XP, rangą i paskiem postępu |
+| `/leaderboard-xp` | Ranking serwera po XP i poziomach |
 
-Most important variables:
+### Tylko administracja
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| DISCORD_TOKEN | yes | Bot token |
-| CLIENT_ID | yes | Discord application ID |
-| GUILD_ID | recommended | Test guild for instant command propagation |
-| ADMIN_ROLE_ID | yes | Admin role ID |
-| MODERATOR_ROLE_ID | yes | Moderator role ID |
-| COMMUNITY_MANAGER_ROLE_ID | yes (dashboard) | Community Manager role ID |
-| DEV_ROLE_ID | yes (dashboard) | Dev role ID (full dashboard + economy access) |
-| SERVER_MUTE_ROLE_ID | yes (timeouts) | Role ID used for timeout system (`/mute` + dashboard) |
-| SUPPORT_CATEGORY_ID | yes | Tickets category ID |
-| VOICE_TRIGGER_CHANNEL_ID | yes (temp voice) | Trigger voice channel ID |
-| VOICE_CATEGORY_ID | yes (temp voice) | Category ID for temporary voice channels |
-| WATCHPARTY_CATEGORY_ID | no (watchparty) | Category ID for watchparty voice channels |
-| DISCORD_CLIENT_SECRET | yes (dashboard) | OAuth2 client secret |
-| DISCORD_REDIRECT_URI | yes (dashboard) | OAuth redirect URI |
-| DASHBOARD_SESSION_SECRET | yes (dashboard) | Express session secret |
-| DASHBOARD_SESSION_DB_PATH | no | Dashboard session SQLite path |
-| ECONOMY_DB_PATH | no | Economy SQLite path |
-| LEVEL_UP_ANNOUNCE_CHANNEL_ID | no | Text channel ID for natural level-up announcements |
-| DASHBOARD_SESSION_TTL_HOURS | no | Dashboard session TTL in hours |
-| DASHBOARD_TRUST_PROXY | no | Proxy trust setting (1/0) |
-| DASHBOARD_PORT | no | Dashboard port (default: 3000) |
-| DASHBOARD_BASE_URL | yes (dashboard) | Public dashboard URL used by `/dashboard` command |
-| PANDASCORE_API_KEY | yes (G2 module) | PandaScore API key |
-| DEV_LOGS | no | Dashboard developer logs (1/0) |
-| BOT_DEV_LOGS | no | Bot heartbeat/dev logs (1/0) |
-| DASHBOARD_RATE_LIMIT_WINDOW_MS | no | Global dashboard rate-limit window (ms) |
-| DASHBOARD_RATE_LIMIT_MAX | no | Max global dashboard requests per window |
-| DASHBOARD_AUTH_RATE_LIMIT_WINDOW_MS | no | OAuth callback rate-limit window (ms) |
-| DASHBOARD_AUTH_RATE_LIMIT_MAX | no | Max OAuth callbacks per window |
-| DASHBOARD_MUTATION_RATE_LIMIT_WINDOW_MS | no | Dashboard mutation rate-limit window (ms) |
-| DASHBOARD_MUTATION_RATE_LIMIT_MAX | no | Max dashboard mutations per window |
+> Komendy z `setDefaultMemberPermissions(null)` — widoczne i dostępne wyłącznie dla osób z uprawnieniami skonfigurowanymi przez administratora serwera w ustawieniach integracji Discord.
 
-Temporary voice flow:
+| Komenda | Opis |
+|---|---|
+| `/dodaj-xp` | Dodaj XP wybranemu użytkownikowi (z opcjonalnym powodem) |
+| `/dodaj-coinsy` | Dodaj cebuliony wybranemu użytkownikowi |
+| `/usun-coinsy` | Usuń cebuliony wybranemu użytkownikowi |
+| `/resetuj-level` | Zresetuj level i XP do zera (z potwierdzeniem) |
+| `/resetuj-coinsy` | Zresetuj cebuliony do zera (z potwierdzeniem) |
+| `/mute` | Nadaj timeout przez rolę Server Mute (czas + powód) |
+| `/ticketyconfig` | Opublikuj panel ticketów na wskazanym kanale |
+| `/sendimg` | Wyślij obraz z biblioteki `/img` na wybrany kanał |
+| `/ping` | Sprawdź latencję bota i status połączenia z Discord |
 
-1. User joins `VOICE_TRIGGER_CHANNEL_ID`.
-2. Bot creates `username-voice` in `VOICE_CATEGORY_ID` and moves the user.
-3. If user already has an active temp channel, bot moves user to it instead of creating another.
-4. Empty temp channels are removed after 10 seconds (grace period for reconnect).
-
-## Bot Commands
-
-| Command | Description | Access |
-| --- | --- | --- |
-| /ping | Health check and latency | Admin/Moderator/CommunityManager/Dev |
-| /dashboard | Dashboard link | Admin/Moderator/CommunityManager/Dev |
-| /sendimg | Send image from `img` library | Admin/Moderator/CommunityManager/Dev |
-| /ticketyconfig | Configure ticket panel | Admin/Moderator/CommunityManager/Dev |
-| /daily | Claim daily coin reward | All guild members |
-| /streak-daily | Show daily streak and multiplier | All guild members |
-| /leaderboard-xp | XP/level leaderboard | All guild members |
-| /stankonta | Private coin balance summary | All guild members |
-| /level | Public level card image with XP progress | All guild members |
-| /mute | Apply timeout via Server Mute role | Admin/Moderator/CommunityManager/Dev |
-| /dodaj-coinsy | Add coins to target user | Admin/Moderator/CommunityManager/Dev |
-| /dodaj-xp | Add XP to target user | Admin/Moderator/CommunityManager/Dev |
-| /usun-coinsy | Remove coins from target user | Admin/Moderator/CommunityManager/Dev |
-| /resetuj-level | Reset target user level and XP | Admin/Moderator/CommunityManager/Dev |
-| /resetuj-coinsy | Reset target user coins | Admin/Moderator/CommunityManager/Dev |
+---
 
 ## Dashboard
 
-Default URL: `http://localhost:3000`
+Dashboard to osobna aplikacja webowa. Logowanie odbywa się przez Discord OAuth2 — dostęp wyłącznie dla memberów z rolą administracyjną (Admin, Moderator, Community Manager, Dev).
 
-Dashboard modules:
+### Kreator publikacji
 
-- Post creator (embedded/message).
-- Scheduled posts.
-- Sent posts (edit, retry, delete).
-- Discord Scheduled Events management (CRUD).
-- G2 matches (PandaScore sync, filters, refresh).
-- Economy settings (daily, leveling, text/voice XP, reset users, strict CSV import snapshot, role rewards per level).
-- Economy leaderboard (XP/coins sorting, pagination, Discord display names/avatars, message and voice-minute stats, persistent profile cache fallback).
-- Timeout system (create/list/remove) with user search and duration fields: `durationAmount + durationUnit` (`s`, `m`, `h`, `d`, `mo`, `y`).
-- System logs (Dev-only): filter/search/paginate dashboard and bot activity.
-- Economy access policy: settings/mutations/import/level-role mappings are Dev-only; leaderboard is available for Admin/Moderator/CommunityManager/Dev.
+Kreator umożliwia wysyłanie wiadomości na dowolny kanał tekstowy lub announcement serwera:
 
-Timeout safety rules:
+- **Tryb embed** — pełny edytor embeda: tytuł, opis, kolor, autor, footer, pole obrazu; podgląd Discord na żywo
+- **Tryb plain text** — zwykła wiadomość Discord z pełnym markdownem i obsługą mentionów użytkowników/ról
+- **Ping roli** — opcjonalny ping przed postem (bot weryfikuje istnienie roli przed wysłaniem)
+- **Obraz** — attach z biblioteki serwerowej lub upload pliku (PNG, JPG, GIF, WebP; max 20 MB); SVG z pełną weryfikacją bezpieczeństwa
+- **Podgląd na żywo** — WYSIWYG renderowany w przeglądarce przed wysłaniem
 
-- Timeout cannot be applied to bots.
-- Timeout cannot be applied to protected staff roles (Admin/Moderator/Community Manager/Dev).
-- A user can have only one active timeout at a time.
-- Max timeout duration is 10 years.
+### Scheduler
 
-Economy CSV import format:
+- Planowanie publikacji na dowolną datę i godzinę
+- Lista zaplanowanych postów z możliwością edycji, anulowania i natychmiastowej publikacji
+- Automatyczne wykonanie przez wbudowany scheduler oparty na natywnych timerach Node.js
+- Obsługa wielokrotnych restartów — scheduled posty przeżywają restart procesu (persystencja w JSON)
 
-- Strict no-header rows: `userId,level,xp,messages,voiceMinutes`
-- `level` uses HusariaBot internal scale where first level is `1`
-- `xp` means XP inside current level (not total XP)
-- Import uses current leveling curve to convert level + xp into total XP
-- Import works in snapshot mode (overwrites target state fields, does not add)
-- Import is fail-fast with full rollback on first invalid row
+### Historia wysłanych postów
 
-Dashboard scripts:
+- Pełna historia wszystkich wysłanych i zaplanowanych postów ze statusami (`sent`, `pending`, `failed`, `cancelled`)
+- Edycja treści i ponowne wysłanie istniejących postów
+- Renderowanie mentionów `<@userId>` jako rzeczywistych nazw użytkowników (prefetch z Discord API)
+- Statusy powiązanych eventów Discord i kanałów watchparty
 
-- `npm run dashboard`
-- `npm run dashboard:dev`
+### Ekonomia
 
-## Observability and Logging
+- Leaderboard z rankingiem XP i coinów, paginacja, awatary pobierane z Discord
+- Podgląd i edycja stanu konta dowolnego użytkownika (XP, coins, statsy)
+- Masowy import danych przez CSV: `userId,level,totalxp,messages,voiceMinutes`
+- Konfiguracja mapowań ról na poziomy (automatyczne przyznawanie ról po awansie)
+- Statystyki serwera: wykresy aktywności (wiadomości, minuty głosowe), top userzy, configurowalny zakres dat
 
-Logging behavior:
+### Eventy Discord
 
-- Structured JSON logs are written daily to `logs/system-YYYY-MM-DD.jsonl`.
-- Human-readable logs are written daily to `logs/system-YYYY-MM-DD.log`.
-- `error` and `fatal` events can be sent to a webhook (`LOG_ALERT_WEBHOOK_URL`).
-- Dashboard has a Dev-only `System Logs` tab backed by `/api/logs` (search, level filter, pagination).
+- Tworzenie natywnych eventów Discord bezpośrednio z poziomu kreatora postów
+- Opcjonalne powiązanie z kanałem watchparty
 
-What is logged:
+### Watchparty
 
-- Dashboard auth flow (login started/success/denied/failure, logout success/failure).
-- Scheduled/sent post lifecycle actions.
-- Immediate publish actions and sent-history persistence.
-- Timeout actions and selected moderation warnings.
+- Tworzenie kanałów watchparty powiązanych ze zaplanowanymi postami
+- Lifecycle: kanał otwiera się o wyznaczonym czasie, zamykany automatycznie
+- Rollback kanału w przypadku błędu persystencji
 
-Leaderboard reliability notes:
+### Baza meczów G2
 
-- Guild-member profile lookups are rate-limit aware.
-- On Discord 429, the dashboard applies backoff and avoids repeated hot-loop lookups.
-- Profile snapshots are persisted in SQLite (`dashboard_leaderboard_profile_cache`) and reused during Discord/API pressure.
+- Integracja z PandaScore API — przeglądarka wyników i historii meczów drużyny G2 Esports
+- Cache po stronie serwera
 
-## Development Scripts
+---
 
-- `npm run dev`
-- `npm run build`
-- `npm start`
-- `npm run deploy`
-- `npm run clear-global`
-- `npm test`
-- `npm run test:watch`
+## Architektura projektu
 
-## Security and GitHub Commit Checklist
-
-Before committing:
-
-1. Never commit `.env` or any environment file with real secrets.
-2. Commit only `.env.example` with placeholders.
-3. Verify staged files:
-
-```bash
-git diff --cached --name-only
+```
+src/
+├── index.ts                    # Entry point bota Discord
+├── deploy-commands.ts          # Rejestracja komend slash
+│
+├── commands/                   # Handlery komend slash (jeden plik = jedna komenda)
+│   ├── daily.ts
+│   ├── level.ts
+│   ├── leaderboard-xp.ts
+│   ├── mute.ts
+│   ├── ticketyconfig.ts
+│   └── ...
+│
+├── economy/
+│   ├── types.ts                # Typy domenowe (EconomyConfig, EconomyUserState, ...)
+│   ├── database.ts             # Inicjalizacja SQLite i migracje schematu
+│   ├── repository.ts           # Data access layer — SQL + logika biznesowa
+│   ├── runtime.ts              # Eventy bota: XP za wiadomości i voice (tick co minutę)
+│   ├── stats-store.ts          # Daily stats aggregation i time-series
+│   └── ...
+│
+├── voice-channels/             # Tymczasowe prywatne kanały głosowe
+├── tickets/                    # System ticketów (panel + historia + licznik)
+├── timeouts/                   # System timeoutów / mute z auto-expire
+│
+├── utils/
+│   ├── logger.ts               # Strukturowany logger (.jsonl + .log + Discord webhook)
+│   ├── embed-builder.ts        # Utility do budowania embedów
+│   ├── role-access.ts          # Sprawdzanie uprawnień po rolach
+│   └── ...
+│
+└── dashboard/
+    ├── index.ts                # Entry point dashboardu (Express)
+    ├── server.ts               # App setup, middleware, security headers
+    ├── discord-api.ts          # Klient Discord REST API (Bot token)
+    ├── publish-flow.ts         # Logika publikowania — ping, embed/tekst, obrazy
+    ├── embed-handlers.ts       # Walidacja i budowanie payloadów embed
+    ├── event-publisher.ts      # Tworzenie natywnych eventów Discord
+    ├── watchparty-publisher.ts # Tworzenie i zamykanie kanałów watchparty
+    ├── watchparty-lifecycle.ts # Zarządzanie cyklem życia watchparty
+    │
+    ├── routes/
+    │   └── api.ts              # REST API dashboardu (~2700 linii, 60+ endpointów)
+    │
+    ├── scheduler/
+    │   ├── service.ts          # Scheduler — Node.js timers, execute przy restarcie
+    │   ├── store.ts            # Persystencja zaplanowanych postów (JSON)
+    │   └── types.ts
+    │
+    ├── middleware/             # Autentykacja, autoryzacja, rate limiting, sesje
+    ├── validation/             # Schematy Zod dla payloadów API
+    ├── views/                  # HTML (dashboard.html, login.html)
+    ├── public/
+    │   ├── css/style.css       # Style dashboardu
+    │   └── js/app.js           # Frontend SPA (vanilla JS, bez bundlera)
+    └── g2-matches/             # PandaScore client, cache, typy
 ```
 
-4. If any secret might have leaked, rotate immediately:
-   - `DISCORD_TOKEN`
-   - `DISCORD_CLIENT_SECRET`
-   - `PANDASCORE_API_KEY`
-   - `DASHBOARD_SESSION_SECRET`
+### Kluczowe wzorce projektowe
 
-Additional security rules:
+| Wzorzec | Gdzie używany |
+|---|---|
+| Repository Pattern | `economy/repository.ts` — warstwa SQL oddzielona od logiki |
+| Immutable updates | Cały codebase — zakaz mutacji, wyłącznie spread + nowe obiekty |
+| Structured logging | `utils/logger.ts` — każda operacja z `action`, `scope`, kontekstem, stack trace |
+| Zod validation | Wszystkie endpointy API — walidacja na granicy systemu |
+| Write lock (SQLite) | `economy/database.ts` — serializacja zapisów przez `Promise` chain |
+| Session auth (OAuth2) | `middleware/` — Discord OAuth2, role check, CSRF |
 
-- Staff operations are role-protected.
-- Dashboard validates mutation payloads.
-- CSRF tokens are required for mutating API endpoints.
-- Multi-layer rate limiting is enabled (global + OAuth callback + API mutations).
-- Dashboard sessions are stored in SQLite (not MemoryStore).
-- Sensitive log context fields are redacted before dashboard log rendering.
-- Do not publish logs containing environment data.
-- Before push, verify runtime data files (`data/*.json`, sqlite files) are intentional; avoid committing live counters/state snapshots.
+---
 
-## Troubleshooting
-
-### Commands do not appear in Discord
-
-1. Verify `CLIENT_ID` and token.
-2. Run `npm run deploy`.
-3. If using global commands, wait for propagation.
-
-### Dashboard login fails
-
-1. Redirect URI must exactly match Discord Developer Portal.
-2. Verify `DISCORD_CLIENT_SECRET`.
-3. Confirm the user has required staff role.
-
-### G2 matches are not syncing
-
-1. Verify `PANDASCORE_API_KEY`.
-2. Check PandaScore rate limits.
-3. Enable dashboard dev logs (`DEV_LOGS=1`).
-
-### Discord event creation fails
-
-1. Bot must have `Manage Events` permission.
-2. Verify `GUILD_ID` and bot membership in guild.
-3. Ensure event date/time is in the future.
-
-### Build/tests fail
+## Testy
 
 ```bash
-npm run build
-npm test
+npm test              # Uruchom wszystkie testy (Vitest, tryb jednorazowy)
+npm run test:watch    # Tryb watch — ponowne uruchomienie przy zmianach
 ```
 
-## License
+Pokrycie testami:
+- Logika ekonomii: XP, levele, daily, streak, CSV import
+- Repozytoria: operacje SQL na in-memory SQLite
+- Parsowanie i walidacja komend slash
+- Moduły kanałów głosowych (store, flow, service)
+- Handlery embedów dashboardu
+- Klient PandaScore (parsowanie odpowiedzi API)
+
+---
+
+## Logowanie
+
+Bot używa strukturowanego systemu logowania z `src/utils/logger.ts`. Każdy moduł tworzy własny logger przez `createLogger(scope)`.
+
+**Wyjścia:**
+- `logs/system-YYYY-MM-DD.jsonl` — structured JSON, jeden wpis na linię
+- `logs/system-YYYY-MM-DD.log` — czytelny format dla oczu
+- Discord webhook (`LOG_ALERT_WEBHOOK_URL`) — automatyczny alert przy `error` i `fatal`
+
+**Scopy logerów:** `dashboard:api`, `dashboard:publish-flow`, `dashboard:scheduler`, i inne per moduł.
+
+**Format wpisu `.jsonl`:**
+
+```json
+{
+  "timestampIso": "2026-05-10T14:23:01.000Z",
+  "timestampMs": 1746885781000,
+  "level": "error",
+  "action": "EMBED_SEND_FAILED",
+  "scope": "dashboard:publish-flow",
+  "message": "Nie udalo sie wyslac embeda do kanalu Discord.",
+  "context": {
+    "channelId": "123456789012345678",
+    "mode": "embedded",
+    "publishedByUserId": "987654321098765432"
+  },
+  "error": {
+    "name": "DiscordRequestError",
+    "message": "Missing Access",
+    "stack": "..."
+  }
+}
+```
+
+---
+
+## Licencja
 
 MIT

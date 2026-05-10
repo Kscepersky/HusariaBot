@@ -27,3 +27,4 @@ Thumbs.db
 *.swo
 
 security.md
+.claude/

@@ -9,15 +9,29 @@ import {
     incrementMessageCount,
     incrementVoiceMinutes,
 } from './repository.js';
+import { getStatsExcludedChannelIds } from './stats-store.js';
 import type { EconomyConfig, EconomyLevelRoleMapping, EconomyXpAwardResult } from './types.js';
 
 const VOICE_TICK_INTERVAL_MS = 60_000;
 const CONFIG_CACHE_TTL_MS = 60_000;
+const EXCLUDED_CHANNELS_CACHE_TTL_MS = 60_000;
 
 const messageCooldownByUser = new Map<string, number>();
 
 let cachedConfig: EconomyConfig | null = null;
 let cachedConfigAt = 0;
+
+let cachedExcludedChannelIds: string[] | null = null;
+let cachedExcludedChannelIdsAt = 0;
+
+async function getCachedExcludedChannelIds(nowTimestamp: number): Promise<string[]> {
+    if (cachedExcludedChannelIds !== null && (nowTimestamp - cachedExcludedChannelIdsAt) < EXCLUDED_CHANNELS_CACHE_TTL_MS) {
+        return cachedExcludedChannelIds;
+    }
+    cachedExcludedChannelIds = await getStatsExcludedChannelIds();
+    cachedExcludedChannelIdsAt = nowTimestamp;
+    return cachedExcludedChannelIds;
+}
 
 interface VoiceEligibilityInput {
     isBot: boolean;
@@ -264,7 +278,10 @@ export async function handleEconomyMessageCreate(message: Message): Promise<void
     const config = await getCachedEconomyConfig(nowTimestamp);
 
     try {
-        await incrementMessageCount(message.guildId, message.author.id, nowTimestamp);
+        const excludedChannelIds = await getCachedExcludedChannelIds(nowTimestamp);
+        if (!excludedChannelIds.includes(message.channelId)) {
+            await incrementMessageCount(message.guildId, message.author.id, nowTimestamp);
+        }
     } catch (error) {
         console.error('❌  Nie udalo sie zwiekszyc licznika wiadomosci:', error);
     }

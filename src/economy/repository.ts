@@ -348,20 +348,6 @@ function resolveXpSpentForLevel(level: number, config: EconomyConfig): number {
     return xpSpent;
 }
 
-function resolveTotalXpFromLevelAndProgress(level: number, xpIntoLevel: number, config: EconomyConfig): number {
-    const safeLevel = Math.max(ECONOMY_MIN_LEVEL, Math.floor(level));
-    const xpForCurrentLevel = resolveXpForNextLevel(safeLevel, config);
-    const safeXpIntoLevel = Math.max(0, Math.floor(xpIntoLevel));
-
-    if (safeXpIntoLevel >= xpForCurrentLevel) {
-        throw new EconomyCsvImportValidationError(
-            `XP wewnatrz levela (${safeXpIntoLevel}) musi byc mniejsze od progu kolejnego poziomu (${xpForCurrentLevel}).`,
-        );
-    }
-
-    return resolveXpSpentForLevel(safeLevel, config) + safeXpIntoLevel;
-}
-
 function normalizeLevelRoleMappings(inputMappings: EconomyLevelRoleMappingInput[]): EconomyLevelRoleMappingInput[] {
     const normalized = inputMappings.map((mapping) => {
         return {
@@ -749,6 +735,7 @@ export async function incrementMessageCount(
     nowTimestamp: number,
 ): Promise<void> {
     const db = await getEconomyDatabase();
+    const dateStr = new Date(nowTimestamp).toISOString().slice(0, 10);
 
     await withWriteLock(async () => {
         await withTransaction(db, async () => {
@@ -766,6 +753,17 @@ export async function incrementMessageCount(
                 guildId,
                 userId,
             );
+
+            await db.run(
+                `
+                INSERT INTO daily_user_stats (guild_id, user_id, date, messages, voice_minutes)
+                VALUES (?, ?, ?, 1, 0)
+                ON CONFLICT (guild_id, user_id, date) DO UPDATE SET messages = messages + 1
+                `,
+                guildId,
+                userId,
+                dateStr,
+            );
         });
     });
 }
@@ -778,6 +776,7 @@ export async function incrementVoiceMinutes(
 ): Promise<void> {
     const db = await getEconomyDatabase();
     const safeMinutes = Math.max(1, Math.floor(minutes));
+    const dateStr = new Date(nowTimestamp).toISOString().slice(0, 10);
 
     await withWriteLock(async () => {
         await withTransaction(db, async () => {
@@ -795,6 +794,19 @@ export async function incrementVoiceMinutes(
                 nowTimestamp,
                 guildId,
                 userId,
+            );
+
+            await db.run(
+                `
+                INSERT INTO daily_user_stats (guild_id, user_id, date, messages, voice_minutes)
+                VALUES (?, ?, ?, 0, ?)
+                ON CONFLICT (guild_id, user_id, date) DO UPDATE SET voice_minutes = voice_minutes + ?
+                `,
+                guildId,
+                userId,
+                dateStr,
+                safeMinutes,
+                safeMinutes,
             );
         });
     });
@@ -1197,7 +1209,7 @@ function parseCsvIntegerField(rawValue: string, lineNumber: number, columnName: 
     }
 
     const parsedValue = Number.parseInt(rawValue, 10);
-    if (!Number.isFinite(parsedValue) || parsedValue < minimum) {
+    if (!Number.isFinite(parsedValue) || parsedValue < minimum || parsedValue > Number.MAX_SAFE_INTEGER) {
         throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: pole ${columnName} musi byc >= ${minimum}.`);
     }
 
@@ -1225,11 +1237,11 @@ export async function importEconomyCsvSnapshot(input: {
 
                 if (columns.length !== 5) {
                     throw new EconomyCsvImportValidationError(
-                        `Wiersz ${lineNumber}: oczekiwano 5 kolumn w formacie userId,level,xp,messages,voiceMinutes.`,
+                        `Wiersz ${lineNumber}: oczekiwano 5 kolumn w formacie userId,level,totalxp,messages,voiceMinutes.`,
                     );
                 }
 
-                const [userId, levelRaw, xpRaw, messageCountRaw, voiceMinutesRaw] = columns;
+                const [userId, levelRaw, totalXpRaw, messageCountRaw, voiceMinutesRaw] = columns;
 
                 if (!/^\d{17,20}$/.test(userId)) {
                     throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: pole userId ma niepoprawny format.`);
@@ -1242,23 +1254,12 @@ export async function importEconomyCsvSnapshot(input: {
                 seenUserIds.add(userId);
 
                 const level = parseCsvIntegerField(levelRaw, lineNumber, 'level', ECONOMY_MIN_LEVEL);
-                const xpIntoLevel = parseCsvIntegerField(xpRaw, lineNumber, 'xp', 0);
+                const totalXp = parseCsvIntegerField(totalXpRaw, lineNumber, 'totalxp', 0);
                 const messageCount = parseCsvIntegerField(messageCountRaw, lineNumber, 'messages', 0);
                 const voiceMinutes = parseCsvIntegerField(voiceMinutesRaw, lineNumber, 'voiceMinutes', 0);
 
                 if (level > ECONOMY_MAX_LEVEL) {
                     throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: level nie moze przekraczac 10000.`);
-                }
-
-                let totalXp = 0;
-                try {
-                    totalXp = resolveTotalXpFromLevelAndProgress(level, xpIntoLevel, config);
-                } catch (error) {
-                    if (error instanceof EconomyCsvImportValidationError) {
-                        throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: ${error.message}`);
-                    }
-
-                    throw error;
                 }
 
                 const importedCoins = resolveLevelUpCoins(ECONOMY_MIN_LEVEL, level, config);

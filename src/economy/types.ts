@@ -169,6 +169,29 @@ export interface EconomyLeaderboardPage {
     entries: EconomyLeaderboardEntry[];
 }
 
+export type ServerStatsPeriod = 'today' | 'week' | 'month' | 'year';
+
+export interface ServerStatsSummary {
+    messages: number;
+    voiceMinutes: number;
+    voiceHours: number;
+}
+
+export interface ServerStatsTopUser {
+    userId: string;
+    messages: number;
+    voiceMinutes: number;
+    score: number;
+    displayName?: string;
+    avatarUrl?: string | null;
+}
+
+export interface ServerStatsDailyPoint {
+    date: string;
+    messages: number;
+    voiceMinutes: number;
+}
+
 export interface EconomyXpAwardResult {
     guildId: string;
     userId: string;

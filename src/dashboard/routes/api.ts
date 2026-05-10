@@ -75,8 +75,15 @@ import {
     updateEconomyConfig,
 } from '../../economy/repository.js';
 import type { EconomyLeaderboardPage, EconomyLeaderboardSortBy } from '../../economy/types.js';
+import {
+    getServerStatsByDateRange,
+    getServerStatsDailyTimeSeries,
+    getServerStatsTopUsers,
+    getStatsExcludedChannelIds,
+    setStatsExcludedChannelIds,
+} from '../../economy/stats-store.js';
 import { parseTimeoutDurationParts } from '../../timeouts/duration.js';
-import { listTicketHistoryEntries, resolveTicketTranscriptFilePath } from '../../tickets/history-store.js';
+import { clearTicketHistory, listTicketHistoryEntries, resolveTicketTranscriptFilePath } from '../../tickets/history-store.js';
 import { createLogger } from '../../utils/logger.js';
 import { listDashboardLogs } from '../../utils/log-reader.js';
 import {
@@ -1300,6 +1307,46 @@ apiRouter.get('/members/search', requireCurrentDashboardRole, async (req, res) =
     }
 });
 
+// GET /api/members/by-ids — resolve display names for a list of Discord user IDs
+apiRouter.get('/members/by-ids', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID!;
+    const idsRaw = typeof req.query.ids === 'string' ? req.query.ids.trim() : '';
+
+    if (!idsRaw) {
+        res.json({ members: [] });
+        return;
+    }
+
+    const ids = idsRaw
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => /^\d{17,20}$/.test(id))
+        .slice(0, 25);
+
+    if (ids.length === 0) {
+        res.json({ members: [] });
+        return;
+    }
+
+    try {
+        const memberResults = await Promise.all(
+            ids.map(async (id) => {
+                const member = await getGuildMember(id, guildId);
+                if (!member) return null;
+                const displayName = member.nick ?? member.user?.global_name ?? member.user?.username ?? id;
+                return { id, displayName };
+            }),
+        );
+
+        res.json({ members: memberResults.filter(Boolean) });
+    } catch (err) {
+        apiLogger.error('MEMBERS_BY_IDS_FETCH_FAILED', 'Nie udalo sie pobrac czlonkow serwera po ID.', {
+            requestedCount: ids.length,
+        }, err);
+        res.status(500).json({ error: 'Nie udało się pobrać danych użytkowników.' });
+    }
+});
+
 // GET /api/timeouts — list active timeouts in current guild
 apiRouter.get('/timeouts', requireCurrentDashboardRole, async (req, res) => {
     const guildId = process.env.GUILD_ID;
@@ -1862,6 +1909,35 @@ apiRouter.get('/tickets/history', requireCurrentDashboardRole, async (req, res) 
             actorUserId: req.session.user?.id,
         }, error);
         res.status(500).json({ error: 'Nie udalo sie pobrac historii ticketow.' });
+    }
+});
+
+// DELETE /api/tickets/history — clear all ticket history (Dev only)
+apiRouter.delete('/tickets/history', requireCurrentDashboardRole, async (req, res) => {
+    try {
+        const guildId = process.env.GUILD_ID;
+        if (!guildId) {
+            res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+            return;
+        }
+
+        const member = await getGuildMember(req.session.user!.id, guildId);
+        if (!member || !hasDevRole(member)) {
+            res.status(403).json({ error: 'Brak uprawnien. Wymagana rola Dev.' });
+            return;
+        }
+
+        await clearTicketHistory();
+
+        apiLogger.info('TICKET_HISTORY_CLEARED', 'Wyczyszczono historie ticketow.', {
+            actorUserId: req.session.user?.id,
+        });
+        res.json({ success: true });
+    } catch (error) {
+        apiLogger.error('TICKET_HISTORY_CLEAR_FAILED', 'Nie udalo sie wyczyscic historii ticketow.', {
+            actorUserId: req.session.user?.id,
+        }, error);
+        res.status(500).json({ error: 'Nie udalo sie wyczyscic historii ticketow.' });
     }
 });
 
@@ -2494,7 +2570,152 @@ apiRouter.post('/embed', async (req, res) => {
             return;
         }
 
-        console.error('Failed to publish message:', err);
+        apiLogger.error('EMBED_PUBLISH_FAILED', 'Krytyczny blad podczas publikowania posta z dashboardu.', {
+            actorUserId: req.session.user?.id,
+            channelId: req.body?.channelId,
+            mode: req.body?.mode,
+        }, err);
         res.status(500).json({ error: 'Nie udało się opublikować wiadomości.' });
+    }
+});
+
+const SERVER_STATS_TOP_USERS_LIMIT_DEFAULT = 10;
+const SERVER_STATS_TOP_USERS_LIMIT_MAX = 50;
+const SERVER_STATS_DATE_RANGE_MAX_DAYS = 365;
+const STATS_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseStatsDateRange(
+    rawStart: unknown,
+    rawEnd: unknown,
+): { startDate: string; endDate: string } | null {
+    const startDate = normalizeTrimmedString(rawStart);
+    const endDate = normalizeTrimmedString(rawEnd);
+    if (!STATS_DATE_RE.test(startDate) || !STATS_DATE_RE.test(endDate)) return null;
+    if (startDate > endDate) return null;
+    const msPerDay = 86_400_000;
+    const diffDays = (new Date(endDate).getTime() - new Date(startDate).getTime()) / msPerDay;
+    if (diffDays > SERVER_STATS_DATE_RANGE_MAX_DAYS) return null;
+    return { startDate, endDate };
+}
+
+// GET /api/stats/server?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD — summary for a date range
+apiRouter.get('/stats/server', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) {
+        res.status(400).json({ error: 'Wymagane parametry startDate i endDate w formacie YYYY-MM-DD (max 365 dni).' });
+        return;
+    }
+
+    try {
+        const summary = await getServerStatsByDateRange(guildId, range.startDate, range.endDate);
+        res.json({ summary });
+    } catch (error) {
+        console.error('Failed to load server stats:', error);
+        res.status(500).json({ error: 'Nie udało się pobrać statystyk serwera.' });
+    }
+});
+
+// GET /api/stats/server/config — read excluded channel IDs for stats
+apiRouter.get('/stats/server/config', requireCurrentDashboardRole, async (_req, res) => {
+    try {
+        const excludedChannelIds = await getStatsExcludedChannelIds();
+        res.json({ excludedChannelIds });
+    } catch (error) {
+        console.error('Failed to load stats config:', error);
+        res.status(500).json({ error: 'Nie udało się pobrać konfiguracji statystyk.' });
+    }
+});
+
+// PUT /api/stats/server/config — update excluded channel IDs for stats
+apiRouter.put('/stats/server/config', requireCurrentDashboardRole, async (req, res) => {
+    const body: unknown = req.body;
+    if (
+        typeof body !== 'object'
+        || body === null
+        || !Array.isArray((body as Record<string, unknown>).excludedChannelIds)
+        || !(body as Record<string, unknown[]>).excludedChannelIds.every((id) => typeof id === 'string')
+    ) {
+        res.status(400).json({ error: 'Pole excludedChannelIds musi być tablicą stringów.' });
+        return;
+    }
+
+    const channelIds: string[] = (body as { excludedChannelIds: string[] }).excludedChannelIds;
+
+    try {
+        await setStatsExcludedChannelIds(channelIds);
+        res.json({ success: true, excludedChannelIds: channelIds });
+    } catch (error) {
+        console.error('Failed to update stats config:', error);
+        res.status(500).json({ error: 'Nie udało się zaktualizować konfiguracji statystyk.' });
+    }
+});
+
+// GET /api/stats/server/top-users?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&limit=10
+apiRouter.get('/stats/server/top-users', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) {
+        res.status(400).json({ error: 'Wymagane parametry startDate i endDate w formacie YYYY-MM-DD (max 365 dni).' });
+        return;
+    }
+
+    const limit = Math.max(1, Math.min(
+        SERVER_STATS_TOP_USERS_LIMIT_MAX,
+        parsePositiveIntQuery(req.query.limit, SERVER_STATS_TOP_USERS_LIMIT_DEFAULT),
+    ));
+
+    try {
+        const rawTopUsers = await getServerStatsTopUsers(guildId, range.startDate, range.endDate, limit);
+        const uniqueUserIds = [...new Set(rawTopUsers.map((u) => u.userId).filter((id) => id.length > 0))];
+        const profilePairs = await resolveLeaderboardProfilesWithLimit(guildId, uniqueUserIds);
+        const profileByUserId = new Map(profilePairs);
+
+        const topUsers = rawTopUsers.map((user) => {
+            const profile = profileByUserId.get(user.userId);
+            return {
+                ...user,
+                displayName: profile?.displayName ?? `Uzytkownik ${user.userId}`,
+                avatarUrl: profile?.avatarUrl ?? null,
+            };
+        });
+
+        res.json({ topUsers });
+    } catch (error) {
+        console.error('Failed to load server stats top users:', error);
+        res.status(500).json({ error: 'Nie udało się pobrać najaktywniejszych użytkowników.' });
+    }
+});
+
+// GET /api/stats/server/timeseries?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD — daily time series
+apiRouter.get('/stats/server/timeseries', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) {
+        res.status(400).json({ error: 'Wymagane parametry startDate i endDate w formacie YYYY-MM-DD (max 365 dni).' });
+        return;
+    }
+
+    try {
+        const timeSeries = await getServerStatsDailyTimeSeries(guildId, range.startDate, range.endDate);
+        res.json({ timeSeries });
+    } catch (error) {
+        console.error('Failed to load server stats time series:', error);
+        res.status(500).json({ error: 'Nie udało się pobrać szeregu czasowego statystyk serwera.' });
     }
 });

@@ -73,6 +73,10 @@ async function ensureEconomyConfigColumns(db: Database): Promise<void> {
             name: 'level_baseline_version',
             sql: 'ALTER TABLE economy_config ADD COLUMN level_baseline_version INTEGER NOT NULL DEFAULT 0',
         },
+        {
+            name: 'stats_excluded_channel_ids',
+            sql: "ALTER TABLE economy_config ADD COLUMN stats_excluded_channel_ids TEXT NOT NULL DEFAULT '[]'",
+        },
     ];
 
     for (const migration of migrations) {
@@ -244,6 +248,20 @@ async function initializeSchema(db: Database): Promise<void> {
 
         CREATE INDEX IF NOT EXISTS idx_dashboard_leaderboard_profile_cache_expires
             ON dashboard_leaderboard_profile_cache(expires_at ASC);
+
+        CREATE TABLE IF NOT EXISTS daily_user_stats (
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            messages INTEGER NOT NULL DEFAULT 0,
+            voice_minutes INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id, date),
+            CHECK (messages >= 0),
+            CHECK (voice_minutes >= 0)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_daily_user_stats_guild_date
+            ON daily_user_stats(guild_id, date);
     `);
 
     await ensureEconomyConfigColumns(db);

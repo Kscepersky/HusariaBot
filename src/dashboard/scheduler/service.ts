@@ -8,6 +8,9 @@ import {
     updateScheduledPost,
 } from './store.js';
 import type { ScheduledPost } from './types.js';
+import { createLogger } from '../../utils/logger.js';
+
+const schedulerLogger = createLogger('dashboard:scheduler');
 
 const timers = new Map<string, NodeJS.Timeout>();
 const MAX_TIMEOUT_MS = 2_147_000_000;
@@ -80,7 +83,10 @@ async function executeScheduledPost(postId: string): Promise<void> {
             try {
                 await deleteWatchpartyChannel(createdWatchpartyChannelId);
             } catch (cleanupError) {
-                console.error('Failed to rollback watchparty channel after scheduler persist error:', cleanupError);
+                schedulerLogger.error('WATCHPARTY_ROLLBACK_FAILED', 'Nie udalo sie cofnac kanalu watchparty po bledzie zapisu schedulera.', {
+                    postId,
+                    channelId: createdWatchpartyChannelId,
+                }, cleanupError);
                 rollbackFailureNote = `Rollback kanału watchparty nie powiódł się (channelId=${createdWatchpartyChannelId}).`;
             }
         }

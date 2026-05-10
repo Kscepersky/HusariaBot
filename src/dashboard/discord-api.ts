@@ -391,7 +391,7 @@ export async function getGuildTextChannels(guildId: string): Promise<DiscordChan
 
     const channels = await resp.json() as DiscordChannel[];
     return channels
-        .filter(c => c.type === 0)
+        .filter(c => c.type === 0 || c.type === 5)
         .sort((a, b) => a.position - b.position);
 }
 
