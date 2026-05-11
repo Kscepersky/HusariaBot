@@ -1,4 +1,4 @@
-<![CDATA[<div align="center">
+<div align="center">
 
 # HusariaBot
 
@@ -419,4 +419,3 @@ Every module creates a scoped logger via `createLogger(scope)` from `src/utils/l
 ## License
 
 [MIT](LICENSE)
-]]>
