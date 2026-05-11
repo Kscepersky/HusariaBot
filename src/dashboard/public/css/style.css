@@ -1407,16 +1407,22 @@ input[name="colorName"] { display: none }
 .embed-description s      { text-decoration: line-through }
 .embed-description .md-h1-alt,
 .embed-description .md-h2,
-.embed-description .md-h3 {
+.embed-description .md-h3,
+.discord-plain-message .md-h1-alt,
+.discord-plain-message .md-h2,
+.discord-plain-message .md-h3 {
   display: block;
   color: #fff;
   font-weight: 700;
   margin: 4px 0;
 }
 
-.embed-description .md-h1-alt { font-size: 17px }
-.embed-description .md-h2 { font-size: 15px }
-.embed-description .md-h3 { font-size: 14px }
+.embed-description .md-h1-alt,
+.discord-plain-message .md-h1-alt { font-size: 17px }
+.embed-description .md-h2,
+.discord-plain-message .md-h2 { font-size: 15px }
+.embed-description .md-h3,
+.discord-plain-message .md-h3 { font-size: 14px }
 
 .md-mention {
   display: inline-block;
