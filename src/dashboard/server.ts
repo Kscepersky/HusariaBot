@@ -205,7 +205,7 @@ export function createDashboardApp() {
         saveUninitialized: false,
         cookie: {
             httpOnly: true,
-            sameSite: 'strict',
+            sameSite: 'lax',
             maxAge:   sessionMaxAgeMs,
             secure:   process.env.NODE_ENV === 'production',
         },
