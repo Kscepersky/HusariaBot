@@ -1783,3 +1783,108 @@ input[name="colorName"] { display: none }
 .stats-save-error {
   color: #ed4245;
 }
+
+/* ─── Stats Tab Layout ─────────────────────────────────────────────────────── */
+.stats-main-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.stats-tabs-nav {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.stats-tab-btn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+
+.stats-tab-btn:hover {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.stats-tab-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.stats-tab-panel {
+  display: none;
+}
+
+.stats-tab-panel.active {
+  display: block;
+}
+
+.stats-tab-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.stats-tab-toolbar .stats-date-range-bar {
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.stats-two-col {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.stats-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.stats-chart-col {
+  flex: 0 0 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stats-doughnut-wrapper {
+  width: 100%;
+  max-width: 260px;
+  position: relative;
+}
+
+.stats-load-more-btn {
+  display: block;
+  margin: 12px auto 0;
+  font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .stats-two-col {
+    flex-direction: column;
+  }
+
+  .stats-chart-col {
+    flex: none;
+    width: 100%;
+  }
+}

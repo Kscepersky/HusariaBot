@@ -6,6 +6,7 @@ import {
     getDiscordUser,
     getGuildMember,
     hasRequiredRole,
+    resolveDashboardRole,
 } from '../discord-api.js';
 import type { SessionUser } from '../types.js';
 import { createLogger } from '../../utils/logger.js';
@@ -130,10 +131,11 @@ authRouter.get('/discord/callback', async (req, res) => {
         }
 
         const sessionUser: SessionUser = {
-            id:         discordUser.id,
-            username:   discordUser.username,
-            globalName: discordUser.global_name,
-            avatar:     discordUser.avatar,
+            id:           discordUser.id,
+            username:     discordUser.username,
+            globalName:   discordUser.global_name,
+            avatar:       discordUser.avatar,
+            dashboardRole: resolveDashboardRole(member),
         };
 
         await new Promise<void>((resolve, reject) => {
@@ -154,6 +156,7 @@ authRouter.get('/discord/callback', async (req, res) => {
             username: sessionUser.username,
             globalName: sessionUser.globalName ?? null,
             avatarHash: sessionUser.avatar ?? null,
+            dashboardRole: resolveDashboardRole(member),
             ip: req.ip ?? '',
             userAgent: req.get('user-agent') ?? '',
             createdAt: Date.now(),
@@ -194,6 +197,7 @@ authRouter.post('/logout', (req, res) => {
                 username: logoutUser.username,
                 globalName: logoutUser.globalName ?? null,
                 avatarHash: logoutUser.avatar ?? null,
+                dashboardRole: logoutUser.dashboardRole ?? null,
                 ip: req.ip ?? '',
                 userAgent: req.get('user-agent') ?? '',
                 createdAt: Date.now(),

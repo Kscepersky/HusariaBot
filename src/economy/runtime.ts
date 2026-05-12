@@ -9,7 +9,7 @@ import {
     incrementMessageCount,
     incrementVoiceMinutes,
 } from './repository.js';
-import { getStatsExcludedChannelIds } from './stats-store.js';
+import { getStatsExcludedChannelIds, incrementChannelMessageStats, incrementChannelVoiceStats } from './stats-store.js';
 import type { EconomyConfig, EconomyLevelRoleMapping, EconomyXpAwardResult } from './types.js';
 
 const VOICE_TICK_INTERVAL_MS = 60_000;
@@ -281,6 +281,7 @@ export async function handleEconomyMessageCreate(message: Message): Promise<void
         const excludedChannelIds = await getCachedExcludedChannelIds(nowTimestamp);
         if (!excludedChannelIds.includes(message.channelId)) {
             await incrementMessageCount(message.guildId, message.author.id, nowTimestamp);
+            await incrementChannelMessageStats(message.guildId, message.channelId, nowTimestamp);
         }
     } catch (error) {
         console.error('❌  Nie udalo sie zwiekszyc licznika wiadomosci:', error);
@@ -340,6 +341,7 @@ async function processVoiceChannelXpTick(client: Client): Promise<void> {
             const isOpenWatchpartyChannel = openWatchpartyChannelIds.has(voiceChannel.id);
 
             const activeMembers = voiceChannel.members.filter((member) => !member.user.bot);
+            const activeMemberCount = activeMembers.size;
             await Promise.all(activeMembers.map(async (member) => {
                 try {
                     await incrementVoiceMinutes(guild.id, member.id, 1, nowTimestamp);
@@ -347,6 +349,14 @@ async function processVoiceChannelXpTick(client: Client): Promise<void> {
                     console.error(`❌  Nie udalo sie zwiekszyc liczby minut VC dla ${member.id}:`, error);
                 }
             }));
+
+            if (activeMemberCount > 0) {
+                try {
+                    await incrementChannelVoiceStats(guild.id, voiceChannel.id, activeMemberCount, nowTimestamp);
+                } catch (error) {
+                    console.error(`❌  Nie udalo sie zwiekszyc statystyk VC kanalu ${voiceChannel.id}:`, error);
+                }
+            }
 
             const eligibleMembers = voiceChannel.members.filter((member) => {
                 return isVoiceChannelMemberEligible(member, config, afkChannelId);

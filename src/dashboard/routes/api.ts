@@ -24,6 +24,7 @@ import {
     sendImageToChannel,
     sendDirectMessage,
     updateGuildScheduledEvent,
+    getGuildAllChannels,
     DiscordRateLimitedError,
     type DiscordScheduledEvent,
 } from '../discord-api.js';
@@ -81,7 +82,23 @@ import {
     getServerStatsTopUsers,
     getStatsExcludedChannelIds,
     setStatsExcludedChannelIds,
+    getMessageSummary,
+    getMessageTimeSeries,
+    getTopMessageUsers,
+    getTopMessageChannels,
+    getVoiceSummary,
+    getVoiceTimeSeries,
+    getTopVoiceUsers,
+    getTopVoiceChannels,
+    getMemberTimeSeries,
+    getMemberSummary,
+    getActiveUsersInPeriod,
+    getAllUserStatsForExport,
+    getAllChannelStatsForExport,
+    getAllMemberCountsForExport,
+    resetAllStats,
 } from '../../economy/stats-store.js';
+import archiver from 'archiver';
 import { parseTimeoutDurationParts } from '../../timeouts/duration.js';
 import { clearTicketHistory, listTicketHistoryEntries, resolveTicketTranscriptFilePath } from '../../tickets/history-store.js';
 import { createLogger } from '../../utils/logger.js';
@@ -2745,5 +2762,377 @@ apiRouter.get('/stats/server/timeseries', requireCurrentDashboardRole, async (re
     } catch (error) {
         console.error('Failed to load server stats time series:', error);
         res.status(500).json({ error: 'Nie udało się pobrać szeregu czasowego statystyk serwera.' });
+    }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// New stats endpoints: Messages, Voice, Members, Export
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STATS_TOP_LIMIT_DEFAULT = 10;
+const STATS_TOP_LIMIT_MAX = 100;
+
+const VOICE_CHANNEL_TYPES = new Set([2, 13]); // GUILD_VOICE, GUILD_STAGE_VOICE
+
+async function resolveChannelsMap(guildId: string): Promise<Map<string, { name: string; type: number }>> {
+    try {
+        const channels = await getGuildAllChannels(guildId);
+        return new Map(channels.map((ch) => [ch.id, { name: ch.name, type: ch.type }]));
+    } catch {
+        return new Map();
+    }
+}
+
+// ── Messages tab ──────────────────────────────────────────────────────────────
+
+// GET /api/stats/messages/summary?startDate=&endDate=
+apiRouter.get('/stats/messages/summary', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    try {
+        const summary = await getMessageSummary(guildId, range.startDate, range.endDate);
+        res.json({ summary });
+    } catch (error) {
+        apiLogger.error('STATS_MESSAGES_SUMMARY_FAILED', 'Nie udalo sie pobrac podsumowania wiadomosci.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać podsumowania wiadomości.' });
+    }
+});
+
+// GET /api/stats/messages/timeseries?startDate=&endDate=
+apiRouter.get('/stats/messages/timeseries', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    try {
+        const timeSeries = await getMessageTimeSeries(guildId, range.startDate, range.endDate);
+        res.json({ timeSeries });
+    } catch (error) {
+        apiLogger.error('STATS_MESSAGES_TIMESERIES_FAILED', 'Nie udalo sie pobrac szeregu wiadomosci.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać szeregu czasowego wiadomości.' });
+    }
+});
+
+// GET /api/stats/messages/top-users?startDate=&endDate=&limit=10
+apiRouter.get('/stats/messages/top-users', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    const limit = Math.max(1, Math.min(STATS_TOP_LIMIT_MAX, parsePositiveIntQuery(req.query.limit, STATS_TOP_LIMIT_DEFAULT)));
+    try {
+        const rawUsers = await getTopMessageUsers(guildId, range.startDate, range.endDate, limit);
+        const uniqueUserIds = [...new Set(rawUsers.map((u) => u.userId))];
+        const profilePairs = await resolveLeaderboardProfilesWithLimit(guildId, uniqueUserIds);
+        const profileByUserId = new Map(profilePairs);
+        const topUsers = rawUsers.map((u) => ({
+            ...u,
+            displayName: profileByUserId.get(u.userId)?.displayName ?? `Użytkownik ${u.userId}`,
+            avatarUrl: profileByUserId.get(u.userId)?.avatarUrl ?? null,
+        }));
+        res.json({ topUsers });
+    } catch (error) {
+        apiLogger.error('STATS_MESSAGES_TOP_USERS_FAILED', 'Nie udalo sie pobrac top uzytkownikow wiadomosci.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać rankingu użytkowników.' });
+    }
+});
+
+// GET /api/stats/messages/top-channels?startDate=&endDate=&limit=10
+apiRouter.get('/stats/messages/top-channels', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    const limit = Math.max(1, Math.min(STATS_TOP_LIMIT_MAX, parsePositiveIntQuery(req.query.limit, STATS_TOP_LIMIT_DEFAULT)));
+    try {
+        const [rawChannels, channelInfo] = await Promise.all([
+            getTopMessageChannels(guildId, range.startDate, range.endDate, limit),
+            resolveChannelsMap(guildId),
+        ]);
+        const topChannels = rawChannels
+            .filter((ch) => !VOICE_CHANNEL_TYPES.has(channelInfo.get(ch.channelId)?.type ?? 0))
+            .map((ch) => ({
+                ...ch,
+                channelName: channelInfo.get(ch.channelId)?.name ?? `#${ch.channelId}`,
+            }));
+        res.json({ topChannels });
+    } catch (error) {
+        apiLogger.error('STATS_MESSAGES_TOP_CHANNELS_FAILED', 'Nie udalo sie pobrac top kanalow wiadomosci.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać rankingu kanałów.' });
+    }
+});
+
+// ── Voice tab ─────────────────────────────────────────────────────────────────
+
+// GET /api/stats/voice/summary?startDate=&endDate=
+apiRouter.get('/stats/voice/summary', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    try {
+        const summary = await getVoiceSummary(guildId, range.startDate, range.endDate);
+        res.json({ summary });
+    } catch (error) {
+        apiLogger.error('STATS_VOICE_SUMMARY_FAILED', 'Nie udalo sie pobrac podsumowania voice.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać podsumowania voice.' });
+    }
+});
+
+// GET /api/stats/voice/timeseries?startDate=&endDate=
+apiRouter.get('/stats/voice/timeseries', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    try {
+        const timeSeries = await getVoiceTimeSeries(guildId, range.startDate, range.endDate);
+        res.json({ timeSeries });
+    } catch (error) {
+        apiLogger.error('STATS_VOICE_TIMESERIES_FAILED', 'Nie udalo sie pobrac szeregu voice.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać szeregu czasowego voice.' });
+    }
+});
+
+// GET /api/stats/voice/top-users?startDate=&endDate=&limit=10
+apiRouter.get('/stats/voice/top-users', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    const limit = Math.max(1, Math.min(STATS_TOP_LIMIT_MAX, parsePositiveIntQuery(req.query.limit, STATS_TOP_LIMIT_DEFAULT)));
+    try {
+        const rawUsers = await getTopVoiceUsers(guildId, range.startDate, range.endDate, limit);
+        const uniqueUserIds = [...new Set(rawUsers.map((u) => u.userId))];
+        const profilePairs = await resolveLeaderboardProfilesWithLimit(guildId, uniqueUserIds);
+        const profileByUserId = new Map(profilePairs);
+        const topUsers = rawUsers.map((u) => ({
+            ...u,
+            displayName: profileByUserId.get(u.userId)?.displayName ?? `Użytkownik ${u.userId}`,
+            avatarUrl: profileByUserId.get(u.userId)?.avatarUrl ?? null,
+        }));
+        res.json({ topUsers });
+    } catch (error) {
+        apiLogger.error('STATS_VOICE_TOP_USERS_FAILED', 'Nie udalo sie pobrac top uzytkownikow voice.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać rankingu użytkowników voice.' });
+    }
+});
+
+// GET /api/stats/voice/top-channels?startDate=&endDate=&limit=10
+apiRouter.get('/stats/voice/top-channels', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    const limit = Math.max(1, Math.min(STATS_TOP_LIMIT_MAX, parsePositiveIntQuery(req.query.limit, STATS_TOP_LIMIT_DEFAULT)));
+    try {
+        const [rawChannels, channelInfo] = await Promise.all([
+            getTopVoiceChannels(guildId, range.startDate, range.endDate, limit),
+            resolveChannelsMap(guildId),
+        ]);
+        const topChannels = rawChannels
+            .filter((ch) => VOICE_CHANNEL_TYPES.has(channelInfo.get(ch.channelId)?.type ?? 0))
+            .map((ch) => ({
+                ...ch,
+                channelName: channelInfo.get(ch.channelId)?.name ?? `#${ch.channelId}`,
+            }));
+        res.json({ topChannels });
+    } catch (error) {
+        apiLogger.error('STATS_VOICE_TOP_CHANNELS_FAILED', 'Nie udalo sie pobrac top kanalow voice.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać rankingu kanałów voice.' });
+    }
+});
+
+// ── Members tab ───────────────────────────────────────────────────────────────
+
+// GET /api/stats/members/summary?startDate=&endDate=
+apiRouter.get('/stats/members/summary', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    try {
+        const summary = await getMemberSummary(guildId, range.startDate, range.endDate);
+        res.json({ summary });
+    } catch (error) {
+        apiLogger.error('STATS_MEMBERS_SUMMARY_FAILED', 'Nie udalo sie pobrac podsumowania czlonkow.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać podsumowania członków.' });
+    }
+});
+
+// GET /api/stats/members/timeseries?startDate=&endDate=
+apiRouter.get('/stats/members/timeseries', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    try {
+        const timeSeries = await getMemberTimeSeries(guildId, range.startDate, range.endDate);
+        res.json({ timeSeries });
+    } catch (error) {
+        apiLogger.error('STATS_MEMBERS_TIMESERIES_FAILED', 'Nie udalo sie pobrac szeregu czlonkow.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać szeregu czasowego członków.' });
+    }
+});
+
+// GET /api/stats/members/active-users?startDate=&endDate=
+apiRouter.get('/stats/members/active-users', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    try {
+        const rawUsers = await getActiveUsersInPeriod(guildId, range.startDate, range.endDate);
+        const uniqueUserIds = [...new Set(rawUsers.map((u) => u.userId))];
+        const profilePairs = await resolveLeaderboardProfilesWithLimit(guildId, uniqueUserIds);
+        const profileByUserId = new Map(profilePairs);
+        const activeUsers = rawUsers.map((u) => ({
+            ...u,
+            displayName: profileByUserId.get(u.userId)?.displayName ?? `Użytkownik ${u.userId}`,
+            avatarUrl: profileByUserId.get(u.userId)?.avatarUrl ?? null,
+        }));
+        res.json({ activeUsers });
+    } catch (error) {
+        apiLogger.error('STATS_MEMBERS_ACTIVE_FAILED', 'Nie udalo sie pobrac aktywnych uzytkownikow.', {}, error);
+        res.status(500).json({ error: 'Nie udało się pobrać aktywnych użytkowników.' });
+    }
+});
+
+// ── Per-tab CSV exports ───────────────────────────────────────────────────────
+
+function rowsToCsv(headers: string[], rows: string[][]): string {
+    const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const lines = [headers.map(escape).join(',')];
+    for (const row of rows) {
+        lines.push(row.map(escape).join(','));
+    }
+    return lines.join('\r\n');
+}
+
+// GET /api/stats/export/messages?startDate=&endDate=
+apiRouter.get('/stats/export/messages', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    try {
+        const rows = await getAllUserStatsForExport(guildId);
+        const filtered = rows.filter((r) => r.date >= range.startDate && r.date <= range.endDate && r.messages > 0);
+        const csv = rowsToCsv(
+            ['date', 'user_id', 'messages'],
+            filtered.map((r) => [r.date, r.userId, String(r.messages)]),
+        );
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="messages_${range.startDate}_${range.endDate}.csv"`);
+        res.send(csv);
+    } catch (error) {
+        apiLogger.error('STATS_EXPORT_MESSAGES_FAILED', 'Nie udalo sie eksportowac wiadomosci CSV.', {}, error);
+        res.status(500).json({ error: 'Nie udało się wygenerować eksportu.' });
+    }
+});
+
+// GET /api/stats/export/voice?startDate=&endDate=
+apiRouter.get('/stats/export/voice', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    try {
+        const rows = await getAllUserStatsForExport(guildId);
+        const filtered = rows.filter((r) => r.date >= range.startDate && r.date <= range.endDate && r.voiceMinutes > 0);
+        const csv = rowsToCsv(
+            ['date', 'user_id', 'voice_minutes'],
+            filtered.map((r) => [r.date, r.userId, String(r.voiceMinutes)]),
+        );
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="voice_${range.startDate}_${range.endDate}.csv"`);
+        res.send(csv);
+    } catch (error) {
+        apiLogger.error('STATS_EXPORT_VOICE_FAILED', 'Nie udalo sie eksportowac voice CSV.', {}, error);
+        res.status(500).json({ error: 'Nie udało się wygenerować eksportu.' });
+    }
+});
+
+// GET /api/stats/export/members?startDate=&endDate=
+apiRouter.get('/stats/export/members', requireCurrentDashboardRole, async (req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
+    if (!range) { res.status(400).json({ error: 'Wymagane startDate i endDate (YYYY-MM-DD, max 365 dni).' }); return; }
+    try {
+        const rows = await getAllMemberCountsForExport(guildId);
+        const filtered = rows.filter((r) => r.date >= range.startDate && r.date <= range.endDate);
+        const csv = rowsToCsv(
+            ['date', 'member_count', 'joins', 'leaves'],
+            filtered.map((r) => [r.date, String(r.memberCount), String(r.joins), String(r.leaves)]),
+        );
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="members_${range.startDate}_${range.endDate}.csv"`);
+        res.send(csv);
+    } catch (error) {
+        apiLogger.error('STATS_EXPORT_MEMBERS_FAILED', 'Nie udalo sie eksportowac czlonkow CSV.', {}, error);
+        res.status(500).json({ error: 'Nie udało się wygenerować eksportu.' });
+    }
+});
+
+// GET /api/stats/export/all — ZIP with all historical data
+apiRouter.get('/stats/export/all', requireCurrentDashboardRole, async (_req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    try {
+        const [userRows, channelRows, memberRows] = await Promise.all([
+            getAllUserStatsForExport(guildId),
+            getAllChannelStatsForExport(guildId),
+            getAllMemberCountsForExport(guildId),
+        ]);
+
+        const usersCsv = rowsToCsv(
+            ['date', 'user_id', 'messages', 'voice_minutes'],
+            userRows.map((r) => [r.date, r.userId, String(r.messages), String(r.voiceMinutes)]),
+        );
+        const channelsCsv = rowsToCsv(
+            ['date', 'channel_id', 'messages', 'voice_minutes'],
+            channelRows.map((r) => [r.date, r.channelId, String(r.messages), String(r.voiceMinutes)]),
+        );
+        const membersCsv = rowsToCsv(
+            ['date', 'member_count', 'joins', 'leaves'],
+            memberRows.map((r) => [r.date, String(r.memberCount), String(r.joins), String(r.leaves)]),
+        );
+
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', 'attachment; filename="stats_export_all.zip"');
+
+        const archive = archiver('zip', { zlib: { level: 6 } });
+        archive.on('error', (err: Error) => {
+            apiLogger.error('STATS_EXPORT_ALL_ARCHIVE_ERROR', 'Blad archiwum ZIP.', {}, err);
+            if (!res.headersSent) {
+                res.status(500).json({ error: 'Nie udało się wygenerować archiwum.' });
+            }
+        });
+        archive.pipe(res);
+        archive.append(usersCsv, { name: 'users_daily.csv' });
+        archive.append(channelsCsv, { name: 'channels_daily.csv' });
+        archive.append(membersCsv, { name: 'member_counts.csv' });
+        await archive.finalize();
+    } catch (error) {
+        apiLogger.error('STATS_EXPORT_ALL_FAILED', 'Nie udalo sie eksportowac wszystkich danych.', {}, error);
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Nie udało się wygenerować eksportu.' });
+        }
+    }
+});
+
+// POST /api/stats/reset — usuwa wszystkie statystyki serwera
+apiRouter.post('/stats/reset', requireCurrentDashboardRole, async (_req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
+    try {
+        await resetAllStats(guildId);
+        res.json({ ok: true });
+    } catch (error) {
+        apiLogger.error('STATS_RESET_FAILED', 'Nie udalo sie zresetowac statystyk.', {}, error);
+        res.status(500).json({ error: 'Nie udało się zresetować statystyk.' });
     }
 });

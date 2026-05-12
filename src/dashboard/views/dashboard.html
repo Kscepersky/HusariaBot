@@ -862,82 +862,252 @@
     </div>
 
     <div id="section-server-stats" class="section-panel">
-      <div class="section-header">
-        <h2>📊 Statystyki Serwera</h2>
-        <p>Przeglądaj aktywność serwera — wiadomości i godziny voice — dla wybranego zakresu dat.</p>
-      </div>
-
-      <div class="creator-form-card">
-        <div class="stats-date-range-bar">
-          <div class="stats-date-range-presets">
-            <button class="stats-preset-btn active" data-preset="today">Dzisiaj</button>
-            <button class="stats-preset-btn" data-preset="7d">7 dni</button>
-            <button class="stats-preset-btn" data-preset="30d">30 dni</button>
-            <button class="stats-preset-btn" data-preset="365d">365 dni</button>
-          </div>
-          <div class="stats-date-range-inputs">
-            <label class="stats-date-label">
-              Od
-              <input type="date" id="stats-start-date" class="stats-date-input">
-            </label>
-            <span class="stats-date-separator">—</span>
-            <label class="stats-date-label">
-              Do
-              <input type="date" id="stats-end-date" class="stats-date-input">
-            </label>
-            <button class="btn-primary stats-apply-btn" id="stats-apply-btn">Zastosuj</button>
-          </div>
-        </div>
-
-        <div class="server-stats-cards" id="server-stats-cards">
-          <div class="server-stats-card">
-            <div class="server-stats-card-value" id="server-stats-messages">—</div>
-            <div class="server-stats-card-label">Wiadomości</div>
-          </div>
-          <div class="server-stats-card">
-            <div class="server-stats-card-value" id="server-stats-voice-hours">—</div>
-            <div class="server-stats-card-label">Godziny Voice</div>
-          </div>
-          <div class="server-stats-card">
-            <div class="server-stats-card-value" id="server-stats-voice-minutes">—</div>
-            <div class="server-stats-card-label">Minuty Voice</div>
-          </div>
+      <div class="section-header stats-main-header">
+        <div>
+          <h2>📊 Statystyki Serwera</h2>
+          <p>Przeglądaj aktywność serwera — użytkownicy, wiadomości i voice — dla wybranego zakresu dat.</p>
         </div>
       </div>
 
-      <div class="creator-form-card">
-        <div class="section-header">
-          <h3>📈 Aktywność dzienna</h3>
-          <p>Wiadomości i minuty voice dla wybranego zakresu dat.</p>
-        </div>
-        <div class="server-stats-chart-wrapper">
-          <canvas id="server-stats-chart"></canvas>
-        </div>
+      <!-- Tab navigation -->
+      <div class="stats-tabs-nav">
+        <button class="stats-tab-btn active" data-tab="users">👥 Użytkownicy</button>
+        <button class="stats-tab-btn" data-tab="messages">💬 Wiadomości</button>
+        <button class="stats-tab-btn" data-tab="voice">🎙 Voice</button>
+        <button class="stats-tab-btn" data-tab="settings">⚙️ Ustawienia</button>
       </div>
 
-      <div class="creator-form-card">
-        <div class="section-header">
-          <h3>🥇 Najaktywniejszi użytkownicy</h3>
-          <p>Ranking według łącznej aktywności (wiadomości + minuty voice) dla wybranego zakresu dat.</p>
+      <!-- ───────── TAB: Użytkownicy ───────── -->
+      <div class="stats-tab-panel active" id="stats-tab-users">
+        <div class="creator-form-card">
+          <div class="stats-tab-toolbar">
+            <div class="stats-date-range-bar">
+              <div class="stats-date-range-presets">
+                <button class="stats-preset-btn active" data-tab="users" data-preset="today">Dzisiaj</button>
+                <button class="stats-preset-btn" data-tab="users" data-preset="7d">7 dni</button>
+                <button class="stats-preset-btn" data-tab="users" data-preset="month">Miesiąc</button>
+              </div>
+              <div class="stats-date-range-inputs">
+                <label class="stats-date-label">Od <input type="date" class="stats-date-input" id="users-start-date"></label>
+                <span class="stats-date-separator">—</span>
+                <label class="stats-date-label">Do <input type="date" class="stats-date-input" id="users-end-date"></label>
+                <button class="btn-primary stats-apply-btn" data-tab="users">Zastosuj</button>
+              </div>
+            </div>
+            <button class="btn-secondary stats-csv-btn" id="users-csv-btn" title="Eksportuj CSV">⬇ CSV</button>
+          </div>
         </div>
-        <div id="server-stats-top-users-list" class="scheduled-list"></div>
-      </div>
 
-      <div class="creator-form-card">
-        <div class="section-header">
-          <h3>⚙️ Ustawienia statystyk</h3>
-          <p>Wybierz kanały, których wiadomości nie będą zliczane w statystykach (np. kanały botów).</p>
-        </div>
-        <div class="stats-excluded-channels-section">
-          <div class="form-group">
-            <label class="form-label">Wykluczone kanały</label>
-            <div id="stats-excluded-channels-list" class="stats-channel-checklist">
-              <div class="scheduled-empty">Ładowanie kanałów...</div>
+        <div class="creator-form-card">
+          <div class="server-stats-cards" id="users-kpi-cards">
+            <div class="server-stats-card">
+              <div class="server-stats-card-value" id="users-kpi-count">—</div>
+              <div class="server-stats-card-label">Członków na serwerze</div>
+            </div>
+            <div class="server-stats-card">
+              <div class="server-stats-card-value" id="users-kpi-balance">—</div>
+              <div class="server-stats-card-label">Bilans (okres)</div>
             </div>
           </div>
-          <div class="stats-settings-actions">
-            <button class="btn-primary" id="stats-save-excluded-btn">Zapisz ustawienia</button>
-            <span class="stats-save-status" id="stats-save-status"></span>
+        </div>
+
+        <div class="creator-form-card">
+          <div class="section-header">
+            <h3>📈 Liczba członków serwera</h3>
+          </div>
+          <div class="server-stats-chart-wrapper">
+            <canvas id="users-members-chart"></canvas>
+          </div>
+        </div>
+
+        <div class="creator-form-card">
+          <div class="section-header">
+            <h3>🥇 Najbardziej aktywni użytkownicy</h3>
+            <p>Ranking według łącznej aktywności (wiadomości + minuty voice) dla wybranego okresu.</p>
+          </div>
+          <div id="users-active-list" class="scheduled-list"></div>
+        </div>
+      </div>
+
+      <!-- ───────── TAB: Wiadomości ───────── -->
+      <div class="stats-tab-panel" id="stats-tab-messages">
+        <div class="creator-form-card">
+          <div class="stats-tab-toolbar">
+            <div class="stats-date-range-bar">
+              <div class="stats-date-range-presets">
+                <button class="stats-preset-btn active" data-tab="messages" data-preset="today">Dzisiaj</button>
+                <button class="stats-preset-btn" data-tab="messages" data-preset="7d">7 dni</button>
+                <button class="stats-preset-btn" data-tab="messages" data-preset="month">Miesiąc</button>
+              </div>
+              <div class="stats-date-range-inputs">
+                <label class="stats-date-label">Od <input type="date" class="stats-date-input" id="messages-start-date"></label>
+                <span class="stats-date-separator">—</span>
+                <label class="stats-date-label">Do <input type="date" class="stats-date-input" id="messages-end-date"></label>
+                <button class="btn-primary stats-apply-btn" data-tab="messages">Zastosuj</button>
+              </div>
+            </div>
+            <button class="btn-secondary stats-csv-btn" id="messages-csv-btn" title="Eksportuj CSV">⬇ CSV</button>
+          </div>
+        </div>
+
+        <div class="creator-form-card">
+          <div class="server-stats-cards" id="messages-kpi-cards">
+            <div class="server-stats-card">
+              <div class="server-stats-card-value" id="messages-kpi-total">—</div>
+              <div class="server-stats-card-label">Wiadomości łącznie</div>
+            </div>
+            <div class="server-stats-card">
+              <div class="server-stats-card-value" id="messages-kpi-unique">—</div>
+              <div class="server-stats-card-label">Unikalni użytkownicy</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="creator-form-card">
+          <div class="section-header">
+            <h3>📈 Wiadomości dziennie</h3>
+          </div>
+          <div class="server-stats-chart-wrapper">
+            <canvas id="messages-timeseries-chart"></canvas>
+          </div>
+        </div>
+
+        <div class="creator-form-card">
+          <div class="section-header">
+            <h3>🥇 Top użytkownicy</h3>
+          </div>
+          <div id="messages-top-users-list" class="scheduled-list"></div>
+          <button class="btn-secondary stats-load-more-btn" id="messages-load-more-btn">Załaduj więcej</button>
+        </div>
+
+        <div class="creator-form-card stats-two-col">
+          <div class="stats-col">
+            <div class="section-header">
+              <h3>📢 Top kanały</h3>
+            </div>
+            <div id="messages-top-channels-list" class="scheduled-list"></div>
+          </div>
+          <div class="stats-col stats-chart-col">
+            <div class="section-header">
+              <h3>Udział kanałów</h3>
+            </div>
+            <div class="stats-doughnut-wrapper">
+              <canvas id="messages-channels-doughnut"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────── TAB: Voice ───────── -->
+      <div class="stats-tab-panel" id="stats-tab-voice">
+        <div class="creator-form-card">
+          <div class="stats-tab-toolbar">
+            <div class="stats-date-range-bar">
+              <div class="stats-date-range-presets">
+                <button class="stats-preset-btn active" data-tab="voice" data-preset="today">Dzisiaj</button>
+                <button class="stats-preset-btn" data-tab="voice" data-preset="7d">7 dni</button>
+                <button class="stats-preset-btn" data-tab="voice" data-preset="month">Miesiąc</button>
+              </div>
+              <div class="stats-date-range-inputs">
+                <label class="stats-date-label">Od <input type="date" class="stats-date-input" id="voice-start-date"></label>
+                <span class="stats-date-separator">—</span>
+                <label class="stats-date-label">Do <input type="date" class="stats-date-input" id="voice-end-date"></label>
+                <button class="btn-primary stats-apply-btn" data-tab="voice">Zastosuj</button>
+              </div>
+            </div>
+            <button class="btn-secondary stats-csv-btn" id="voice-csv-btn" title="Eksportuj CSV">⬇ CSV</button>
+          </div>
+        </div>
+
+        <div class="creator-form-card">
+          <div class="server-stats-cards" id="voice-kpi-cards">
+            <div class="server-stats-card">
+              <div class="server-stats-card-value" id="voice-kpi-minutes">—</div>
+              <div class="server-stats-card-label">Minuty Voice</div>
+            </div>
+            <div class="server-stats-card">
+              <div class="server-stats-card-value" id="voice-kpi-hours">—</div>
+              <div class="server-stats-card-label">Godziny Voice</div>
+            </div>
+            <div class="server-stats-card">
+              <div class="server-stats-card-value" id="voice-kpi-unique">—</div>
+              <div class="server-stats-card-label">Unikalni użytkownicy</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="creator-form-card">
+          <div class="section-header">
+            <h3>📈 Minuty Voice dziennie</h3>
+          </div>
+          <div class="server-stats-chart-wrapper">
+            <canvas id="voice-timeseries-chart"></canvas>
+          </div>
+        </div>
+
+        <div class="creator-form-card">
+          <div class="section-header">
+            <h3>🥇 Top użytkownicy Voice</h3>
+          </div>
+          <div id="voice-top-users-list" class="scheduled-list"></div>
+          <button class="btn-secondary stats-load-more-btn" id="voice-load-more-btn">Załaduj więcej</button>
+        </div>
+
+        <div class="creator-form-card stats-two-col">
+          <div class="stats-col">
+            <div class="section-header">
+              <h3>🔊 Top kanały Voice</h3>
+            </div>
+            <div id="voice-top-channels-list" class="scheduled-list"></div>
+          </div>
+          <div class="stats-col stats-chart-col">
+            <div class="section-header">
+              <h3>Udział kanałów</h3>
+            </div>
+            <div class="stats-doughnut-wrapper">
+              <canvas id="voice-channels-doughnut"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───────── TAB: Ustawienia ───────── -->
+      <div class="stats-tab-panel" id="stats-tab-settings">
+        <div class="creator-form-card">
+          <div class="section-header">
+            <h3>⚙️ Ustawienia statystyk</h3>
+            <p>Wybierz kanały, których wiadomości nie będą zliczane w statystykach (np. kanały botów).</p>
+          </div>
+          <div class="stats-excluded-channels-section">
+            <div class="form-group">
+              <label class="form-label">Wykluczone kanały</label>
+              <div id="stats-excluded-channels-list" class="stats-channel-checklist">
+                <div class="scheduled-empty">Ładowanie kanałów...</div>
+              </div>
+            </div>
+            <div class="stats-settings-actions">
+              <button class="btn-primary" id="stats-save-excluded-btn">Zapisz ustawienia</button>
+              <span class="stats-save-status" id="stats-save-status"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="creator-form-card">
+          <div class="section-header">
+            <h3>📦 Eksport wszystkich danych</h3>
+            <p>Pobierz pełne archiwum ZIP ze wszystkimi statystykami w formacie CSV.</p>
+          </div>
+          <button class="btn-primary" id="stats-export-all-btn2">⬇ Pobierz archiwum ZIP</button>
+        </div>
+
+        <div class="creator-form-card" style="border: 1px solid #ed4245;">
+          <div class="section-header">
+            <h3>⚠️ Strefa niebezpieczna</h3>
+            <p>Operacje nieodwracalne. Upewnij się, że wiesz co robisz.</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <button class="btn-danger" id="stats-reset-btn">Resetuj wszystkie statystyki</button>
+            <span id="stats-reset-status" style="font-size:0.85em;color:#ccc;"></span>
           </div>
         </div>
       </div>

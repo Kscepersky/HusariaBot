@@ -262,6 +262,32 @@ async function initializeSchema(db: Database): Promise<void> {
 
         CREATE INDEX IF NOT EXISTS idx_daily_user_stats_guild_date
             ON daily_user_stats(guild_id, date);
+
+        CREATE TABLE IF NOT EXISTS daily_channel_stats (
+            guild_id TEXT NOT NULL,
+            channel_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            messages INTEGER NOT NULL DEFAULT 0,
+            voice_minutes INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, channel_id, date),
+            CHECK (messages >= 0),
+            CHECK (voice_minutes >= 0)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_daily_channel_stats_guild_date
+            ON daily_channel_stats(guild_id, date);
+
+        CREATE TABLE IF NOT EXISTS daily_member_counts (
+            guild_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            member_count INTEGER NOT NULL DEFAULT 0,
+            joins INTEGER NOT NULL DEFAULT 0,
+            leaves INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, date),
+            CHECK (member_count >= 0),
+            CHECK (joins >= 0),
+            CHECK (leaves >= 0)
+        );
     `);
 
     await ensureEconomyConfigColumns(db);

@@ -164,12 +164,22 @@ let csrfTokenPromise = null
 
 let selectedMatchInfo = null
 
-let serverStatsStartDate = ''
-let serverStatsEndDate = ''
-let serverStatsChartInstance = null
-let serverStatsSectionBound = false
+const statsTabDates = {
+  users:    { startDate: '', endDate: '' },
+  messages: { startDate: '', endDate: '' },
+  voice:    { startDate: '', endDate: '' },
+}
+let statsActiveTab = 'users'
+let statsSectionBound = false
 let statsExcludedChannelIds = []
 let statsAllChannels = []
+let usersChartInstance = null
+let messagesChartInstance = null
+let messagesDonutInstance = null
+let voiceChartInstance = null
+let voiceDonutInstance = null
+let messagesTopUsersOffset = 0
+let voiceTopUsersOffset = 0
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadUserInfo()
@@ -400,8 +410,8 @@ function switchSection(section) {
   }
 
   if (section === 'server-stats') {
-    initServerStatsSectionIfNeeded()
-    void loadServerStats()
+    initStatsSectionIfNeeded()
+    void loadActiveStatsTab()
   }
 
   if (typeof window.onDashboardSectionChanged === 'function') {
@@ -1639,6 +1649,19 @@ function renderSessionActivity() {
   }
 }
 
+function buildDashboardRoleChipHtml(role) {
+  if (!role) return ''
+  const map = {
+    dev:               { label: 'Dev',               color: '#5865f2' },
+    admin:             { label: 'Admin',              color: '#dc143c' },
+    moderator:         { label: 'Moderator',          color: '#f0a500' },
+    community_manager: { label: 'Community Manager',  color: '#3ba55d' },
+  }
+  const entry = map[role]
+  if (!entry) return ''
+  return `<span class="scheduled-chip" style="font-size:11px;background:${entry.color}20;color:${entry.color};border:1px solid ${entry.color}40;">${entry.label}</span>`
+}
+
 function buildSessionUserCardHtml(user, isOnline) {
   const avatarUrl = user.avatarHash
     ? `https://cdn.discordapp.com/avatars/${encodeURIComponent(user.userId)}/${encodeURIComponent(user.avatarHash)}.png?size=32`
@@ -1648,6 +1671,7 @@ function buildSessionUserCardHtml(user, isOnline) {
   const statusDot = isOnline
     ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3ba55d;margin-right:6px;vertical-align:middle;"></span>'
     : ''
+  const roleChip = buildDashboardRoleChipHtml(user.dashboardRole)
 
   return `
     <article class="scheduled-card" style="padding:10px 14px;">
@@ -1656,6 +1680,7 @@ function buildSessionUserCardHtml(user, isOnline) {
           <img src="${avatarUrl}" alt="" width="28" height="28" style="border-radius:50%;">
           <span>${statusDot}<strong>${displayName}</strong></span>
           <span class="scheduled-chip" style="font-size:11px;">${escapeHtml(user.userId)}</span>
+          ${roleChip}
         </div>
         <span class="preview-note" style="font-size:11px;">Zalogowano: ${loginTime}</span>
       </div>
@@ -1675,6 +1700,7 @@ function buildSessionEventCardHtml(event) {
   const timestamp = formatTimestampInWarsaw(Number(event.createdAt ?? Date.now()))
   const typeLabel = isLogin ? 'Logowanie' : 'Wylogowanie'
   const typeClass = isLogin ? 'log-level-info' : 'log-level-warn'
+  const roleChip = buildDashboardRoleChipHtml(event.dashboardRole)
 
   return `
     <article class="scheduled-card log-card" style="padding:10px 14px;">
@@ -1683,6 +1709,7 @@ function buildSessionEventCardHtml(event) {
           <img src="${avatarUrl}" alt="" width="24" height="24" style="border-radius:50%;">
           <strong>${displayName}</strong>
           <span class="scheduled-chip" style="font-size:11px;">${escapeHtml(event.userId)}</span>
+          ${roleChip}
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
           <span class="scheduled-chip ${typeClass}">${typeLabel}</span>
@@ -6210,248 +6237,637 @@ function shiftDate(baseDate, days) {
   return d.toISOString().slice(0, 10)
 }
 
-function applyStatsPreset(preset) {
+// ─── Stats Section ────────────────────────────────────────────────────────────
+
+const STATS_DOUGHNUT_COLORS = ['#5865f2', '#9b59b6', '#3498db', '#1abc9c', '#e74c3c', '#95a5a6']
+const STATS_CHART_OPTIONS_BASE = {
+  responsive: true,
+  interaction: { mode: 'index', intersect: false },
+  plugins: { legend: { labels: { color: '#e0e0e0' } }, tooltip: { mode: 'index' } },
+  scales: {
+    x: { ticks: { color: '#aaa', maxTicksLimit: 14 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+    y: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true },
+  },
+}
+
+function getMonthStartDate() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+function applyTabPreset(tab, preset) {
   const today = todayDateString()
   let start = today
   if (preset === '7d') start = shiftDate(today, -6)
-  else if (preset === '30d') start = shiftDate(today, -29)
-  else if (preset === '365d') start = shiftDate(today, -364)
-
-  const startInput = document.getElementById('stats-start-date')
-  const endInput = document.getElementById('stats-end-date')
+  else if (preset === 'month') start = getMonthStartDate()
+  statsTabDates[tab].startDate = start
+  statsTabDates[tab].endDate = today
+  const startInput = document.getElementById(`${tab}-start-date`)
+  const endInput = document.getElementById(`${tab}-end-date`)
   if (startInput) startInput.value = start
   if (endInput) endInput.value = today
-
-  serverStatsStartDate = start
-  serverStatsEndDate = today
 }
 
-function initServerStatsSectionIfNeeded() {
-  if (serverStatsSectionBound) return
-  serverStatsSectionBound = true
+function initTabDateControls(tab) {
+  applyTabPreset(tab, 'today')
 
-  applyStatsPreset('today')
-  const startInput = document.getElementById('stats-start-date')
-  const endInput = document.getElementById('stats-end-date')
-  if (startInput) startInput.value = serverStatsStartDate
-  if (endInput) endInput.value = serverStatsEndDate
+  const panel = document.getElementById(`stats-tab-${tab}`)
+  if (!panel) return
 
-  document.querySelectorAll('.stats-preset-btn').forEach((btn) => {
+  panel.querySelectorAll('.stats-preset-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const preset = btn.dataset.preset ?? 'today'
-      applyStatsPreset(preset)
-      document.querySelectorAll('.stats-preset-btn').forEach((b) => {
-        b.classList.toggle('active', b === btn)
-      })
-      void loadServerStats()
+      applyTabPreset(tab, preset)
+      panel.querySelectorAll('.stats-preset-btn').forEach((b) => b.classList.toggle('active', b === btn))
+      void loadTabByName(tab)
     })
   })
 
-  const applyBtn = document.getElementById('stats-apply-btn')
-  if (applyBtn) {
-    applyBtn.addEventListener('click', () => {
-      const startVal = (document.getElementById('stats-start-date'))?.value ?? ''
-      const endVal = (document.getElementById('stats-end-date'))?.value ?? ''
+  panel.querySelectorAll('.stats-apply-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const startVal = document.getElementById(`${tab}-start-date`)?.value ?? ''
+      const endVal = document.getElementById(`${tab}-end-date`)?.value ?? ''
       if (!startVal || !endVal || startVal > endVal) {
         showToast('❌ Nieprawidłowy zakres dat.', 'error')
         return
       }
-      serverStatsStartDate = startVal
-      serverStatsEndDate = endVal
-      document.querySelectorAll('.stats-preset-btn').forEach((b) => b.classList.remove('active'))
-      void loadServerStats()
+      statsTabDates[tab].startDate = startVal
+      statsTabDates[tab].endDate = endVal
+      panel.querySelectorAll('.stats-preset-btn').forEach((b) => b.classList.remove('active'))
+      void loadTabByName(tab)
     })
-  }
-
-  const saveBtn = document.getElementById('stats-save-excluded-btn')
-  if (saveBtn) {
-    saveBtn.addEventListener('click', () => {
-      void saveStatsExcludedChannels()
-    })
-  }
-
-  void loadStatsExcludedChannels()
+  })
 }
 
-async function loadServerStats() {
+function downloadUrlAs(url, filename) {
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+}
+
+function initStatsSectionIfNeeded() {
+  if (statsSectionBound) return
+  statsSectionBound = true
+
+  initTabDateControls('users')
+  initTabDateControls('messages')
+  initTabDateControls('voice')
+
+  document.querySelectorAll('.stats-tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab
+      if (!tab) return
+      statsActiveTab = tab
+      document.querySelectorAll('.stats-tab-btn').forEach((b) => b.classList.toggle('active', b === btn))
+      document.querySelectorAll('.stats-tab-panel').forEach((p) => p.classList.toggle('active', p.id === `stats-tab-${tab}`))
+      void loadTabByName(tab)
+    })
+  })
+
+  const csvUsers = document.getElementById('users-csv-btn')
+  if (csvUsers) csvUsers.addEventListener('click', () => {
+    const { startDate, endDate } = statsTabDates.users
+    downloadUrlAs(`/api/stats/export/members?startDate=${startDate}&endDate=${endDate}`, `members_${startDate}_${endDate}.csv`)
+  })
+
+  const csvMessages = document.getElementById('messages-csv-btn')
+  if (csvMessages) csvMessages.addEventListener('click', () => {
+    const { startDate, endDate } = statsTabDates.messages
+    downloadUrlAs(`/api/stats/export/messages?startDate=${startDate}&endDate=${endDate}`, `messages_${startDate}_${endDate}.csv`)
+  })
+
+  const csvVoice = document.getElementById('voice-csv-btn')
+  if (csvVoice) csvVoice.addEventListener('click', () => {
+    const { startDate, endDate } = statsTabDates.voice
+    downloadUrlAs(`/api/stats/export/voice?startDate=${startDate}&endDate=${endDate}`, `voice_${startDate}_${endDate}.csv`)
+  })
+
+  const exportAllBtn2 = document.getElementById('stats-export-all-btn2')
+  if (exportAllBtn2) exportAllBtn2.addEventListener('click', () => {
+    downloadUrlAs('/api/stats/export/all', 'stats_export_all.zip')
+  })
+
+  const resetBtn = document.getElementById('stats-reset-btn')
+  if (resetBtn) resetBtn.addEventListener('click', () => { void handleStatsReset() })
+
+  const msgLoadMore = document.getElementById('messages-load-more-btn')
+  if (msgLoadMore) msgLoadMore.addEventListener('click', () => { void loadMessagesTopUsers(false) })
+
+  const voiceLoadMore = document.getElementById('voice-load-more-btn')
+  if (voiceLoadMore) voiceLoadMore.addEventListener('click', () => { void loadVoiceTopUsers(false) })
+
+  const saveBtn = document.getElementById('stats-save-excluded-btn')
+  if (saveBtn) saveBtn.addEventListener('click', () => { void saveStatsExcludedChannels() })
+}
+
+async function loadActiveStatsTab() {
+  await loadTabByName(statsActiveTab)
+}
+
+async function loadTabByName(tab) {
+  if (tab === 'users') await loadUsersTab()
+  else if (tab === 'messages') await loadMessagesTab()
+  else if (tab === 'voice') await loadVoiceTab()
+  else if (tab === 'settings') await loadStatsExcludedChannels()
+}
+
+// ── Users tab ────────────────────────────────────────────────────────────────
+
+async function loadUsersTab() {
   await Promise.all([
-    loadServerStatsSummary(),
-    loadServerStatsTopUsers(),
-    loadServerStatsTimeSeries(),
+    loadUsersSummary(),
+    loadMembersTimeSeries(),
+    loadActiveUsers(),
   ])
 }
 
-async function loadServerStatsSummary() {
-  const messagesEl = document.getElementById('server-stats-messages')
-  const voiceHoursEl = document.getElementById('server-stats-voice-hours')
-  const voiceMinutesEl = document.getElementById('server-stats-voice-minutes')
+async function loadUsersSummary() {
+  const kpiCount = document.getElementById('users-kpi-count')
+  const kpiBalance = document.getElementById('users-kpi-balance')
 
   try {
-    const params = new URLSearchParams({ startDate: serverStatsStartDate, endDate: serverStatsEndDate })
-    const response = await fetch(`/api/stats/server?${params.toString()}`)
-    const payload = await parseApiResponse(response)
-
-    if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie pobrac statystyk serwera.')
+    const { startDate, endDate } = statsTabDates.users
+    const params = new URLSearchParams({ startDate, endDate })
+    const res = await fetch(`/api/stats/members/summary?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    const s = payload.summary ?? {}
+    if (kpiCount) kpiCount.textContent = Number.isFinite(Number(s.latestMemberCount)) ? Number(s.latestMemberCount).toLocaleString('pl-PL') : '—'
+    if (kpiBalance) {
+      const joins = Number(s.totalJoins) || 0
+      const leaves = Number(s.totalLeaves) || 0
+      const balance = joins - leaves
+      kpiBalance.textContent = balance === 0 ? '0' : balance > 0 ? `+${balance.toLocaleString('pl-PL')}` : balance.toLocaleString('pl-PL')
+      kpiBalance.style.color = balance > 0 ? '#57f287' : balance < 0 ? '#ed4245' : ''
     }
-
-    const summary = payload.summary ?? {}
-    const messages = Number.isFinite(Number(summary.messages)) ? Number(summary.messages) : 0
-    const voiceHours = Number.isFinite(Number(summary.voiceHours)) ? Number(summary.voiceHours) : 0
-    const voiceMinutes = Number.isFinite(Number(summary.voiceMinutes)) ? Number(summary.voiceMinutes) : 0
-
-    if (messagesEl) messagesEl.textContent = messages.toLocaleString('pl-PL')
-    if (voiceHoursEl) voiceHoursEl.textContent = voiceHours.toLocaleString('pl-PL')
-    if (voiceMinutesEl) voiceMinutesEl.textContent = voiceMinutes.toLocaleString('pl-PL')
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Nieznany blad'
-    if (messagesEl) messagesEl.textContent = '—'
-    if (voiceHoursEl) voiceHoursEl.textContent = '—'
-    if (voiceMinutesEl) voiceMinutesEl.textContent = '—'
+    const msg = error instanceof Error ? error.message : 'Błąd'
+    if (kpiCount) kpiCount.textContent = '—'
+    if (kpiBalance) { kpiBalance.textContent = '—'; kpiBalance.style.color = '' }
     showToast(`❌ ${msg}`, 'error')
   }
 }
 
-async function loadServerStatsTopUsers() {
-  const list = document.getElementById('server-stats-top-users-list')
-  if (!list) return
+async function handleStatsReset() {
+  const confirmed = window.confirm(
+    'Na pewno chcesz zresetować WSZYSTKIE statystyki?\n\nTa operacja jest nieodwracalna — usunie wszystkie dane o wiadomościach, voice i członkach serwera.',
+  )
+  if (!confirmed) return
 
-  list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+  const btn = document.getElementById('stats-reset-btn')
+  const statusEl = document.getElementById('stats-reset-status')
+  if (btn) btn.disabled = true
+  if (statusEl) statusEl.textContent = 'Resetowanie...'
 
   try {
-    const params = new URLSearchParams({
-      startDate: serverStatsStartDate,
-      endDate: serverStatsEndDate,
-      limit: '10',
-    })
-    const response = await fetch(`/api/stats/server/top-users?${params.toString()}`)
+    const response = await fetchWithCsrf('/api/stats/reset', { method: 'POST' })
     const payload = await parseApiResponse(response)
-
-    if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie pobrac top uzytkownikow.')
-    }
-
-    const topUsers = Array.isArray(payload.topUsers) ? payload.topUsers : []
-
-    if (topUsers.length === 0) {
-      list.innerHTML = '<div class="scheduled-empty">Brak danych dla wybranego okresu.</div>'
-      return
-    }
-
-    list.innerHTML = topUsers.map((user, index) => {
-      const displayName = typeof user.displayName === 'string' && user.displayName.trim().length > 0
-        ? user.displayName.trim()
-        : `Uzytkownik ${user.userId}`
-      const avatarUrl = typeof user.avatarUrl === 'string' && user.avatarUrl.trim().length > 0
-        ? user.avatarUrl.trim()
-        : null
-      const avatarFallback = escapeHtml(displayName.slice(0, 1).toUpperCase() || '?')
-      const messages = Number.isFinite(Number(user.messages)) ? Number(user.messages) : 0
-      const voiceMinutes = Number.isFinite(Number(user.voiceMinutes)) ? Number(user.voiceMinutes) : 0
-      const score = Number.isFinite(Number(user.score)) ? Number(user.score) : 0
-
-      return `
-        <article class="scheduled-card">
-          <div class="scheduled-card-header">
-            <div class="leaderboard-user-main">
-              ${avatarUrl
-        ? `<img class="leaderboard-avatar" src="${escapeHtml(avatarUrl)}" alt="Avatar ${escapeHtml(displayName)}" loading="lazy">`
-        : `<span class="leaderboard-avatar leaderboard-avatar-placeholder">${avatarFallback}</span>`}
-              <span class="scheduled-card-title">#${index + 1} | ${escapeHtml(displayName)}</span>
-            </div>
-            <span class="scheduled-chip leaderboard-chip-primary">Score: ${escapeHtml(String(score))}</span>
-          </div>
-          <div class="scheduled-card-meta">
-            <span class="scheduled-chip">Wiadomosci: ${escapeHtml(String(messages))}</span>
-            <span class="scheduled-chip">Minuty VC: ${escapeHtml(String(voiceMinutes))}</span>
-            <span class="scheduled-chip">ID: ${escapeHtml(String(user.userId))}</span>
-          </div>
-        </article>`
-    }).join('')
+    if (!response.ok) throw new Error(payload.error ?? 'Nie udało się zresetować.')
+    if (statusEl) statusEl.textContent = '✓ Zresetowano pomyślnie'
+    showToast('✅ Statystyki zostały zresetowane.', 'success')
+    setTimeout(() => { if (statusEl) statusEl.textContent = '' }, 4000)
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Nieznany blad'
-    list.innerHTML = `<div class="scheduled-empty scheduled-error">Nie udalo sie zaladowac rankingu: ${escapeHtml(msg)}</div>`
-  }
-}
-
-async function loadServerStatsTimeSeries() {
-  try {
-    const params = new URLSearchParams({ startDate: serverStatsStartDate, endDate: serverStatsEndDate })
-    const response = await fetch(`/api/stats/server/timeseries?${params.toString()}`)
-    const payload = await parseApiResponse(response)
-
-    if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie pobrac danych wykresu.')
-    }
-
-    const timeSeries = Array.isArray(payload.timeSeries) ? payload.timeSeries : []
-    renderServerStatsChart(timeSeries)
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Nieznany blad'
+    const msg = error instanceof Error ? error.message : 'Nieznany błąd'
+    if (statusEl) statusEl.textContent = `✗ ${msg}`
     showToast(`❌ ${msg}`, 'error')
+    setTimeout(() => { if (statusEl) statusEl.textContent = '' }, 5000)
+  } finally {
+    if (btn) btn.disabled = false
   }
 }
 
-function renderServerStatsChart(timeSeries) {
-  const canvas = document.getElementById('server-stats-chart')
-  if (!(canvas instanceof HTMLCanvasElement)) return
-  if (typeof Chart === 'undefined') return
-
-  const labels = timeSeries.map((point) => point.date)
-  const messagesData = timeSeries.map((point) => Number(point.messages) || 0)
-  const voiceData = timeSeries.map((point) => Number(point.voiceMinutes) || 0)
-
-  if (serverStatsChartInstance) {
-    serverStatsChartInstance.destroy()
-    serverStatsChartInstance = null
+async function loadMembersTimeSeries() {
+  try {
+    const { startDate, endDate } = statsTabDates.users
+    const params = new URLSearchParams({ startDate, endDate })
+    const res = await fetch(`/api/stats/members/timeseries?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    renderMembersChart(Array.isArray(payload.timeSeries) ? payload.timeSeries : [])
+  } catch (error) {
+    showToast(`❌ ${error instanceof Error ? error.message : 'Błąd wykresu członków.'}`, 'error')
   }
+}
 
-  serverStatsChartInstance = new Chart(canvas, {
+function renderMembersChart(timeSeries) {
+  const canvas = document.getElementById('users-members-chart')
+  if (!(canvas instanceof HTMLCanvasElement) || typeof Chart === 'undefined') return
+  if (usersChartInstance) { usersChartInstance.destroy(); usersChartInstance = null }
+
+  usersChartInstance = new Chart(canvas, {
     type: 'line',
     data: {
-      labels,
+      labels: timeSeries.map((p) => p.date),
       datasets: [
         {
-          label: 'Wiadomości',
-          data: messagesData,
+          label: 'Członkowie',
+          data: timeSeries.map((p) => Number(p.memberCount) || 0),
+          backgroundColor: 'rgba(88,101,242,0.2)',
           borderColor: '#5865f2',
-          backgroundColor: 'rgba(88,101,242,0.12)',
-          tension: 0.3,
+          borderWidth: 2,
+          pointRadius: 3,
           fill: true,
-          pointRadius: timeSeries.length > 60 ? 0 : 3,
-        },
-        {
-          label: 'Minuty Voice',
-          data: voiceData,
-          borderColor: '#57f287',
-          backgroundColor: 'rgba(87,242,135,0.10)',
           tension: 0.3,
-          fill: true,
-          pointRadius: timeSeries.length > 60 ? 0 : 3,
         },
       ],
     },
     options: {
+      ...STATS_CHART_OPTIONS_BASE,
       responsive: true,
-      interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { labels: { color: '#e0e0e0' } },
-        tooltip: { mode: 'index' },
-      },
-      scales: {
-        x: {
-          ticks: { color: '#aaa', maxTicksLimit: 10 },
-          grid: { color: 'rgba(255,255,255,0.05)' },
-        },
-        y: {
-          ticks: { color: '#aaa' },
-          grid: { color: 'rgba(255,255,255,0.05)' },
-          beginAtZero: true,
+        ...(STATS_CHART_OPTIONS_BASE.plugins ?? {}),
+        tooltip: {
+          callbacks: {
+            afterLabel(ctx) {
+              const p = timeSeries[ctx.dataIndex]
+              if (!p) return ''
+              const balance = (Number(p.joins) || 0) - (Number(p.leaves) || 0)
+              return balance === 0 ? 'Bilans: 0' : balance > 0 ? `Bilans: +${balance}` : `Bilans: ${balance}`
+            },
+          },
         },
       },
     },
   })
 }
+
+async function loadActiveUsers() {
+  const list = document.getElementById('users-active-list')
+  if (!list) return
+  list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+
+  try {
+    const { startDate, endDate } = statsTabDates.users
+    const params = new URLSearchParams({ startDate, endDate })
+    const res = await fetch(`/api/stats/members/active-users?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    const users = Array.isArray(payload.activeUsers) ? payload.activeUsers : []
+    renderTopUsersList(list, users, 'messages', 'voiceMinutes')
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Błąd'
+    list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
+  }
+}
+
+// ── Messages tab ─────────────────────────────────────────────────────────────
+
+async function loadMessagesTab() {
+  messagesTopUsersOffset = 0
+  await Promise.all([
+    loadMessagesSummary(),
+    loadMessagesTimeSeries(),
+    loadMessagesTopUsers(true),
+    loadMessagesTopChannels(),
+  ])
+}
+
+async function loadMessagesSummary() {
+  const kpiTotal = document.getElementById('messages-kpi-total')
+  const kpiUnique = document.getElementById('messages-kpi-unique')
+
+  try {
+    const { startDate, endDate } = statsTabDates.messages
+    const params = new URLSearchParams({ startDate, endDate })
+    const res = await fetch(`/api/stats/messages/summary?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    const s = payload.summary ?? {}
+    if (kpiTotal) kpiTotal.textContent = Number.isFinite(Number(s.messages)) ? Number(s.messages).toLocaleString('pl-PL') : '—'
+    if (kpiUnique) kpiUnique.textContent = Number.isFinite(Number(s.uniqueUsers)) ? Number(s.uniqueUsers).toLocaleString('pl-PL') : '—'
+  } catch (error) {
+    if (kpiTotal) kpiTotal.textContent = '—'
+    if (kpiUnique) kpiUnique.textContent = '—'
+    showToast(`❌ ${error instanceof Error ? error.message : 'Błąd podsumowania.'}`, 'error')
+  }
+}
+
+async function loadMessagesTimeSeries() {
+  try {
+    const { startDate, endDate } = statsTabDates.messages
+    const params = new URLSearchParams({ startDate, endDate })
+    const res = await fetch(`/api/stats/messages/timeseries?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    renderMessagesChart(Array.isArray(payload.timeSeries) ? payload.timeSeries : [])
+  } catch (error) {
+    showToast(`❌ ${error instanceof Error ? error.message : 'Błąd wykresu.'}`, 'error')
+  }
+}
+
+function renderMessagesChart(timeSeries) {
+  const canvas = document.getElementById('messages-timeseries-chart')
+  if (!(canvas instanceof HTMLCanvasElement) || typeof Chart === 'undefined') return
+  if (messagesChartInstance) { messagesChartInstance.destroy(); messagesChartInstance = null }
+
+  messagesChartInstance = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: timeSeries.map((p) => p.date),
+      datasets: [{
+        label: 'Wiadomości',
+        data: timeSeries.map((p) => Number(p.messages) || 0),
+        backgroundColor: 'rgba(88,101,242,0.75)',
+        borderColor: '#5865f2',
+        borderWidth: 1,
+      }],
+    },
+    options: { ...STATS_CHART_OPTIONS_BASE, responsive: true },
+  })
+}
+
+async function loadMessagesTopUsers(reset) {
+  const list = document.getElementById('messages-top-users-list')
+  const loadMoreBtn = document.getElementById('messages-load-more-btn')
+  if (!list) return
+
+  if (reset) {
+    messagesTopUsersOffset = 0
+    list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+  }
+
+  const BATCH = 10
+  try {
+    const { startDate, endDate } = statsTabDates.messages
+    const params = new URLSearchParams({ startDate, endDate, limit: String(messagesTopUsersOffset + BATCH) })
+    const res = await fetch(`/api/stats/messages/top-users?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    const users = Array.isArray(payload.topUsers) ? payload.topUsers : []
+
+    if (reset) list.innerHTML = ''
+    const slice = users.slice(messagesTopUsersOffset)
+    renderTopUsersList(list, slice, 'messages', null, messagesTopUsersOffset)
+    messagesTopUsersOffset += slice.length
+
+    if (loadMoreBtn) loadMoreBtn.style.display = users.length >= messagesTopUsersOffset + 1 ? '' : 'none'
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Błąd'
+    if (reset) list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
+    if (loadMoreBtn) loadMoreBtn.style.display = 'none'
+  }
+}
+
+async function loadMessagesTopChannels() {
+  const list = document.getElementById('messages-top-channels-list')
+  if (!list) return
+  list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+
+  try {
+    const { startDate, endDate } = statsTabDates.messages
+    const params = new URLSearchParams({ startDate, endDate, limit: '10' })
+    const res = await fetch(`/api/stats/messages/top-channels?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    const channels = Array.isArray(payload.topChannels) ? payload.topChannels : []
+    renderTopChannelsList(list, channels, 'messages', 'msg')
+    renderDoughnutChart('messages-channels-doughnut', 'messages', channels, 'messages')
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Błąd'
+    list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
+  }
+}
+
+// ── Voice tab ────────────────────────────────────────────────────────────────
+
+async function loadVoiceTab() {
+  voiceTopUsersOffset = 0
+  await Promise.all([
+    loadVoiceSummary(),
+    loadVoiceTimeSeries(),
+    loadVoiceTopUsers(true),
+    loadVoiceTopChannels(),
+  ])
+}
+
+async function loadVoiceSummary() {
+  const kpiMinutes = document.getElementById('voice-kpi-minutes')
+  const kpiHours = document.getElementById('voice-kpi-hours')
+  const kpiUnique = document.getElementById('voice-kpi-unique')
+
+  try {
+    const { startDate, endDate } = statsTabDates.voice
+    const params = new URLSearchParams({ startDate, endDate })
+    const res = await fetch(`/api/stats/voice/summary?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    const s = payload.summary ?? {}
+    const minutes = Number.isFinite(Number(s.voiceMinutes)) ? Number(s.voiceMinutes) : 0
+    if (kpiMinutes) kpiMinutes.textContent = minutes.toLocaleString('pl-PL')
+    if (kpiHours) kpiHours.textContent = Math.floor(minutes / 60).toLocaleString('pl-PL')
+    if (kpiUnique) kpiUnique.textContent = Number.isFinite(Number(s.uniqueUsers)) ? Number(s.uniqueUsers).toLocaleString('pl-PL') : '—'
+  } catch (error) {
+    if (kpiMinutes) kpiMinutes.textContent = '—'
+    if (kpiHours) kpiHours.textContent = '—'
+    if (kpiUnique) kpiUnique.textContent = '—'
+    showToast(`❌ ${error instanceof Error ? error.message : 'Błąd podsumowania voice.'}`, 'error')
+  }
+}
+
+async function loadVoiceTimeSeries() {
+  try {
+    const { startDate, endDate } = statsTabDates.voice
+    const params = new URLSearchParams({ startDate, endDate })
+    const res = await fetch(`/api/stats/voice/timeseries?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    renderVoiceChart(Array.isArray(payload.timeSeries) ? payload.timeSeries : [])
+  } catch (error) {
+    showToast(`❌ ${error instanceof Error ? error.message : 'Błąd wykresu voice.'}`, 'error')
+  }
+}
+
+function renderVoiceChart(timeSeries) {
+  const canvas = document.getElementById('voice-timeseries-chart')
+  if (!(canvas instanceof HTMLCanvasElement) || typeof Chart === 'undefined') return
+  if (voiceChartInstance) { voiceChartInstance.destroy(); voiceChartInstance = null }
+
+  voiceChartInstance = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: timeSeries.map((p) => p.date),
+      datasets: [{
+        label: 'Minuty Voice',
+        data: timeSeries.map((p) => Number(p.voiceMinutes) || 0),
+        backgroundColor: 'rgba(87,242,135,0.75)',
+        borderColor: '#57f287',
+        borderWidth: 1,
+      }],
+    },
+    options: { ...STATS_CHART_OPTIONS_BASE, responsive: true },
+  })
+}
+
+async function loadVoiceTopUsers(reset) {
+  const list = document.getElementById('voice-top-users-list')
+  const loadMoreBtn = document.getElementById('voice-load-more-btn')
+  if (!list) return
+
+  if (reset) {
+    voiceTopUsersOffset = 0
+    list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+  }
+
+  const BATCH = 10
+  try {
+    const { startDate, endDate } = statsTabDates.voice
+    const params = new URLSearchParams({ startDate, endDate, limit: String(voiceTopUsersOffset + BATCH) })
+    const res = await fetch(`/api/stats/voice/top-users?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    const users = Array.isArray(payload.topUsers) ? payload.topUsers : []
+
+    if (reset) list.innerHTML = ''
+    const slice = users.slice(voiceTopUsersOffset)
+    renderTopUsersList(list, slice, 'voiceMinutes', null, voiceTopUsersOffset)
+    voiceTopUsersOffset += slice.length
+
+    if (loadMoreBtn) loadMoreBtn.style.display = users.length >= voiceTopUsersOffset + 1 ? '' : 'none'
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Błąd'
+    if (reset) list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
+    if (loadMoreBtn) loadMoreBtn.style.display = 'none'
+  }
+}
+
+async function loadVoiceTopChannels() {
+  const list = document.getElementById('voice-top-channels-list')
+  if (!list) return
+  list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+
+  try {
+    const { startDate, endDate } = statsTabDates.voice
+    const params = new URLSearchParams({ startDate, endDate, limit: '10' })
+    const res = await fetch(`/api/stats/voice/top-channels?${params}`)
+    const payload = await parseApiResponse(res)
+    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    const channels = Array.isArray(payload.topChannels) ? payload.topChannels : []
+    renderTopChannelsList(list, channels, 'voiceMinutes', 'min')
+    renderDoughnutChart('voice-channels-doughnut', 'voice', channels, 'voiceMinutes')
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Błąd'
+    list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
+  }
+}
+
+// ── Shared rendering helpers ─────────────────────────────────────────────────
+
+function renderTopUsersList(listEl, users, primaryKey, secondaryKey, startIndex) {
+  const baseIndex = typeof startIndex === 'number' ? startIndex : 0
+  if (users.length === 0 && baseIndex === 0) {
+    listEl.innerHTML = '<div class="scheduled-empty">Brak danych dla wybranego okresu.</div>'
+    return
+  }
+
+  listEl.insertAdjacentHTML('beforeend', users.map((user, i) => {
+    const pos = baseIndex + i + 1
+    const displayName = typeof user.displayName === 'string' && user.displayName.trim().length > 0
+      ? user.displayName.trim()
+      : `Użytkownik ${user.userId}`
+    const avatarUrl = typeof user.avatarUrl === 'string' && user.avatarUrl.trim().length > 0 ? user.avatarUrl.trim() : null
+    const fallback = escapeHtml(displayName.slice(0, 1).toUpperCase() || '?')
+    const primaryVal = Number.isFinite(Number(user[primaryKey])) ? Number(user[primaryKey]).toLocaleString('pl-PL') : '0'
+    const primaryLabel = primaryKey === 'messages' ? 'Wiadomości' : primaryKey === 'voiceMinutes' ? 'Minuty VC' : primaryKey
+
+    const chips = [`<span class="scheduled-chip">${escapeHtml(primaryLabel)}: ${escapeHtml(primaryVal)}</span>`]
+    if (secondaryKey && user[secondaryKey] !== undefined) {
+      const secondaryVal = Number.isFinite(Number(user[secondaryKey])) ? Number(user[secondaryKey]).toLocaleString('pl-PL') : '0'
+      const secondaryLabel = secondaryKey === 'messages' ? 'Wiadomości' : secondaryKey === 'voiceMinutes' ? 'Minuty VC' : secondaryKey
+      chips.push(`<span class="scheduled-chip">${escapeHtml(secondaryLabel)}: ${escapeHtml(secondaryVal)}</span>`)
+    }
+
+    return `
+      <article class="scheduled-card">
+        <div class="scheduled-card-header">
+          <div class="leaderboard-user-main">
+            ${avatarUrl
+              ? `<img class="leaderboard-avatar" src="${escapeHtml(avatarUrl)}" alt="Avatar" loading="lazy">`
+              : `<span class="leaderboard-avatar leaderboard-avatar-placeholder">${fallback}</span>`}
+            <span class="scheduled-card-title">#${pos} | ${escapeHtml(displayName)}</span>
+          </div>
+        </div>
+        <div class="scheduled-card-meta">${chips.join('')}</div>
+      </article>`
+  }).join(''))
+}
+
+function renderTopChannelsList(listEl, channels, valueKey, unitLabel) {
+  if (channels.length === 0) {
+    listEl.innerHTML = '<div class="scheduled-empty">Brak danych dla wybranego okresu.</div>'
+    return
+  }
+
+  listEl.innerHTML = channels.map((ch, i) => {
+    const name = typeof ch.channelName === 'string' && ch.channelName.trim().length > 0 ? ch.channelName : `#${ch.channelId}`
+    const val = Number.isFinite(Number(ch[valueKey])) ? Number(ch[valueKey]).toLocaleString('pl-PL') : '0'
+    const unit = unitLabel ?? ''
+    return `
+      <article class="scheduled-card">
+        <div class="scheduled-card-header">
+          <span class="scheduled-card-title">#${i + 1} | ${escapeHtml(name)}</span>
+          <span class="scheduled-chip leaderboard-chip-primary">${escapeHtml(val)} ${escapeHtml(unit)}</span>
+        </div>
+      </article>`
+  }).join('')
+}
+
+function renderDoughnutChart(canvasId, chartType, channels, valueKey) {
+  const canvas = document.getElementById(canvasId)
+  if (!(canvas instanceof HTMLCanvasElement) || typeof Chart === 'undefined') return
+
+  if (chartType === 'messages') {
+    if (messagesDonutInstance) { messagesDonutInstance.destroy(); messagesDonutInstance = null }
+  } else {
+    if (voiceDonutInstance) { voiceDonutInstance.destroy(); voiceDonutInstance = null }
+  }
+
+  if (channels.length === 0) return
+
+  const top5 = channels.slice(0, 5)
+  const rest = channels.slice(5)
+  const labels = top5.map((ch) => {
+    const name = typeof ch.channelName === 'string' && ch.channelName.trim().length > 0 ? ch.channelName : `#${ch.channelId}`
+    return name.length > 20 ? name.slice(0, 18) + '…' : name
+  })
+  const values = top5.map((ch) => Number(ch[valueKey]) || 0)
+
+  if (rest.length > 0) {
+    labels.push('Inne')
+    values.push(rest.reduce((sum, ch) => sum + (Number(ch[valueKey]) || 0), 0))
+  }
+
+  const chart = new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: STATS_DOUGHNUT_COLORS.slice(0, labels.length),
+        borderColor: 'rgba(0,0,0,0.2)',
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#e0e0e0', boxWidth: 14, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => ` ${ctx.label}: ${ctx.parsed.toLocaleString('pl-PL')}`,
+          },
+        },
+      },
+    },
+  })
+
+  if (chartType === 'messages') messagesDonutInstance = chart
+  else voiceDonutInstance = chart
+}
+
+// ── Settings tab ─────────────────────────────────────────────────────────────
 
 async function loadStatsExcludedChannels() {
   const container = document.getElementById('stats-excluded-channels-list')

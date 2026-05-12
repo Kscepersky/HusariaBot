@@ -12,6 +12,7 @@ export interface SessionEvent {
     username: string;
     globalName: string | null;
     avatarHash: string | null;
+    dashboardRole: string | null;
     ip: string;
     userAgent: string;
     createdAt: number;
@@ -33,6 +34,7 @@ interface SessionEventRow {
     username: string;
     global_name: string | null;
     avatar_hash: string | null;
+    dashboard_role: string | null;
     ip: string;
     user_agent: string;
     created_at: number;
@@ -63,6 +65,7 @@ async function openDatabase(): Promise<Database> {
             username TEXT NOT NULL,
             global_name TEXT,
             avatar_hash TEXT,
+            dashboard_role TEXT,
             ip TEXT NOT NULL,
             user_agent TEXT NOT NULL,
             created_at INTEGER NOT NULL
@@ -70,6 +73,7 @@ async function openDatabase(): Promise<Database> {
     `);
     await db.exec('CREATE INDEX IF NOT EXISTS session_events_user_idx ON session_events(user_id);');
     await db.exec('CREATE INDEX IF NOT EXISTS session_events_created_idx ON session_events(created_at);');
+    await db.exec('ALTER TABLE session_events ADD COLUMN dashboard_role TEXT').catch(() => {});
 
     return db;
 }
@@ -94,6 +98,7 @@ function rowToEvent(row: SessionEventRow): SessionEvent {
         username: row.username,
         globalName: row.global_name ?? null,
         avatarHash: row.avatar_hash ?? null,
+        dashboardRole: row.dashboard_role ?? null,
         ip: row.ip,
         userAgent: row.user_agent,
         createdAt: row.created_at,
@@ -107,14 +112,15 @@ export async function recordSessionEvent(event: Omit<SessionEvent, 'id'>): Promi
     }
 
     await db.run(
-        `INSERT INTO session_events (id, event_type, user_id, username, global_name, avatar_hash, ip, user_agent, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO session_events (id, event_type, user_id, username, global_name, avatar_hash, dashboard_role, ip, user_agent, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         crypto.randomUUID(),
         event.eventType,
         event.userId,
         event.username,
         event.globalName ?? null,
         event.avatarHash ?? null,
+        event.dashboardRole ?? null,
         event.ip,
         event.userAgent,
         event.createdAt,

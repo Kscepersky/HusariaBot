@@ -192,6 +192,25 @@ export interface ServerStatsDailyPoint {
     voiceMinutes: number;
 }
 
+export interface ServerStatsTopChannel {
+    channelId: string;
+    messages: number;
+    voiceMinutes: number;
+}
+
+export interface ServerStatsMemberPoint {
+    date: string;
+    memberCount: number;
+    joins: number;
+    leaves: number;
+}
+
+export interface ServerStatsMemberSummary {
+    totalJoins: number;
+    totalLeaves: number;
+    latestMemberCount: number;
+}
+
 export interface EconomyXpAwardResult {
     guildId: string;
     userId: string;

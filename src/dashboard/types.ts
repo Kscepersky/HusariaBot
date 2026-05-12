@@ -3,6 +3,7 @@ export interface SessionUser {
     username: string;
     globalName: string | null;
     avatar: string | null;
+    dashboardRole?: string;
 }
 
 declare module 'express-session' {

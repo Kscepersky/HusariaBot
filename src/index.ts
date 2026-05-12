@@ -48,6 +48,7 @@ import { cleanupOrphanedTemporaryVoiceRecords } from './voice-channels/service.j
 import { handleEconomyResetButton } from './economy/admin-reset-buttons.js';
 import { handleEconomyLeaderboardButton } from './economy/leaderboard-buttons.js';
 import { handleEconomyMessageCreate, startEconomyVoiceXpTicker } from './economy/runtime.js';
+import { recordMemberJoin, recordMemberLeave, recordMemberSnapshot } from './economy/stats-store.js';
 import { startTimeoutExpiryTicker } from './timeouts/runtime.js';
 import { createLogger } from './utils/logger.js';
 // Załaduj zmienne środowiskowe z .env
@@ -92,6 +93,7 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildVoiceStates,
+        GatewayIntentBits.GuildMembers,
     ],
 });
 
@@ -147,6 +149,12 @@ client.on('clientReady', () => {
     stopTimeoutExpiryTicker?.();
     stopTimeoutExpiryTicker = startTimeoutExpiryTicker(client);
 
+    const nowTimestamp = Date.now();
+    for (const guild of client.guilds.cache.values()) {
+        void recordMemberSnapshot(guild.id, guild.memberCount, nowTimestamp).catch((error) => {
+            botLogger.error('BOT_MEMBER_SNAPSHOT_FAILED', 'Nie udalo sie zapisac snapshotu czlonkow.', { guildId: guild.id }, error);
+        });
+    }
 });
 
 client.on('warn', (warning) => {
@@ -284,6 +292,22 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             guildId: newState.guild.id,
             actorUserId: newState.member?.id,
         }, error);
+    }
+});
+
+client.on('guildMemberAdd', async (member) => {
+    try {
+        await recordMemberJoin(member.guild.id, member.guild.memberCount, Date.now());
+    } catch (error) {
+        botLogger.error('BOT_MEMBER_JOIN_FAILED', 'Nie udalo sie zapisac dolaczenia czlonka.', { guildId: member.guild.id, userId: member.id }, error);
+    }
+});
+
+client.on('guildMemberRemove', async (member) => {
+    try {
+        await recordMemberLeave(member.guild.id, member.guild.memberCount, Date.now());
+    } catch (error) {
+        botLogger.error('BOT_MEMBER_LEAVE_FAILED', 'Nie udalo sie zapisac odejscia czlonka.', { guildId: member.guild.id, userId: member.id }, error);
     }
 });
 

@@ -997,6 +997,19 @@ export function hasRequiredRole(member: DiscordGuildMember): boolean {
     return hasSupportRole(member) || hasDevRole(member);
 }
 
+export function resolveDashboardRole(member: DiscordGuildMember): string {
+    const devRoleId = process.env.DEV_ROLE_ID?.trim();
+    const adminRoleId = process.env.ADMIN_ROLE_ID?.trim();
+    const moderatorRoleId = process.env.MODERATOR_ROLE_ID?.trim();
+    const cmRoleId = process.env.COMMUNITY_MANAGER_ROLE_ID?.trim();
+
+    if (devRoleId && member.roles.includes(devRoleId)) return 'dev';
+    if (adminRoleId && member.roles.includes(adminRoleId)) return 'admin';
+    if (moderatorRoleId && member.roles.includes(moderatorRoleId)) return 'moderator';
+    if (cmRoleId && member.roles.includes(cmRoleId)) return 'community_manager';
+    return 'member';
+}
+
 const ALLOWED_IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
 const IMG_MIME: Record<string, string> = {
     '.png':  'image/png',
@@ -1050,6 +1063,26 @@ export async function sendImageToChannel(channelId: string, filename: string): P
 
 export function invalidateGuildChannelsCache(guildId: string): void {
     guildChannelsCache.delete(guildId);
+}
+
+const guildAllChannelsCache = new Map<string, SimpleCacheEntry<DiscordChannel[]>>();
+
+export async function getGuildAllChannels(guildId: string): Promise<DiscordChannel[]> {
+    const now = Date.now();
+    const cached = guildAllChannelsCache.get(guildId);
+    if (cached && now - cached.fetchedAt < GUILD_CHANNELS_CACHE_TTL_MS) {
+        return [...cached.data];
+    }
+
+    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/channels`, {
+        headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+    });
+
+    if (!resp.ok) throw new Error(`Failed to fetch all channels: ${resp.status}`);
+
+    const channels = await resp.json() as DiscordChannel[];
+    guildAllChannelsCache.set(guildId, { data: channels, fetchedAt: now });
+    return [...channels];
 }
 
 export function invalidateGuildMemberCache(guildId: string, userId: string): void {
