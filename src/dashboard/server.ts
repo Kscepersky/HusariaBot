@@ -147,6 +147,7 @@ export function createDashboardApp() {
         res.setHeader('X-Frame-Options', 'DENY');
         res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
         res.setHeader(
             'Content-Security-Policy',
             "default-src 'self'; img-src 'self' https://cdn.discordapp.com data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
@@ -204,7 +205,7 @@ export function createDashboardApp() {
         saveUninitialized: false,
         cookie: {
             httpOnly: true,
-            sameSite: 'lax',
+            sameSite: 'strict',
             maxAge:   sessionMaxAgeMs,
             secure:   process.env.NODE_ENV === 'production',
         },

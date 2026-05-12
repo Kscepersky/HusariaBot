@@ -518,11 +518,10 @@ async function syncLevelRolesAfterCsvImport(guildId: string, csvContent: string)
             updatedUsers += 1;
         } catch (error) {
             failedUsers += 1;
-            console.warn('Failed to sync imported economy role mapping for user:', {
+            apiLogger.warn('LEVEL_ROLE_SYNC_USER_FAILED', 'Failed to sync imported economy role mapping for user.', {
                 guildId,
                 userId: importedUser.userId,
-                error,
-            });
+            }, error);
         }
     }
 
@@ -974,7 +973,7 @@ async function requireCurrentDashboardRole(req: Request, res: Response, next: Ne
 
         next();
     } catch (error) {
-        console.error('Failed to verify dashboard role:', error);
+        apiLogger.error('DASHBOARD_ROLE_VERIFY_FAILED', 'Failed to verify dashboard role.', { userId }, error);
         res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień użytkownika.' });
     }
 }
@@ -1001,7 +1000,7 @@ async function requireCurrentDashboardDevRole(req: Request, res: Response, next:
 
         next();
     } catch (error) {
-        console.error('Failed to verify dashboard role:', error);
+        apiLogger.error('DASHBOARD_DEV_ROLE_VERIFY_FAILED', 'Failed to verify dashboard dev role.', { userId }, error);
         res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień użytkownika.' });
     }
 }
@@ -1153,12 +1152,12 @@ function handleDashboardEventMutationError(
     }
 
     if (isDiscordEventOperationError(error)) {
-        console.error(`Failed to ${operation} Discord event (upstream):`, error);
+        apiLogger.error('DISCORD_EVENT_OP_UPSTREAM_FAILED', `Failed to ${operation} Discord event (upstream).`, { operation }, error);
         res.status(502).json({ error: `Nie udało się ${operation === 'create' ? 'utworzyć' : (operation === 'update' ? 'zaktualizować' : 'usunąć')} wydarzenia Discord (błąd usługi zewnętrznej).` });
         return;
     }
 
-    console.error(`Failed to ${operation} Discord event:`, error);
+    apiLogger.error('DISCORD_EVENT_OP_FAILED', `Failed to ${operation} Discord event.`, { operation }, error);
     res.status(500).json({ error: `Nie udało się ${operation === 'create' ? 'utworzyć' : (operation === 'update' ? 'zaktualizować' : 'usunąć')} wydarzenia Discord.` });
 }
 
@@ -1215,19 +1214,19 @@ apiRouter.get('/me', (req, res) => {
 });
 
 // GET /api/channels — live channel list from Discord
-apiRouter.get('/channels', async (_req, res) => {
+apiRouter.get('/channels', requireCurrentDashboardRole, async (_req, res) => {
     const guildId = process.env.GUILD_ID!;
     try {
         const channels = await getGuildTextChannels(guildId);
         res.json({ channels });
     } catch (err) {
-        console.error('Failed to fetch channels:', err);
+        apiLogger.error('CHANNELS_FETCH_FAILED', 'Failed to fetch channels.', {}, err);
         res.status(500).json({ error: 'Nie udało się pobrać listy kanałów.' });
     }
 });
 
 // GET /api/channels/search — search channels for mention picker
-apiRouter.get('/channels/search', async (req, res) => {
+apiRouter.get('/channels/search', requireCurrentDashboardRole, async (req, res) => {
     const guildId = process.env.GUILD_ID!;
     const query = typeof req.query.query === 'string' ? req.query.query.trim().toLowerCase() : '';
 
@@ -1247,26 +1246,26 @@ apiRouter.get('/channels/search', async (req, res) => {
 
         res.json({ channels: filteredChannels });
     } catch (err) {
-        console.error('Failed to search channels:', err);
+        apiLogger.error('CHANNELS_SEARCH_FAILED', 'Failed to search channels.', {}, err);
         res.status(500).json({ error: 'Nie udało się wyszukać kanałów.' });
     }
 });
 
 // GET /api/roles — live role list from Discord
-apiRouter.get('/roles', async (_req, res) => {
+apiRouter.get('/roles', requireCurrentDashboardRole, async (_req, res) => {
     const guildId = process.env.GUILD_ID!;
 
     try {
         const roles = await getGuildRoles(guildId);
         res.json({ roles });
     } catch (err) {
-        console.error('Failed to fetch roles:', err);
+        apiLogger.error('ROLES_FETCH_FAILED', 'Failed to fetch roles.', {}, err);
         res.status(500).json({ error: 'Nie udało się pobrać listy ról.' });
     }
 });
 
 // GET /api/roles/search — search roles for mention picker
-apiRouter.get('/roles/search', async (req, res) => {
+apiRouter.get('/roles/search', requireCurrentDashboardRole, async (req, res) => {
     const guildId = process.env.GUILD_ID!;
     const query = typeof req.query.query === 'string' ? req.query.query.trim().toLowerCase() : '';
 
@@ -1286,20 +1285,20 @@ apiRouter.get('/roles/search', async (req, res) => {
 
         res.json({ roles: filteredRoles });
     } catch (err) {
-        console.error('Failed to search roles:', err);
+        apiLogger.error('ROLES_SEARCH_FAILED', 'Failed to search roles.', {}, err);
         res.status(500).json({ error: 'Nie udało się wyszukać ról.' });
     }
 });
 
 // GET /api/emojis — live emoji list from Discord
-apiRouter.get('/emojis', async (_req, res) => {
+apiRouter.get('/emojis', requireCurrentDashboardRole, async (_req, res) => {
     const guildId = process.env.GUILD_ID!;
 
     try {
         const emojis = await getGuildEmojis(guildId);
         res.json({ emojis });
     } catch (err) {
-        console.error('Failed to fetch emojis:', err);
+        apiLogger.error('EMOJIS_FETCH_FAILED', 'Failed to fetch emojis.', {}, err);
         res.status(500).json({ error: 'Nie udało się pobrać listy emotek.' });
     }
 });
@@ -1321,7 +1320,7 @@ apiRouter.get('/members/search', requireCurrentDashboardRole, async (req, res) =
         const members = await searchGuildMembers(guildId, query, limit);
         res.json({ members });
     } catch (err) {
-        console.error('Failed to search members:', err);
+        apiLogger.error('MEMBERS_SEARCH_FAILED', 'Failed to search members.', {}, err);
         res.status(500).json({ error: 'Nie udało się wyszukać użytkowników.' });
     }
 });
@@ -1390,7 +1389,7 @@ apiRouter.get('/timeouts', requireCurrentDashboardRole, async (req, res) => {
 
         res.json({ success: true, timeouts });
     } catch (error) {
-        console.error('Failed to list active timeouts:', error);
+        apiLogger.error('TIMEOUTS_LIST_FAILED', 'Failed to list active timeouts.', {}, error);
         res.status(500).json({ error: 'Nie udalo sie pobrac listy timeoutow.' });
     }
 });
@@ -1619,7 +1618,7 @@ apiRouter.post('/timeouts/:timeoutId/remove', requireCurrentDashboardRole, async
             return;
         }
 
-        console.error('Failed to remove timeout from dashboard:', error);
+        apiLogger.error('TIMEOUT_REMOVE_FAILED', 'Failed to remove timeout from dashboard.', {}, error);
         res.status(500).json({ error: 'Nie udalo sie zdjac timeoutu.' });
     }
 });
@@ -2060,7 +2059,7 @@ apiRouter.get('/economy/settings', requireCurrentDashboardDevRole, async (_req, 
         const config = await getEconomyConfig();
         res.json({ config });
     } catch (error) {
-        console.error('Failed to load economy settings:', error);
+        apiLogger.error('ECONOMY_SETTINGS_LOAD_FAILED', 'Failed to load economy settings.', {}, error);
         res.status(500).json({ error: 'Nie udało się pobrać ustawień ekonomii.' });
     }
 });
@@ -2077,7 +2076,7 @@ apiRouter.patch('/economy/settings', requireCurrentDashboardDevRole, async (req,
         const updatedConfig = await updateEconomyConfig(parsedBody.data, Date.now());
         res.json({ success: true, config: updatedConfig });
     } catch (error) {
-        console.error('Failed to update economy settings:', error);
+        apiLogger.error('ECONOMY_SETTINGS_UPDATE_FAILED', 'Failed to update economy settings.', {}, error);
         res.status(500).json({ error: 'Nie udało się zapisać ustawień ekonomii.' });
     }
 });
@@ -2094,7 +2093,7 @@ apiRouter.post('/economy/reset-users', requireCurrentDashboardDevRole, async (_r
         const resetCount = await resetEconomyUsers(guildId);
         res.json({ success: true, resetCount });
     } catch (error) {
-        console.error('Failed to reset economy users:', error);
+        apiLogger.error('ECONOMY_RESET_USERS_FAILED', 'Failed to reset economy users.', {}, error);
         res.status(500).json({ error: 'Nie udało się zresetować danych ekonomii.' });
     }
 });
@@ -2149,7 +2148,7 @@ apiRouter.post('/economy/user-mutation', requireCurrentDashboardDevRole, async (
 
         res.json({ success: true, mutation });
     } catch (error) {
-        console.error('Failed to apply manual economy mutation:', error);
+        apiLogger.error('ECONOMY_USER_MUTATION_FAILED', 'Failed to apply manual economy mutation.', {}, error);
         res.status(500).json({ error: 'Nie udało się wykonać ręcznej mutacji użytkownika.' });
     }
 });
@@ -2166,7 +2165,7 @@ apiRouter.get('/economy/level-roles', requireCurrentDashboardDevRole, async (_re
         const mappings = await getEconomyLevelRoleMappings(guildId);
         res.json({ mappings });
     } catch (error) {
-        console.error('Failed to load economy level-role mappings:', error);
+        apiLogger.error('ECONOMY_LEVEL_ROLES_LOAD_FAILED', 'Failed to load economy level-role mappings.', {}, error);
         res.status(500).json({ error: 'Nie udało się pobrać mapowań ról levelowych.' });
     }
 });
@@ -2203,7 +2202,7 @@ apiRouter.put('/economy/level-roles', requireCurrentDashboardDevRole, async (req
             return;
         }
 
-        console.error('Failed to update economy level-role mappings:', error);
+        apiLogger.error('ECONOMY_LEVEL_ROLES_UPDATE_FAILED', 'Failed to update economy level-role mappings.', {}, error);
         res.status(500).json({ error: 'Nie udało się zapisać mapowań ról levelowych.' });
     }
 });
@@ -2239,7 +2238,7 @@ apiRouter.post('/economy/import-csv', requireCurrentDashboardDevRole, async (req
         try {
             roleSync = await syncLevelRolesAfterCsvImport(guildId, parsedBody.data.csvContent);
         } catch (roleSyncError) {
-            console.warn('Failed to sync level roles after economy CSV import:', roleSyncError);
+            apiLogger.warn('ECONOMY_CSV_ROLE_SYNC_FAILED', 'Failed to sync level roles after economy CSV import.', {}, roleSyncError);
         }
 
         res.json({ success: true, result, roleSync });
@@ -2249,7 +2248,7 @@ apiRouter.post('/economy/import-csv', requireCurrentDashboardDevRole, async (req
             return;
         }
 
-        console.error('Failed to import economy CSV snapshot:', error);
+        apiLogger.error('ECONOMY_CSV_IMPORT_FAILED', 'Failed to import economy CSV snapshot.', {}, error);
         res.status(500).json({ error: 'Nie udało się zaimportować danych CSV ekonomii.' });
     }
 });
@@ -2278,7 +2277,7 @@ apiRouter.get('/economy/leaderboard', requireCurrentDashboardRole, async (req, r
         const leaderboard = await enrichEconomyLeaderboard(guildId, rawLeaderboard);
         res.json({ leaderboard });
     } catch (error) {
-        console.error('Failed to load economy leaderboard:', error);
+        apiLogger.error('ECONOMY_LEADERBOARD_LOAD_FAILED', 'Failed to load economy leaderboard.', {}, error);
         res.status(500).json({ error: 'Nie udało się pobrać leaderboardu ekonomii.' });
     }
 });
@@ -2313,12 +2312,12 @@ apiRouter.get('/events', async (_req, res) => {
         }
 
         if (isDiscordEventOperationError(error)) {
-            console.error('Failed to load Discord events (upstream):', error);
+            apiLogger.error('DISCORD_EVENTS_FETCH_UPSTREAM_FAILED', 'Failed to load Discord events (upstream).', {}, error);
             res.status(502).json({ error: 'Nie udało się pobrać listy wydarzeń Discord (błąd usługi zewnętrznej).' });
             return;
         }
 
-        console.error('Failed to load Discord events:', error);
+        apiLogger.error('DISCORD_EVENTS_FETCH_FAILED', 'Failed to load Discord events.', {}, error);
         res.status(500).json({ error: 'Nie udało się pobrać listy wydarzeń Discord.' });
     }
 });
@@ -2441,7 +2440,7 @@ apiRouter.post('/send-image', async (req, res) => {
             return;
         }
 
-        console.error('Failed to send image:', err);
+        apiLogger.error('IMAGE_SEND_FAILED', 'Failed to send image.', {}, err);
         res.status(500).json({ error: 'Nie udało się wysłać obrazu.' });
     }
 });
@@ -2536,7 +2535,6 @@ apiRouter.post('/embed', async (req, res) => {
                 source: sentPost.source,
             });
         } catch (persistError) {
-            console.error('Failed to persist sent post history:', persistError);
             warnings.push('Post został wysłany, ale nie udało się zapisać go w historii wysłanych postów.');
             apiLogger.warn('SENT_POST_HISTORY_PERSIST_FAILED', 'Nie udalo sie zapisac historii wyslanego posta.', {
                 actorUserId: publisherId,
@@ -2560,7 +2558,7 @@ apiRouter.post('/embed', async (req, res) => {
                     lastError: warnings.length > 0 ? warnings.join(' | ') : undefined,
                 }));
             } catch (persistWatchpartyError) {
-                console.error('Failed to persist watchparty status for sent post:', persistWatchpartyError);
+                apiLogger.warn('WATCHPARTY_STATUS_PERSIST_FAILED', 'Failed to persist watchparty status for sent post.', {}, persistWatchpartyError);
             }
 
             if (updatedPost) {
@@ -2572,7 +2570,7 @@ apiRouter.post('/embed', async (req, res) => {
                     try {
                         await deleteWatchpartyChannel(watchpartyResult.channelId);
                     } catch (watchpartyCleanupError) {
-                        console.error('Failed to rollback watchparty channel after persist error:', watchpartyCleanupError);
+                        apiLogger.warn('WATCHPARTY_CHANNEL_ROLLBACK_FAILED', 'Failed to rollback watchparty channel after persist error.', {}, watchpartyCleanupError);
                         warnings.push('Rollback kanału watchparty po błędzie zapisu nie powiódł się. Wymagane ręczne sprzątanie kanału.');
                     }
                 }
@@ -2661,7 +2659,7 @@ apiRouter.get('/stats/server', requireCurrentDashboardRole, async (req, res) => 
         const summary = await getServerStatsByDateRange(guildId, range.startDate, range.endDate);
         res.json({ summary });
     } catch (error) {
-        console.error('Failed to load server stats:', error);
+        apiLogger.error('SERVER_STATS_LOAD_FAILED', 'Failed to load server stats.', {}, error);
         res.status(500).json({ error: 'Nie udało się pobrać statystyk serwera.' });
     }
 });
@@ -2672,7 +2670,7 @@ apiRouter.get('/stats/server/config', requireCurrentDashboardRole, async (_req, 
         const excludedChannelIds = await getStatsExcludedChannelIds();
         res.json({ excludedChannelIds });
     } catch (error) {
-        console.error('Failed to load stats config:', error);
+        apiLogger.error('STATS_CONFIG_LOAD_FAILED', 'Failed to load stats config.', {}, error);
         res.status(500).json({ error: 'Nie udało się pobrać konfiguracji statystyk.' });
     }
 });
@@ -2696,7 +2694,7 @@ apiRouter.put('/stats/server/config', requireCurrentDashboardRole, async (req, r
         await setStatsExcludedChannelIds(channelIds);
         res.json({ success: true, excludedChannelIds: channelIds });
     } catch (error) {
-        console.error('Failed to update stats config:', error);
+        apiLogger.error('STATS_CONFIG_UPDATE_FAILED', 'Failed to update stats config.', {}, error);
         res.status(500).json({ error: 'Nie udało się zaktualizować konfiguracji statystyk.' });
     }
 });
@@ -2737,7 +2735,7 @@ apiRouter.get('/stats/server/top-users', requireCurrentDashboardRole, async (req
 
         res.json({ topUsers });
     } catch (error) {
-        console.error('Failed to load server stats top users:', error);
+        apiLogger.error('SERVER_STATS_TOP_USERS_FAILED', 'Failed to load server stats top users.', {}, error);
         res.status(500).json({ error: 'Nie udało się pobrać najaktywniejszych użytkowników.' });
     }
 });
@@ -2760,7 +2758,7 @@ apiRouter.get('/stats/server/timeseries', requireCurrentDashboardRole, async (re
         const timeSeries = await getServerStatsDailyTimeSeries(guildId, range.startDate, range.endDate);
         res.json({ timeSeries });
     } catch (error) {
-        console.error('Failed to load server stats time series:', error);
+        apiLogger.error('SERVER_STATS_TIMESERIES_FAILED', 'Failed to load server stats time series.', {}, error);
         res.status(500).json({ error: 'Nie udało się pobrać szeregu czasowego statystyk serwera.' });
     }
 });

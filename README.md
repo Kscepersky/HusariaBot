@@ -280,8 +280,41 @@ A full-featured publishing tool that targets any text or announcement channel on
 - Per-user account inspection and manual edit (XP, coins, message count, voice minutes).
 - Bulk import via CSV: `userId,level,totalxp,messages,voiceMinutes`.
 - Level → role mapping editor: configure which Discord role is awarded at which level threshold.
-- Server activity statistics: message and voice minute charts over configurable date ranges, top users by composite score.
 - G2 match database refresh reloads data in-place without redirecting the user.
+
+### Server Statistics
+
+A full-featured analytics panel with tabbed sections and per-tab date filtering:
+
+**Date filters:** Dzisiaj / 7 dni / Miesiąc presets plus a custom date-range picker. Every chart and ranking updates instantly.
+
+**Users tab**
+- Combined activity leaderboard ranked by composite score (messages + voice minutes).
+- Top users by messages and by voice minutes, each with color-coded chips (💬 green for messages, 🎙️ blue for voice minutes).
+- Unique active user counts for the selected period.
+
+**Messages tab**
+- Daily message count bar chart.
+- Top users by message count with green chips.
+- Top channels by message count with green chips and doughnut chart showing channel share.
+- Unique messaging-user count for the period.
+
+**Voice tab**
+- Daily voice-minute bar chart.
+- Top users by voice minutes with blue chips.
+- Top channels by voice minutes with blue chips and doughnut chart showing channel share.
+- Unique voice-active user count for the period.
+
+**Members tab**
+- Total server member count over time (line chart).
+- Members joined vs. left per day for the selected period.
+- Net member change summary for the period.
+
+**Settings tab** *(Dev role only)*
+- Toggle message and voice tracking on/off per channel.
+- Configure stat collection globally.
+
+**Export:** Every tab has a CSV export button. A global "Export All Data" button downloads a full cross-tab dataset.
 
 ![ladder_economy](leaderboard_economy.png)
 
@@ -308,6 +341,7 @@ A full-featured publishing tool that targets any text or announcement channel on
 - Real-time view of which dashboard users are currently logged in, with their Discord avatar, display name, Discord ID, IP address, and browser User-Agent.
 - Full login and logout event history for the last 30 days, stored in a dedicated SQLite database (`data/session-events.sqlite`).
 - Login events are recorded on every successful OAuth2 callback; logout events are recorded on explicit session destruction.
+- **Session killswitch** — a single button force-logs out all currently active dashboard users simultaneously, writes audit logout events for every affected session, and clears the underlying session store. Only accessible to users with the Dev role.
 
 ---
 

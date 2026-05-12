@@ -39,7 +39,7 @@ function isProtectedMutationRequest(req: Request): boolean {
         return true;
     }
 
-    return normalizedPath === '/auth/logout' && method === 'POST';
+    return (normalizedPath === '/auth/logout' || normalizedPath === '/auth/killswitch') && method === 'POST';
 }
 
 function secureCompareToken(left: string, right: string): boolean {

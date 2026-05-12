@@ -127,6 +127,7 @@ let sessionRecentEvents = []
 let sessionActivityLoadRequestId = 0
 let economyLevelRoleMappings = []
 let economyLevelRoleMappingsLoaded = false
+let currentDashboardRole = null
 let economyHasDevAccess = null
 let economyAccessRetryTimerId = null
 let timeoutCreateSearchDebounceId = null
@@ -185,6 +186,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadUserInfo()
   await ensureCsrfToken().catch(() => undefined)
   initSidebarNav()
+  initHamburger()
   applyEconomySettingsAccessState()
   await initEmbedSection()
   await initScheduledSection()
@@ -212,6 +214,13 @@ async function loadUserInfo() {
     }
 
     const { user } = await resp.json()
+    currentDashboardRole = user.dashboardRole ?? null
+
+    const settingsTabBtn = document.getElementById('stats-settings-tab-btn')
+    if (settingsTabBtn && currentDashboardRole !== 'dev') {
+      settingsTabBtn.style.display = 'none'
+    }
+
     const container = document.getElementById('navbar-user')
     const avatarUrl = user.avatar
       ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=64`
@@ -319,6 +328,32 @@ async function fetchWithCsrf(url, options = {}) {
   })
 }
 
+function closeMobileSidebar() {
+  const sidebar = document.querySelector('.sidebar')
+  const overlay = document.getElementById('sidebar-overlay')
+  const hamburger = document.getElementById('hamburger-btn')
+  sidebar?.classList.remove('open')
+  overlay?.classList.remove('visible')
+  hamburger?.classList.remove('open')
+  hamburger?.setAttribute('aria-expanded', 'false')
+}
+
+function initHamburger() {
+  const hamburger = document.getElementById('hamburger-btn')
+  const sidebar = document.querySelector('.sidebar')
+  const overlay = document.getElementById('sidebar-overlay')
+  if (!hamburger || !sidebar || !overlay) return
+
+  hamburger.addEventListener('click', () => {
+    const isOpen = sidebar.classList.toggle('open')
+    overlay.classList.toggle('visible', isOpen)
+    hamburger.classList.toggle('open', isOpen)
+    hamburger.setAttribute('aria-expanded', String(isOpen))
+  })
+
+  overlay.addEventListener('click', closeMobileSidebar)
+}
+
 function initSidebarNav() {
   document.querySelectorAll('.sidebar-item[data-section]').forEach((item) => {
     item.addEventListener('click', (event) => {
@@ -329,6 +364,7 @@ function initSidebarNav() {
       }
 
       switchSection(section)
+      if (window.innerWidth <= 768) closeMobileSidebar()
     })
   })
 }
@@ -1536,6 +1572,7 @@ function bindSessionActivitySectionListeners() {
   const refreshButton = document.getElementById('session-activity-refresh-btn')
   const prevButton = document.getElementById('session-activity-prev-btn')
   const nextButton = document.getElementById('session-activity-next-btn')
+  const killswitchButton = document.getElementById('session-killswitch-btn')
 
   refreshButton?.addEventListener('click', () => {
     void loadSessionActivity({ page: 1, silent: true })
@@ -1550,6 +1587,45 @@ function bindSessionActivitySectionListeners() {
     if (sessionActivityPage >= sessionActivityTotalPages) return
     void loadSessionActivity({ page: sessionActivityPage + 1, silent: true })
   })
+
+  killswitchButton?.addEventListener('click', () => {
+    if (!confirm('Na pewno chcesz wylogować WSZYSTKICH użytkowników z dashboardu? Ta operacja jest nieodwracalna.')) return
+    void triggerSessionKillswitch()
+  })
+}
+
+async function triggerSessionKillswitch() {
+  const killswitchButton = document.getElementById('session-killswitch-btn')
+  if (killswitchButton) {
+    killswitchButton.disabled = true
+    killswitchButton.textContent = 'Wylogowywanie...'
+  }
+
+  try {
+    const csrfToken = await ensureCsrfToken()
+    const response = await fetch('/auth/killswitch', {
+      method: 'POST',
+      headers: { 'x-csrf-token': csrfToken },
+    })
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}))
+      alert(`Błąd: ${payload.error ?? 'Nie udało się wykonać killswitch.'}`)
+      if (killswitchButton) {
+        killswitchButton.disabled = false
+        killswitchButton.textContent = 'Killswitch — wyloguj wszystkich'
+      }
+      return
+    }
+
+    window.location.href = '/auth/login'
+  } catch {
+    alert('Błąd połączenia. Spróbuj ponownie.')
+    if (killswitchButton) {
+      killswitchButton.disabled = false
+      killswitchButton.textContent = 'Killswitch — wyloguj wszystkich'
+    }
+  }
 }
 
 async function loadSessionActivity(options = {}) {
@@ -6477,6 +6553,7 @@ function renderMembersChart(timeSeries) {
     options: {
       ...STATS_CHART_OPTIONS_BASE,
       responsive: true,
+      maintainAspectRatio: false,
       plugins: {
         ...(STATS_CHART_OPTIONS_BASE.plugins ?? {}),
         tooltip: {
@@ -6575,7 +6652,7 @@ function renderMessagesChart(timeSeries) {
         borderWidth: 1,
       }],
     },
-    options: { ...STATS_CHART_OPTIONS_BASE, responsive: true },
+    options: { ...STATS_CHART_OPTIONS_BASE, responsive: true, maintainAspectRatio: false },
   })
 }
 
@@ -6623,7 +6700,7 @@ async function loadMessagesTopChannels() {
     const payload = await parseApiResponse(res)
     if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
     const channels = Array.isArray(payload.topChannels) ? payload.topChannels : []
-    renderTopChannelsList(list, channels, 'messages', 'msg')
+    renderTopChannelsList(list, channels, 'messages', 'wiad.')
     renderDoughnutChart('messages-channels-doughnut', 'messages', channels, 'messages')
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Błąd'
@@ -6697,7 +6774,7 @@ function renderVoiceChart(timeSeries) {
         borderWidth: 1,
       }],
     },
-    options: { ...STATS_CHART_OPTIONS_BASE, responsive: true },
+    options: { ...STATS_CHART_OPTIONS_BASE, responsive: true, maintainAspectRatio: false },
   })
 }
 
@@ -6762,6 +6839,8 @@ function renderTopUsersList(listEl, users, primaryKey, secondaryKey, startIndex)
     return
   }
 
+  if (baseIndex === 0) listEl.innerHTML = ''
+
   listEl.insertAdjacentHTML('beforeend', users.map((user, i) => {
     const pos = baseIndex + i + 1
     const displayName = typeof user.displayName === 'string' && user.displayName.trim().length > 0
@@ -6769,14 +6848,20 @@ function renderTopUsersList(listEl, users, primaryKey, secondaryKey, startIndex)
       : `Użytkownik ${user.userId}`
     const avatarUrl = typeof user.avatarUrl === 'string' && user.avatarUrl.trim().length > 0 ? user.avatarUrl.trim() : null
     const fallback = escapeHtml(displayName.slice(0, 1).toUpperCase() || '?')
-    const primaryVal = Number.isFinite(Number(user[primaryKey])) ? Number(user[primaryKey]).toLocaleString('pl-PL') : '0'
-    const primaryLabel = primaryKey === 'messages' ? 'Wiadomości' : primaryKey === 'voiceMinutes' ? 'Minuty VC' : primaryKey
 
-    const chips = [`<span class="scheduled-chip">${escapeHtml(primaryLabel)}: ${escapeHtml(primaryVal)}</span>`]
+    const primaryVal = Number.isFinite(Number(user[primaryKey])) ? Number(user[primaryKey]).toLocaleString('pl-PL') : '0'
+    const primaryChipClass = primaryKey === 'voiceMinutes' ? 'leaderboard-chip-voice' : 'leaderboard-chip-messages'
+    const primaryEmoji = primaryKey === 'voiceMinutes' ? '🎙️' : '💬'
+    const primaryUnit = primaryKey === 'voiceMinutes' ? ' min' : ' wiad.'
+    const primaryChip = `<span class="scheduled-chip ${primaryChipClass}">${primaryEmoji} ${escapeHtml(primaryVal)}${primaryUnit}</span>`
+
+    let secondaryChip = ''
     if (secondaryKey && user[secondaryKey] !== undefined) {
       const secondaryVal = Number.isFinite(Number(user[secondaryKey])) ? Number(user[secondaryKey]).toLocaleString('pl-PL') : '0'
-      const secondaryLabel = secondaryKey === 'messages' ? 'Wiadomości' : secondaryKey === 'voiceMinutes' ? 'Minuty VC' : secondaryKey
-      chips.push(`<span class="scheduled-chip">${escapeHtml(secondaryLabel)}: ${escapeHtml(secondaryVal)}</span>`)
+      const secondaryChipClass = secondaryKey === 'voiceMinutes' ? 'leaderboard-chip-voice' : 'leaderboard-chip-messages'
+      const secondaryEmoji = secondaryKey === 'voiceMinutes' ? '🎙️' : '💬'
+      const secondaryUnit = secondaryKey === 'voiceMinutes' ? ' min' : ' wiad.'
+      secondaryChip = `<span class="scheduled-chip ${secondaryChipClass}">${secondaryEmoji} ${escapeHtml(secondaryVal)}${secondaryUnit}</span>`
     }
 
     return `
@@ -6788,8 +6873,9 @@ function renderTopUsersList(listEl, users, primaryKey, secondaryKey, startIndex)
               : `<span class="leaderboard-avatar leaderboard-avatar-placeholder">${fallback}</span>`}
             <span class="scheduled-card-title">#${pos} | ${escapeHtml(displayName)}</span>
           </div>
+          ${primaryChip}
         </div>
-        <div class="scheduled-card-meta">${chips.join('')}</div>
+        ${secondaryChip ? `<div class="scheduled-card-meta">${secondaryChip}</div>` : ''}
       </article>`
   }).join(''))
 }
@@ -6800,6 +6886,9 @@ function renderTopChannelsList(listEl, channels, valueKey, unitLabel) {
     return
   }
 
+  const chipClass = valueKey === 'voiceMinutes' ? 'leaderboard-chip-voice' : 'leaderboard-chip-messages'
+  const chipEmoji = valueKey === 'voiceMinutes' ? '🎙️' : '💬'
+
   listEl.innerHTML = channels.map((ch, i) => {
     const name = typeof ch.channelName === 'string' && ch.channelName.trim().length > 0 ? ch.channelName : `#${ch.channelId}`
     const val = Number.isFinite(Number(ch[valueKey])) ? Number(ch[valueKey]).toLocaleString('pl-PL') : '0'
@@ -6808,7 +6897,7 @@ function renderTopChannelsList(listEl, channels, valueKey, unitLabel) {
       <article class="scheduled-card">
         <div class="scheduled-card-header">
           <span class="scheduled-card-title">#${i + 1} | ${escapeHtml(name)}</span>
-          <span class="scheduled-chip leaderboard-chip-primary">${escapeHtml(val)} ${escapeHtml(unit)}</span>
+          <span class="scheduled-chip ${chipClass}">${chipEmoji} ${escapeHtml(val)} ${escapeHtml(unit)}</span>
         </div>
       </article>`
   }).join('')

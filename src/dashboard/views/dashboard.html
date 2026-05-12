@@ -11,6 +11,9 @@
 
 <nav class="navbar">
   <div class="navbar-brand">
+    <button class="hamburger" id="hamburger-btn" aria-label="Menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
     <img src="/img/DNA.png" class="navbar-logo" alt="HusariaBot">
     <span class="navbar-title">HusariaBot</span>
     <span class="navbar-subtitle">Dashboard</span>
@@ -77,6 +80,7 @@
       </a>
     </nav>
   </aside>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
   <section class="content">
     <div id="section-embed-creator" class="section-panel active">
@@ -874,7 +878,7 @@
         <button class="stats-tab-btn active" data-tab="users">👥 Użytkownicy</button>
         <button class="stats-tab-btn" data-tab="messages">💬 Wiadomości</button>
         <button class="stats-tab-btn" data-tab="voice">🎙 Voice</button>
-        <button class="stats-tab-btn" data-tab="settings">⚙️ Ustawienia</button>
+        <button class="stats-tab-btn" data-tab="settings" id="stats-settings-tab-btn">⚙️ Ustawienia</button>
       </div>
 
       <!-- ───────── TAB: Użytkownicy ───────── -->
@@ -912,20 +916,24 @@
         </div>
 
         <div class="creator-form-card">
-          <div class="section-header">
-            <h3>📈 Liczba członków serwera</h3>
+          <div class="stats-two-col">
+            <div class="stats-col" style="flex: 1.5;">
+              <div class="section-header">
+                <h3>📈 Liczba członków serwera</h3>
+              </div>
+              <div class="server-stats-chart-wrapper">
+                <canvas id="users-members-chart"></canvas>
+              </div>
+            </div>
+            <div class="stats-vsep"></div>
+            <div class="stats-col">
+              <div class="section-header">
+                <h3>🥇 Najbardziej aktywni</h3>
+                <p>Wiadomości + minuty voice łącznie.</p>
+              </div>
+              <div id="users-active-list" class="scheduled-list"></div>
+            </div>
           </div>
-          <div class="server-stats-chart-wrapper">
-            <canvas id="users-members-chart"></canvas>
-          </div>
-        </div>
-
-        <div class="creator-form-card">
-          <div class="section-header">
-            <h3>🥇 Najbardziej aktywni użytkownicy</h3>
-            <p>Ranking według łącznej aktywności (wiadomości + minuty voice) dla wybranego okresu.</p>
-          </div>
-          <div id="users-active-list" class="scheduled-list"></div>
         </div>
       </div>
 
@@ -964,20 +972,24 @@
         </div>
 
         <div class="creator-form-card">
-          <div class="section-header">
-            <h3>📈 Wiadomości dziennie</h3>
+          <div class="stats-two-col">
+            <div class="stats-col" style="flex: 1.5;">
+              <div class="section-header">
+                <h3>📈 Wiadomości dziennie</h3>
+              </div>
+              <div class="server-stats-chart-wrapper">
+                <canvas id="messages-timeseries-chart"></canvas>
+              </div>
+            </div>
+            <div class="stats-vsep"></div>
+            <div class="stats-col">
+              <div class="section-header">
+                <h3>🥇 Top użytkownicy</h3>
+              </div>
+              <div id="messages-top-users-list" class="scheduled-list"></div>
+              <button class="btn-secondary stats-load-more-btn" id="messages-load-more-btn" style="margin-top: 10px;">Załaduj więcej</button>
+            </div>
           </div>
-          <div class="server-stats-chart-wrapper">
-            <canvas id="messages-timeseries-chart"></canvas>
-          </div>
-        </div>
-
-        <div class="creator-form-card">
-          <div class="section-header">
-            <h3>🥇 Top użytkownicy</h3>
-          </div>
-          <div id="messages-top-users-list" class="scheduled-list"></div>
-          <button class="btn-secondary stats-load-more-btn" id="messages-load-more-btn">Załaduj więcej</button>
         </div>
 
         <div class="creator-form-card stats-two-col">
@@ -987,6 +999,7 @@
             </div>
             <div id="messages-top-channels-list" class="scheduled-list"></div>
           </div>
+          <div class="stats-vsep"></div>
           <div class="stats-col stats-chart-col">
             <div class="section-header">
               <h3>Udział kanałów</h3>
@@ -1037,20 +1050,24 @@
         </div>
 
         <div class="creator-form-card">
-          <div class="section-header">
-            <h3>📈 Minuty Voice dziennie</h3>
+          <div class="stats-two-col">
+            <div class="stats-col" style="flex: 1.5;">
+              <div class="section-header">
+                <h3>📈 Minuty Voice dziennie</h3>
+              </div>
+              <div class="server-stats-chart-wrapper">
+                <canvas id="voice-timeseries-chart"></canvas>
+              </div>
+            </div>
+            <div class="stats-vsep"></div>
+            <div class="stats-col">
+              <div class="section-header">
+                <h3>🥇 Top użytkownicy Voice</h3>
+              </div>
+              <div id="voice-top-users-list" class="scheduled-list"></div>
+              <button class="btn-secondary stats-load-more-btn" id="voice-load-more-btn" style="margin-top: 10px;">Załaduj więcej</button>
+            </div>
           </div>
-          <div class="server-stats-chart-wrapper">
-            <canvas id="voice-timeseries-chart"></canvas>
-          </div>
-        </div>
-
-        <div class="creator-form-card">
-          <div class="section-header">
-            <h3>🥇 Top użytkownicy Voice</h3>
-          </div>
-          <div id="voice-top-users-list" class="scheduled-list"></div>
-          <button class="btn-secondary stats-load-more-btn" id="voice-load-more-btn">Załaduj więcej</button>
         </div>
 
         <div class="creator-form-card stats-two-col">
@@ -1060,6 +1077,7 @@
             </div>
             <div id="voice-top-channels-list" class="scheduled-list"></div>
           </div>
+          <div class="stats-vsep"></div>
           <div class="stats-col stats-chart-col">
             <div class="section-header">
               <h3>Udział kanałów</h3>
@@ -1122,7 +1140,10 @@
       <div class="creator-form-card">
         <div class="scheduled-toolbar">
           <span class="preview-note" id="session-activity-online-count">Zalogowani: —</span>
-          <button id="session-activity-refresh-btn" class="btn-secondary" type="button">Odswiez</button>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button id="session-activity-refresh-btn" class="btn-secondary" type="button">Odswiez</button>
+            <button id="session-killswitch-btn" class="btn-danger" type="button" title="Wyloguj wszystkich uzytkownikow z dashboardu">Killswitch — wyloguj wszystkich</button>
+          </div>
         </div>
 
         <h3 style="margin:12px 0 8px;font-size:14px;color:var(--text-muted)">Aktualnie zalogowani</h3>
@@ -1142,7 +1163,12 @@
       </div>
     </div>
 
+    <footer class="dashboard-footer">
+      &copy; 2026 HusariaBot - created by <a href="https://github.com/Kscepersky" target="_blank" rel="noopener" class="dashboard-footer-link">@Kscepersky</a>
+    </footer>
+
   </section>
+
 </main>
 
 <div id="toast-container"></div>
@@ -1154,10 +1180,6 @@
     <span class="image-preview-modal-name" id="image-preview-modal-name"></span>
   </div>
 </div>
-
-<footer class="dashboard-footer">
-  &copy; 2026 HusariaBot - created by <a href="https://github.com/Kscepersky" target="_blank" rel="noopener" class="dashboard-footer-link">@Kscepersky</a>
-</footer>
 
 <script src="/public/js/chart.umd.min.js"></script>
 <script src="/public/js/app.js"></script>

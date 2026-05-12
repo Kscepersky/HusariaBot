@@ -184,6 +184,59 @@ export async function listSessionActivity(page = 1, pageSize = 50): Promise<Sess
     };
 }
 
+export async function forceLogoutAllActiveSessions(killedByUserId: string): Promise<number> {
+    const db = await getDb();
+    if (!db) {
+        throw (initError ?? new Error('Session events database is not available.'));
+    }
+
+    const sessionTtlMs = Number(process.env.DASHBOARD_SESSION_TTL_HOURS ?? 24) * 60 * 60 * 1000;
+    const onlineCutoffMs = Date.now() - sessionTtlMs;
+    const now = Date.now();
+
+    const onlineRows = await db.all<SessionEventRow[]>(`
+        SELECT e.*
+        FROM session_events e
+        WHERE e.event_type = 'login'
+          AND e.created_at > ?
+          AND NOT EXISTS (
+              SELECT 1 FROM session_events e2
+              WHERE e2.user_id = e.user_id
+                AND e2.event_type = 'logout'
+                AND e2.created_at > e.created_at
+          )
+        ORDER BY e.created_at DESC
+    `, onlineCutoffMs);
+
+    const seenUsers = new Set<string>();
+    const uniqueOnlineUsers: SessionEventRow[] = [];
+    for (const row of onlineRows) {
+        if (!seenUsers.has(row.user_id)) {
+            seenUsers.add(row.user_id);
+            uniqueOnlineUsers.push(row);
+        }
+    }
+
+    for (const row of uniqueOnlineUsers) {
+        await db.run(
+            `INSERT INTO session_events (id, event_type, user_id, username, global_name, avatar_hash, dashboard_role, ip, user_agent, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            crypto.randomUUID(),
+            'logout',
+            row.user_id,
+            row.username,
+            row.global_name ?? null,
+            row.avatar_hash ?? null,
+            row.dashboard_role ?? null,
+            '',
+            `killswitch:${killedByUserId}`,
+            now,
+        );
+    }
+
+    return uniqueOnlineUsers.length;
+}
+
 export async function pruneOldSessionEvents(): Promise<void> {
     const db = await getDb();
     if (!db) return;

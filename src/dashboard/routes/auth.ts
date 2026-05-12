@@ -6,12 +6,13 @@ import {
     getDiscordUser,
     getGuildMember,
     hasRequiredRole,
+    hasDevRole,
     resolveDashboardRole,
 } from '../discord-api.js';
 import type { SessionUser } from '../types.js';
 import { createLogger } from '../../utils/logger.js';
 import { cacheDiscordUser } from '../../utils/discord-user-cache.js';
-import { recordSessionEvent } from '../session/session-events.js';
+import { forceLogoutAllActiveSessions, recordSessionEvent } from '../session/session-events.js';
 
 config();
 
@@ -169,7 +170,6 @@ authRouter.get('/discord/callback', async (req, res) => {
         }));
         res.redirect('/');
     } catch (err) {
-        console.error('OAuth2 callback error:', err);
         authLogger.error('DASHBOARD_LOGIN_FAILED', 'Logowanie do dashboardu zakonczone bledem.', buildAuthLogContext(req), err);
         res.redirect('/auth/error?msg=auth_failed');
     }
@@ -181,7 +181,6 @@ authRouter.post('/logout', (req, res) => {
 
     req.session.destroy((err) => {
         if (err) {
-            console.error('Session destroy error:', err);
             authLogger.error('DASHBOARD_LOGOUT_FAILED', 'Nie udalo sie zakonczyc sesji dashboardu.', {
                 actorUserId,
                 ...buildAuthLogContext(req),
@@ -223,6 +222,64 @@ authRouter.get('/login', (req, res) => {
     res.sendFile(join(VIEWS, 'login.html'));
 });
 
+authRouter.post('/killswitch', async (req, res) => {
+    const actor = req.session.user;
+
+    if (!actor) {
+        res.status(401).json({ error: 'Brak autoryzacji.' });
+        return;
+    }
+
+    try {
+        const member = await getGuildMember(actor.id, GUILD_ID);
+        if (!member || !hasDevRole(member)) {
+            authLogger.warn('DASHBOARD_KILLSWITCH_DENIED', 'Odrzucono killswitch: brak roli Dev.', buildAuthLogContext(req, {
+                actorUserId: actor.id,
+            }));
+            res.status(403).json({ error: 'Brak uprawnień. Wymagana rola Dev.' });
+            return;
+        }
+    } catch (err) {
+        authLogger.error('DASHBOARD_KILLSWITCH_ROLE_CHECK_FAILED', 'Nie udalo sie zweryfikowac roli dla killswitch.', buildAuthLogContext(req), err);
+        res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień.' });
+        return;
+    }
+
+    authLogger.warn('DASHBOARD_KILLSWITCH_TRIGGERED', 'Killswitch sesji uruchomiony przez administratora.', buildAuthLogContext(req, {
+        actorUserId: actor.id,
+        username: actor.username,
+    }));
+
+    if (typeof req.sessionStore.clear !== 'function') {
+        authLogger.error('DASHBOARD_KILLSWITCH_UNSUPPORTED', 'Session store nie obsluguje metody clear.', buildAuthLogContext(req));
+        res.status(500).json({ error: 'Session store nie obsługuje czyszczenia sesji.' });
+        return;
+    }
+
+    const loggedOutCount = await forceLogoutAllActiveSessions(actor.id).catch((err) => {
+        authLogger.warn('DASHBOARD_KILLSWITCH_EVENTS_FAILED', 'Nie udalo sie zapisac zdarzen wylogowania dla killswitch.', { actorUserId: actor.id }, err);
+        return 0;
+    });
+
+    await new Promise<void>((resolve, reject) => {
+        req.sessionStore.clear!((err?: unknown) => {
+            if (err) {
+                reject(err);
+                return;
+            }
+
+            resolve();
+        });
+    });
+
+    authLogger.warn('DASHBOARD_KILLSWITCH_COMPLETED', 'Killswitch sesji zakonczony pomyslnie.', buildAuthLogContext(req, {
+        actorUserId: actor.id,
+        loggedOutCount,
+    }));
+
+    res.json({ success: true, loggedOutCount });
+});
+
 const ERROR_MESSAGES: Record<string, string> = {
     no_access:     'Nie masz uprawnień. Wymagana rola: Zarząd, Moderator, Community Manager lub Dev.',
     not_member:    'Nie jesteś członkiem tego serwera Discord.',
@@ -236,6 +293,15 @@ authRouter.get('/error', (req, res) => {
     const message = ERROR_MESSAGES[key] ?? 'Wystąpił nieznany błąd.';
     res.status(403).send(buildErrorHtml(message));
 });
+
+function escapeHtml(text: string): string {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 function buildErrorHtml(message: string): string {
     return `<!DOCTYPE html>
@@ -263,7 +329,7 @@ function buildErrorHtml(message: string): string {
   <div class="card">
     <div class="icon">🚫</div>
     <h1>Brak dostępu</h1>
-    <p>${message}</p>
+    <p>${escapeHtml(message)}</p>
         <a href="/auth/login">Zaloguj sie ponownie</a>
   </div>
 </body>
