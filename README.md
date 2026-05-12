@@ -22,6 +22,11 @@ Every subsystem is backed by structured JSON logging with per-scope loggers, Dis
 
 ---
 
+## Dashboard preview
+
+![husariabot_dashboard](img/husariadashboard_preview.png)
+---
+
 ## Table of Contents
 
 - [Features](#features)
