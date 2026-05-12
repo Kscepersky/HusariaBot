@@ -118,6 +118,13 @@ let dashboardLogsLevel = 'all'
 let dashboardLogsLoadRequestId = 0
 let dashboardLogsSearchDebounceId = null
 let dashboardLogsAbortController = null
+let sessionActivitySectionBound = false
+let sessionActivityPage = 1
+let sessionActivityTotalPages = 1
+let sessionActivityTotalEvents = 0
+let sessionOnlineUsers = []
+let sessionRecentEvents = []
+let sessionActivityLoadRequestId = 0
 let economyLevelRoleMappings = []
 let economyLevelRoleMappingsLoaded = false
 let economyHasDevAccess = null
@@ -180,6 +187,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initTicketHistorySection()
   await initImageLibrarySection()
   await initSystemLogsSection()
+  await initSessionActivitySection()
   bindImagePreviewModalListeners()
   await loadG2Matches({ silent: true })
   switchSection('embed-creator')
@@ -385,6 +393,10 @@ function switchSection(section) {
 
   if (section === 'system-logs') {
     void loadDashboardLogs({ silent: false })
+  }
+
+  if (section === 'session-activity') {
+    void loadSessionActivity({ silent: false })
   }
 
   if (section === 'server-stats') {
@@ -1501,6 +1513,194 @@ async function loadDashboardLogs(options = {}) {
   }
 }
 
+async function initSessionActivitySection() {
+  renderSessionActivity()
+
+  if (!sessionActivitySectionBound) {
+    sessionActivitySectionBound = true
+    bindSessionActivitySectionListeners()
+  }
+}
+
+function bindSessionActivitySectionListeners() {
+  const refreshButton = document.getElementById('session-activity-refresh-btn')
+  const prevButton = document.getElementById('session-activity-prev-btn')
+  const nextButton = document.getElementById('session-activity-next-btn')
+
+  refreshButton?.addEventListener('click', () => {
+    void loadSessionActivity({ page: 1, silent: true })
+  })
+
+  prevButton?.addEventListener('click', () => {
+    if (sessionActivityPage <= 1) return
+    void loadSessionActivity({ page: sessionActivityPage - 1, silent: true })
+  })
+
+  nextButton?.addEventListener('click', () => {
+    if (sessionActivityPage >= sessionActivityTotalPages) return
+    void loadSessionActivity({ page: sessionActivityPage + 1, silent: true })
+  })
+}
+
+async function loadSessionActivity(options = {}) {
+  const requestId = ++sessionActivityLoadRequestId
+  const nextPage = Number.isFinite(Number(options.page))
+    ? Math.max(1, Number(options.page))
+    : sessionActivityPage
+  const silent = options.silent === true
+
+  const params = new URLSearchParams({
+    page: String(nextPage),
+    pageSize: '50',
+  })
+
+  try {
+    const response = await fetch(`/api/sessions/activity?${params.toString()}`)
+    const payload = await parseApiResponse(response)
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie pobrac aktywnosci sesji.')
+    }
+
+    if (requestId !== sessionActivityLoadRequestId) {
+      return
+    }
+
+    sessionOnlineUsers = Array.isArray(payload.onlineUsers) ? payload.onlineUsers : []
+    sessionRecentEvents = Array.isArray(payload.recentEvents) ? payload.recentEvents : []
+    sessionActivityPage = Number.isFinite(Number(payload.page)) ? Math.max(1, Number(payload.page)) : 1
+    sessionActivityTotalPages = Number.isFinite(Number(payload.totalPages)) ? Math.max(1, Number(payload.totalPages)) : 1
+    sessionActivityTotalEvents = Number.isFinite(Number(payload.totalEvents)) ? Math.max(0, Number(payload.totalEvents)) : 0
+
+    renderSessionActivity()
+  } catch (error) {
+    if (requestId !== sessionActivityLoadRequestId) return
+
+    sessionOnlineUsers = []
+    sessionRecentEvents = []
+    sessionActivityPage = 1
+    sessionActivityTotalPages = 1
+    sessionActivityTotalEvents = 0
+    renderSessionActivity()
+
+    if (!silent) {
+      const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac aktywnosci sesji.'
+      showToast(`❌ ${message}`, 'error')
+    }
+  }
+}
+
+function renderSessionActivity() {
+  const onlineList = document.getElementById('session-online-list')
+  const eventsList = document.getElementById('session-events-list')
+  const onlineCount = document.getElementById('session-activity-online-count')
+  const countLabel = document.getElementById('session-activity-count-label')
+  const pageLabel = document.getElementById('session-activity-page-label')
+  const pagination = document.getElementById('session-activity-pagination')
+  const prevButton = document.getElementById('session-activity-prev-btn')
+  const nextButton = document.getElementById('session-activity-next-btn')
+
+  if (!onlineList || !eventsList) return
+
+  if (onlineCount) {
+    onlineCount.textContent = `Zalogowani: ${sessionOnlineUsers.length}`
+  }
+
+  if (countLabel) {
+    countLabel.textContent = `Zdarzenia: ${sessionActivityTotalEvents}`
+  }
+
+  if (pageLabel) {
+    pageLabel.textContent = `Strona ${sessionActivityPage}/${sessionActivityTotalPages}`
+  }
+
+  if (pagination) {
+    pagination.hidden = sessionActivityTotalPages <= 1
+  }
+
+  if (prevButton instanceof HTMLButtonElement) {
+    prevButton.disabled = sessionActivityPage <= 1
+  }
+
+  if (nextButton instanceof HTMLButtonElement) {
+    nextButton.disabled = sessionActivityPage >= sessionActivityTotalPages
+  }
+
+  if (sessionOnlineUsers.length === 0) {
+    onlineList.innerHTML = '<div class="scheduled-empty">Brak aktualnie zalogowanych uzytkownikow.</div>'
+  } else {
+    onlineList.innerHTML = sessionOnlineUsers.map((user) => buildSessionUserCardHtml(user, true)).join('')
+  }
+
+  if (sessionRecentEvents.length === 0) {
+    eventsList.innerHTML = '<div class="scheduled-empty">Brak zdarzen sesji w ciagu ostatnich 30 dni.</div>'
+  } else {
+    eventsList.innerHTML = sessionRecentEvents.map((event) => buildSessionEventCardHtml(event)).join('')
+  }
+}
+
+function buildSessionUserCardHtml(user, isOnline) {
+  const avatarUrl = user.avatarHash
+    ? `https://cdn.discordapp.com/avatars/${encodeURIComponent(user.userId)}/${encodeURIComponent(user.avatarHash)}.png?size=32`
+    : `https://cdn.discordapp.com/embed/avatars/0.png`
+  const displayName = escapeHtml(user.globalName || user.username || user.userId)
+  const loginTime = formatTimestampInWarsaw(Number(user.createdAt ?? Date.now()))
+  const statusDot = isOnline
+    ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3ba55d;margin-right:6px;vertical-align:middle;"></span>'
+    : ''
+
+  return `
+    <article class="scheduled-card" style="padding:10px 14px;">
+      <div class="scheduled-card-header" style="gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <img src="${avatarUrl}" alt="" width="28" height="28" style="border-radius:50%;">
+          <span>${statusDot}<strong>${displayName}</strong></span>
+          <span class="scheduled-chip" style="font-size:11px;">${escapeHtml(user.userId)}</span>
+        </div>
+        <span class="preview-note" style="font-size:11px;">Zalogowano: ${loginTime}</span>
+      </div>
+      <div class="scheduled-card-meta" style="font-size:11px;margin-top:4px;">
+        <span class="scheduled-chip">IP: ${escapeHtml(user.ip)}</span>
+        <span class="scheduled-chip" title="${escapeHtml(user.userAgent)}" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(truncate(user.userAgent, 60))}</span>
+      </div>
+    </article>`
+}
+
+function buildSessionEventCardHtml(event) {
+  const isLogin = event.eventType === 'login'
+  const avatarUrl = event.avatarHash
+    ? `https://cdn.discordapp.com/avatars/${encodeURIComponent(event.userId)}/${encodeURIComponent(event.avatarHash)}.png?size=32`
+    : `https://cdn.discordapp.com/embed/avatars/0.png`
+  const displayName = escapeHtml(event.globalName || event.username || event.userId)
+  const timestamp = formatTimestampInWarsaw(Number(event.createdAt ?? Date.now()))
+  const typeLabel = isLogin ? 'Logowanie' : 'Wylogowanie'
+  const typeClass = isLogin ? 'log-level-info' : 'log-level-warn'
+
+  return `
+    <article class="scheduled-card log-card" style="padding:10px 14px;">
+      <div class="scheduled-card-header" style="gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <img src="${avatarUrl}" alt="" width="24" height="24" style="border-radius:50%;">
+          <strong>${displayName}</strong>
+          <span class="scheduled-chip" style="font-size:11px;">${escapeHtml(event.userId)}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="scheduled-chip ${typeClass}">${typeLabel}</span>
+          <span class="preview-note" style="font-size:11px;">${timestamp}</span>
+        </div>
+      </div>
+      <div class="scheduled-card-meta" style="font-size:11px;margin-top:4px;">
+        <span class="scheduled-chip">IP: ${escapeHtml(event.ip)}</span>
+        <span class="scheduled-chip" title="${escapeHtml(event.userAgent)}" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(truncate(event.userAgent, 60))}</span>
+      </div>
+    </article>`
+}
+
+function truncate(str, maxLen) {
+  if (typeof str !== 'string') return ''
+  return str.length > maxLen ? str.slice(0, maxLen) + '…' : str
+}
+
 async function loadTicketHistory(options = {}) {
   const requestId = ++ticketHistoryLoadRequestId
   const nextPage = Number.isFinite(Number(options.page))
@@ -1735,6 +1935,15 @@ function renderDashboardLogs() {
     const errorLabel = entry.error?.message
       ? `<div class="log-error">Blad: ${escapeHtml(String(entry.error.message))}</div>`
       : ''
+    const actorHtml = entry.actorUser?.displayName
+      ? buildAuthorHtml(entry.actorUser.displayName, null, null, 'Aktor', entry.actorUser.avatarUrl)
+      : ''
+    const targetHtml = entry.targetUser?.displayName
+      ? buildAuthorHtml(entry.targetUser.displayName, null, null, 'Cel', entry.targetUser.avatarUrl)
+      : ''
+    const userChips = actorHtml || targetHtml
+      ? `<div class="scheduled-card-meta">${actorHtml}${targetHtml}</div>`
+      : ''
 
     return `
       <article class="scheduled-card log-card">
@@ -1746,6 +1955,7 @@ function renderDashboardLogs() {
           <span class="scheduled-chip">Akcja: ${action}</span>
           <span class="scheduled-chip">Zakres: ${scope}</span>
         </div>
+        ${userChips}
         <div class="scheduled-preview">${message}</div>
         ${errorLabel}
         <details class="log-context-details">
@@ -1779,6 +1989,7 @@ function renderScheduledPosts() {
     const previewHtml = post?.payload?.mode === 'embedded'
       ? renderPreviewEmbedText(post?.payload?.title ?? '', post?.payload?.content ?? '')
       : (renderMarkdown(post?.payload?.content ?? '') || '<span style="opacity:.45">Brak treści.</span>')
+    const authorHtml = buildAuthorHtml(post.publisherName, post.publisherUserId, post.publisherAvatar)
 
     return `
       <article class="scheduled-card">
@@ -1790,6 +2001,7 @@ function renderScheduledPosts() {
           <span class="scheduled-chip">Kanał: #${escapeHtml(channelName)}</span>
           <span class="scheduled-chip">Ping: ${escapeHtml(pingLabel)}</span>
           <span class="scheduled-chip">Czas: ${escapeHtml(formatTimestampInWarsaw(post.scheduledFor))}</span>
+          ${authorHtml}
         </div>
         <div class="scheduled-preview">${previewHtml}</div>
         <div class="scheduled-actions">
@@ -1839,6 +2051,10 @@ function renderSentPosts() {
     const previewHtml = post?.payload?.mode === 'embedded'
       ? renderPreviewEmbedText(post?.payload?.title ?? '', post?.payload?.content ?? '')
       : (renderMarkdown(post?.payload?.content ?? '') || '<span style="opacity:.45">Brak treści.</span>')
+    const authorHtml = buildAuthorHtml(post.publisherName, post.publisherUserId, post.publisherAvatar)
+    const editorHtml = post.editedBy
+      ? buildAuthorHtml(post.editedBy, post.editedByUserId, null, 'edytował')
+      : ''
 
     return `
       <article class="scheduled-card">
@@ -1851,6 +2067,8 @@ function renderSentPosts() {
           <span class="scheduled-chip">Wysłano: ${escapeHtml(sentAtLabel)}</span>
           <span class="scheduled-chip">${escapeHtml(eventLabelMap[eventStatus] ?? 'Event: brak')}</span>
           <span class="scheduled-chip">${escapeHtml(watchpartyLabelMap[watchpartyStatus] ?? 'Watchparty: brak')}</span>
+          ${authorHtml}
+          ${editorHtml}
         </div>
         <div class="scheduled-preview">${previewHtml}</div>
         <div class="scheduled-actions">
@@ -3206,6 +3424,8 @@ function applyEconomySettingsAccessState() {
     ?? document.querySelector('.sidebar-item[data-section="economy-settings"]')
   const logsNavItem = document.getElementById('system-logs-nav-item')
     ?? document.querySelector('.sidebar-item[data-section="system-logs"]')
+  const sessionActivityNavItem = document.getElementById('session-activity-nav-item')
+    ?? document.querySelector('.sidebar-item[data-section="session-activity"]')
   const hasDevAccess = economyHasDevAccess === true
   const isAccessDenied = economyHasDevAccess !== true
   const shouldShowDeniedNotice = economyHasDevAccess === false
@@ -3226,11 +3446,19 @@ function applyEconomySettingsAccessState() {
     logsNavItem.style.display = isAccessDenied ? 'none' : ''
   }
 
+  if (sessionActivityNavItem instanceof HTMLElement) {
+    sessionActivityNavItem.style.display = isAccessDenied ? 'none' : ''
+  }
+
   if (isAccessDenied && currentSection === 'economy-settings') {
     switchSection('economy-leaderboard')
   }
 
   if (isAccessDenied && currentSection === 'system-logs') {
+    switchSection('economy-leaderboard')
+  }
+
+  if (isAccessDenied && currentSection === 'session-activity') {
     switchSection('economy-leaderboard')
   }
 }
@@ -4101,9 +4329,7 @@ async function refreshG2Matches() {
     }
 
     showToast(`✅ Odświeżono bazę meczów (${payload.count ?? 0}).`, 'success')
-    window.setTimeout(() => {
-      window.location.reload()
-    }, 250)
+    await loadG2Matches({ silent: true })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nieznany błąd'
     showToast(`❌ ${message}`, 'error')
@@ -5960,6 +6186,16 @@ function escapeHtml(value) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+function buildAuthorHtml(name, userId, avatarHash, prefix = 'dodał', resolvedAvatarUrl = null) {
+  if (!name) return ''
+  const avatarUrl = resolvedAvatarUrl
+    || (userId && avatarHash
+      ? `https://cdn.discordapp.com/avatars/${encodeURIComponent(userId)}/${encodeURIComponent(avatarHash)}.png?size=32`
+      : `https://cdn.discordapp.com/embed/avatars/0.png`)
+  const imgHtml = `<img src="${avatarUrl}" alt="" class="author-avatar" width="16" height="16" style="border-radius:50%;vertical-align:middle;margin-right:4px;">`
+  return `<span class="scheduled-chip author-chip">${imgHtml}${escapeHtml(prefix)}: ${escapeHtml(name)}</span>`
 }
 
 // ─── Server Stats ──────────────────────────────────────────────────────────────

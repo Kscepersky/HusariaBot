@@ -358,6 +358,7 @@ scheduledRouter.post('/', async (req, res) => {
         updatedAt: now,
         publisherName: req.session.user?.globalName ?? req.session.user?.username ?? 'Administrator',
         publisherUserId: req.session.user?.id,
+        publisherAvatar: req.session.user?.avatar ?? undefined,
         source: 'scheduled',
         eventStatus: payload.eventDraft?.enabled ? 'pending' : 'not_requested',
         watchpartyStatus: payload.watchpartyDraft?.enabled ? 'pending' : 'not_requested',

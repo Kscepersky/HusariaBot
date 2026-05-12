@@ -1,6 +1,7 @@
 import {
     createGuildVoiceChannel,
     deleteGuildChannel,
+    invalidateGuildChannelsCache,
     updateChannelRolePermissions,
 } from './discord-api.js';
 import type { EmbedFormData } from './embed-handlers.js';
@@ -96,14 +97,16 @@ export async function tryCreateWatchpartyChannelFromPayload(payload: EmbedFormDa
     }
 
     const shouldOpenImmediately = Date.now() >= watchpartyWindow.startAtTimestamp;
-    const categoryId = normalizeTrimmedString(process.env.WATCHPARTY_CATEGORY_ID);
+    const categoryId = normalizeTrimmedString(process.env.WATCHPARTY_CATEGORY_ID)
+        || normalizeTrimmedString(process.env.VOICE_CATEGORY_ID);
 
     try {
         const channelId = await createGuildVoiceChannel(guildId, {
             name: channelName,
             categoryId: categoryId || undefined,
-            initiallyOpen: shouldOpenImmediately,
+            initiallyOpen: true,
         });
+        invalidateGuildChannelsCache(guildId);
 
         return {
             status: shouldOpenImmediately ? 'open' : 'scheduled',

@@ -13,6 +13,10 @@ const SPEAK_PERMISSION = 1n << 21n;
 const SCHEDULED_EVENTS_CACHE_TTL_MS = 15_000;
 const SCHEDULED_EVENTS_DEFAULT_RETRY_MS = 1_000;
 const SCHEDULED_EVENTS_MAX_CACHE_ENTRIES = 20;
+const GUILD_CHANNELS_CACHE_TTL_MS = 60_000;
+const GUILD_ROLES_CACHE_TTL_MS = 60_000;
+const GUILD_EMOJIS_CACHE_TTL_MS = 120_000;
+const GUILD_MEMBER_CACHE_TTL_MS = 30_000;
 
 interface DiscordRateLimitPayload {
     message?: string;
@@ -27,8 +31,18 @@ interface ScheduledEventsCacheEntry {
     hasSnapshot: boolean;
 }
 
+interface SimpleCacheEntry<T> {
+    data: T;
+    fetchedAt: number;
+}
+
 const scheduledEventsCache = new Map<string, ScheduledEventsCacheEntry>();
 const scheduledEventsInFlight = new Map<string, Promise<DiscordScheduledEvent[]>>();
+const guildChannelsCache = new Map<string, SimpleCacheEntry<DiscordChannel[]>>();
+const guildRolesCache = new Map<string, SimpleCacheEntry<DiscordRole[]>>();
+const guildEmojisCache = new Map<string, SimpleCacheEntry<DiscordEmoji[]>>();
+const guildMemberCache = new Map<string, SimpleCacheEntry<DiscordGuildMember | null>>();
+const guildMemberInFlight = new Map<string, Promise<DiscordGuildMember | null>>();
 
 class DiscordRequestError extends Error {
     status: number;
@@ -239,37 +253,51 @@ export async function getDiscordUserById(userId: string): Promise<DiscordUser | 
 }
 
 export async function getGuildMember(userId: string, guildId: string): Promise<DiscordGuildMember | null> {
-    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}`, {
-        headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+    const cacheKey = `${guildId}:${userId}`;
+    const now = Date.now();
+    const cached = guildMemberCache.get(cacheKey);
+    if (cached && now - cached.fetchedAt < GUILD_MEMBER_CACHE_TTL_MS) {
+        return cached.data;
+    }
+
+    const inFlight = guildMemberInFlight.get(cacheKey);
+    if (inFlight) return inFlight;
+
+    const request = (async (): Promise<DiscordGuildMember | null> => {
+        const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}`, {
+            headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+        });
+
+        if (resp.status === 404) {
+            guildMemberCache.set(cacheKey, { data: null, fetchedAt: Date.now() });
+            return null;
+        }
+        if (resp.status === 429) {
+            const retryAfterHeader = resp.headers.get('retry-after');
+            const retryAfterFromHeader = retryAfterHeader ? Number.parseFloat(retryAfterHeader) : Number.NaN;
+            const retryAfterFromBody = await resp.json()
+                .then((payload) => {
+                    if (!payload || typeof payload !== 'object') return Number.NaN;
+                    const maybeRetryAfter = (payload as DiscordRateLimitPayload).retry_after;
+                    if (typeof maybeRetryAfter !== 'number' || !Number.isFinite(maybeRetryAfter)) return Number.NaN;
+                    return maybeRetryAfter;
+                })
+                .catch(() => Number.NaN);
+            const retryAfterSeconds = Number.isFinite(retryAfterFromHeader)
+                ? retryAfterFromHeader
+                : (Number.isFinite(retryAfterFromBody) ? retryAfterFromBody : 1);
+            throw new DiscordRateLimitedError(Math.max(1, retryAfterSeconds));
+        }
+        if (!resp.ok) throw new Error(`Failed to fetch guild member: ${resp.status}`);
+        const member = await resp.json() as DiscordGuildMember;
+        guildMemberCache.set(cacheKey, { data: member, fetchedAt: Date.now() });
+        return member;
+    })().finally(() => {
+        guildMemberInFlight.delete(cacheKey);
     });
 
-    if (resp.status === 404) return null;
-    if (resp.status === 429) {
-        const retryAfterHeader = resp.headers.get('retry-after');
-        const retryAfterFromHeader = retryAfterHeader ? Number.parseFloat(retryAfterHeader) : Number.NaN;
-        const retryAfterFromBody = await resp.json()
-            .then((payload) => {
-                if (!payload || typeof payload !== 'object') {
-                    return Number.NaN;
-                }
-
-                const maybeRetryAfter = (payload as DiscordRateLimitPayload).retry_after;
-                if (typeof maybeRetryAfter !== 'number' || !Number.isFinite(maybeRetryAfter)) {
-                    return Number.NaN;
-                }
-
-                return maybeRetryAfter;
-            })
-            .catch(() => Number.NaN);
-
-        const retryAfterSeconds = Number.isFinite(retryAfterFromHeader)
-            ? retryAfterFromHeader
-            : (Number.isFinite(retryAfterFromBody) ? retryAfterFromBody : 1);
-
-        throw new DiscordRateLimitedError(Math.max(1, retryAfterSeconds));
-    }
-    if (!resp.ok) throw new Error(`Failed to fetch guild member: ${resp.status}`);
-    return resp.json() as Promise<DiscordGuildMember>;
+    guildMemberInFlight.set(cacheKey, request);
+    return request;
 }
 
 export async function updateGuildMemberRoles(
@@ -383,6 +411,12 @@ export async function removeGuildMemberRole(
 }
 
 export async function getGuildTextChannels(guildId: string): Promise<DiscordChannel[]> {
+    const now = Date.now();
+    const cached = guildChannelsCache.get(guildId);
+    if (cached && now - cached.fetchedAt < GUILD_CHANNELS_CACHE_TTL_MS) {
+        return [...cached.data];
+    }
+
     const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/channels`, {
         headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
     });
@@ -390,12 +424,20 @@ export async function getGuildTextChannels(guildId: string): Promise<DiscordChan
     if (!resp.ok) throw new Error(`Failed to fetch channels: ${resp.status}`);
 
     const channels = await resp.json() as DiscordChannel[];
-    return channels
+    const filtered = channels
         .filter(c => c.type === 0 || c.type === 5)
         .sort((a, b) => a.position - b.position);
+    guildChannelsCache.set(guildId, { data: filtered, fetchedAt: now });
+    return [...filtered];
 }
 
 export async function getGuildRoles(guildId: string): Promise<DiscordRole[]> {
+    const now = Date.now();
+    const cached = guildRolesCache.get(guildId);
+    if (cached && now - cached.fetchedAt < GUILD_ROLES_CACHE_TTL_MS) {
+        return [...cached.data];
+    }
+
     const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/roles`, {
         headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
     });
@@ -403,9 +445,11 @@ export async function getGuildRoles(guildId: string): Promise<DiscordRole[]> {
     if (!resp.ok) throw new Error(`Failed to fetch roles: ${resp.status}`);
 
     const roles = await resp.json() as DiscordRole[];
-    return roles
+    const filtered = roles
         .filter((role) => role.name !== '@everyone')
         .sort((a, b) => b.position - a.position);
+    guildRolesCache.set(guildId, { data: filtered, fetchedAt: now });
+    return [...filtered];
 }
 
 async function getGuildRolesRaw(guildId: string): Promise<DiscordRole[]> {
@@ -733,6 +777,12 @@ export async function searchGuildMembers(guildId: string, query: string, limit =
 }
 
 export async function getGuildEmojis(guildId: string): Promise<DiscordEmoji[]> {
+    const now = Date.now();
+    const cached = guildEmojisCache.get(guildId);
+    if (cached && now - cached.fetchedAt < GUILD_EMOJIS_CACHE_TTL_MS) {
+        return [...cached.data];
+    }
+
     const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/emojis`, {
         headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
     });
@@ -740,9 +790,11 @@ export async function getGuildEmojis(guildId: string): Promise<DiscordEmoji[]> {
     if (!resp.ok) throw new Error(`Failed to fetch emojis: ${resp.status}`);
 
     const emojis = await resp.json() as DiscordEmoji[];
-    return emojis
+    const filtered = emojis
         .filter((emoji) => !!emoji.name)
         .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+    guildEmojisCache.set(guildId, { data: filtered, fetchedAt: now });
+    return [...filtered];
 }
 
 export async function sendMessageToChannel(channelId: string, payload: DiscordMessagePayload): Promise<string> {
@@ -996,3 +1048,10 @@ export async function sendImageToChannel(channelId: string, filename: string): P
     return msg.id;
 }
 
+export function invalidateGuildChannelsCache(guildId: string): void {
+    guildChannelsCache.delete(guildId);
+}
+
+export function invalidateGuildMemberCache(guildId: string, userId: string): void {
+    guildMemberCache.delete(`${guildId}:${userId}`);
+}

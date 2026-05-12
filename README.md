@@ -61,6 +61,8 @@ A fully configurable engagement system tracking XP, levels, and a server currenc
 ### Watchparty
 
 - Automatically creates a dedicated voice channel when a watchparty-enabled post is published or scheduled.
+- The channel is created in the same category as temporary voice channels (`VOICE_CATEGORY_ID`), with a fallback to `WATCHPARTY_CATEGORY_ID` if configured separately.
+- Channel is created open (no lock icon) — all members can join immediately, regardless of whether the watchparty window has started.
 - Awards an XP multiplier and a per-minute coin bonus to all active participants.
 - Full lifecycle management: channel opens at the scheduled time, closes automatically when empty or when the event ends. Includes rollback on persistence failure.
 
@@ -171,8 +173,8 @@ SERVER_MUTE_ROLE_ID=        # Role assigned by /mute — must be below bot's hig
 # ── Channel & Category IDs ────────────────────────────────────────────────────
 SUPPORT_CATEGORY_ID=           # Category where ticket channels are created
 VOICE_TRIGGER_CHANNEL_ID=      # Joining this channel creates a private voice channel
-VOICE_CATEGORY_ID=             # Category for temporary private voice channels
-WATCHPARTY_CATEGORY_ID=        # Category for watchparty voice channels
+VOICE_CATEGORY_ID=             # Category for temporary private voice channels (also used by watchparty)
+WATCHPARTY_CATEGORY_ID=        # Optional override — watchparty category (defaults to VOICE_CATEGORY_ID)
 LEVEL_UP_ANNOUNCE_CHANNEL_ID=  # Text channel for level-up announcements (optional)
 
 # ── Dashboard OAuth2 ──────────────────────────────────────────────────────────
@@ -200,6 +202,7 @@ LOG_ALERT_WEBHOOK_URL=     # Discord webhook URL for error/fatal level log alert
 # ── Storage Paths (optional, default to working directory) ───────────────────
 ECONOMY_DB_PATH=
 DASHBOARD_SESSION_DB_PATH=
+SESSION_EVENTS_DB_PATH=    # Path for session login/logout event log (default: data/session-events.sqlite)
 
 # ── Development ───────────────────────────────────────────────────────────────
 DEV_LOGS=1
@@ -242,6 +245,8 @@ BOT_DEV_LOGS=1
 
 The dashboard is a separate Express web application secured by Discord OAuth2. Access is restricted to members holding one of the configured admin roles (Admin, Moderator, Community Manager, Dev).
 
+
+
 ### Post Creator
 
 A full-featured publishing tool that targets any text or announcement channel on the server:
@@ -257,13 +262,17 @@ A full-featured publishing tool that targets any text or announcement channel on
 - Schedule posts for any future date and time.
 - Manage the queue: edit, cancel, or immediately publish any pending post.
 - Persistence survives process restarts — the scheduler re-registers all pending timers on startup using stored metadata.
+- Each post card shows the publisher's Discord avatar and name (captured at scheduling time).
 
 ### Sent Post History
 
 - Complete history of every sent and scheduled post with statuses: `sent`, `pending`, `failed`, `cancelled`.
 - Edit and resend any historical post directly from the history view.
+- Publisher and last editor are shown with Discord avatar and name on each card.
 - User mentions (`<@userId>`) are resolved to real display names via a prefetch from the Discord API before rendering.
 - Associated Discord event and watchparty channel statuses shown inline.
+
+![sent_post](sent_posts.png)
 
 ### Economy Management
 
@@ -272,6 +281,9 @@ A full-featured publishing tool that targets any text or announcement channel on
 - Bulk import via CSV: `userId,level,totalxp,messages,voiceMinutes`.
 - Level → role mapping editor: configure which Discord role is awarded at which level threshold.
 - Server activity statistics: message and voice minute charts over configurable date ranges, top users by composite score.
+- G2 match database refresh reloads data in-place without redirecting the user.
+
+![ladder_economy](leaderboard_economy.png)
 
 ### Discord Events
 
@@ -284,10 +296,18 @@ A full-featured publishing tool that targets any text or announcement channel on
 - Full lifecycle view: pending → open → closed, with last error and channel ID shown.
 - Automatic channel rollback if persistence fails after channel creation.
 
-### G2 Match Browser
+### System Logs (Dev only)
 
-- Pulls match history and results from the PandaScore API.
-- Server-side response cache to avoid redundant API calls.
+- Paginated log viewer showing all structured `.jsonl` entries from the last 30 days.
+- Filter by log level (trace / debug / info / warn / error / fatal) and free-text search.
+- Actor and target users are resolved to Discord avatar + display name when available, using an in-memory user profile cache populated at login.
+- Sensitive keys (`token`, `session`, `authorization`, etc.) are automatically redacted.
+
+### Session Activity (Dev only)
+
+- Real-time view of which dashboard users are currently logged in, with their Discord avatar, display name, Discord ID, IP address, and browser User-Agent.
+- Full login and logout event history for the last 30 days, stored in a dedicated SQLite database (`data/session-events.sqlite`).
+- Login events are recorded on every successful OAuth2 callback; logout events are recorded on explicit session destruction.
 
 ---
 
@@ -320,6 +340,8 @@ src/
 │
 ├── utils/
 │   ├── logger.ts                 # Structured logger — .jsonl + .log + Discord webhook
+│   ├── discord-user-cache.ts     # In-memory Discord user profile cache (id → avatar/name)
+│   ├── log-reader.ts             # JSONL log reader with filtering, pagination, and enrichment
 │   ├── embed-builder.ts          # Discord embed construction utilities
 │   ├── role-access.ts            # Role-based access checks
 │   └── ...
@@ -335,12 +357,18 @@ src/
     ├── watchparty-lifecycle.ts   # Watchparty open/close lifecycle management
     │
     ├── routes/
-    │   └── api.ts                # All REST endpoints (~2 700 lines, 60+ routes)
+    │   ├── api.ts                # All REST endpoints (~2 700 lines, 60+ routes)
+    │   ├── auth.ts               # Discord OAuth2 login/logout — records session events
+    │   └── scheduled.ts          # Scheduled post CRUD endpoints
     │
     ├── scheduler/
     │   ├── service.ts            # Scheduler — Node.js timers, re-registered on startup
     │   ├── store.ts              # Scheduled post persistence (JSON file)
     │   └── types.ts
+    │
+    ├── session/
+    │   ├── sqlite-store.ts       # express-session SQLite store (dashboard_sessions table)
+    │   └── session-events.ts     # Login/logout event log — SQLite, 30-day retention
     │
     ├── middleware/               # Auth, authorization, session, rate limiting
     ├── validation/               # Zod schemas for all API request bodies
@@ -361,6 +389,7 @@ src/
 | **Schema Validation** | `dashboard/validation/` — every API boundary validated with Zod before any processing |
 | **SQLite Write Lock** | `economy/database.ts` — writes serialized through a `Promise` chain to prevent race conditions |
 | **OAuth2 + CSRF** | `dashboard/middleware/` — Discord OAuth2 login flow, role assertion, timing-safe CSRF token comparison |
+| **In-Memory Cache** | `utils/discord-user-cache.ts` — Discord user profiles cached on login for log enrichment |
 
 ---
 

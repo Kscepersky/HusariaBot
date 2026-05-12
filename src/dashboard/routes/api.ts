@@ -86,6 +86,8 @@ import { parseTimeoutDurationParts } from '../../timeouts/duration.js';
 import { clearTicketHistory, listTicketHistoryEntries, resolveTicketTranscriptFilePath } from '../../tickets/history-store.js';
 import { createLogger } from '../../utils/logger.js';
 import { listDashboardLogs } from '../../utils/log-reader.js';
+import { enrichWithDiscordUser } from '../../utils/discord-user-cache.js';
+import { listSessionActivity } from '../session/session-events.js';
 import {
     getStoredLeaderboardProfile,
     pruneStoredLeaderboardProfiles,
@@ -1985,9 +1987,19 @@ apiRouter.get('/logs', requireCurrentDashboardDevRole, async (req, res) => {
             level,
         });
 
+        const enrichedEntries = result.entries.map((entry) => {
+            const actorId = typeof entry.context?.actorUserId === 'string' ? entry.context.actorUserId : undefined;
+            const targetId = typeof entry.context?.targetUserId === 'string' ? entry.context.targetUserId : undefined;
+            return {
+                ...entry,
+                actorUser: enrichWithDiscordUser(actorId),
+                targetUser: enrichWithDiscordUser(targetId),
+            };
+        });
+
         res.json({
             success: true,
-            logs: result.entries,
+            logs: enrichedEntries,
             pagination: {
                 page: result.page,
                 pageSize: result.pageSize,
@@ -2006,6 +2018,22 @@ apiRouter.get('/logs', requireCurrentDashboardDevRole, async (req, res) => {
             search,
         }, error);
         res.status(500).json({ error: 'Nie udalo sie pobrac logow systemowych.' });
+    }
+});
+
+// GET /api/sessions/activity — session activity panel (Dev-only)
+apiRouter.get('/sessions/activity', requireCurrentDashboardDevRole, async (req, res) => {
+    const page = parsePositiveIntQuery(req.query.page, 1);
+    const pageSize = Math.max(1, Math.min(100, parsePositiveIntQuery(req.query.pageSize, 50)));
+
+    try {
+        const result = await listSessionActivity(page, pageSize);
+        res.json({ success: true, ...result });
+    } catch (error) {
+        apiLogger.error('SESSION_ACTIVITY_LIST_FAILED', 'Nie udalo sie pobrac aktywnosci sesji.', {
+            actorUserId: req.session.user?.id,
+        }, error);
+        res.status(500).json({ error: 'Nie udalo sie pobrac aktywnosci sesji.' });
     }
 });
 

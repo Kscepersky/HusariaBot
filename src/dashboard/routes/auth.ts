@@ -9,6 +9,8 @@ import {
 } from '../discord-api.js';
 import type { SessionUser } from '../types.js';
 import { createLogger } from '../../utils/logger.js';
+import { cacheDiscordUser } from '../../utils/discord-user-cache.js';
+import { recordSessionEvent } from '../session/session-events.js';
 
 config();
 
@@ -145,6 +147,19 @@ authRouter.get('/discord/callback', async (req, res) => {
         });
 
         req.session.user = sessionUser;
+        cacheDiscordUser(sessionUser.id, sessionUser.username, sessionUser.globalName ?? null, sessionUser.avatar ?? null);
+        void recordSessionEvent({
+            eventType: 'login',
+            userId: sessionUser.id,
+            username: sessionUser.username,
+            globalName: sessionUser.globalName ?? null,
+            avatarHash: sessionUser.avatar ?? null,
+            ip: req.ip ?? '',
+            userAgent: req.get('user-agent') ?? '',
+            createdAt: Date.now(),
+        }).catch((error) => {
+            authLogger.warn('SESSION_EVENT_RECORD_FAILED', 'Nie udalo sie zapisac zdarzenia sesji (login).', { actorUserId: sessionUser.id }, error);
+        });
         authLogger.info('DASHBOARD_LOGIN_SUCCESS', 'Uzytkownik zalogowal sie do dashboardu.', buildAuthLogContext(req, {
             actorUserId: sessionUser.id,
             username: sessionUser.username,
@@ -158,7 +173,8 @@ authRouter.get('/discord/callback', async (req, res) => {
 });
 
 authRouter.post('/logout', (req, res) => {
-    const actorUserId = req.session.user?.id;
+    const logoutUser = req.session.user;
+    const actorUserId = logoutUser?.id;
 
     req.session.destroy((err) => {
         if (err) {
@@ -169,6 +185,21 @@ authRouter.post('/logout', (req, res) => {
             }, err);
             res.status(500).json({ error: 'Nie udało się zakończyć sesji.' });
             return;
+        }
+
+        if (logoutUser) {
+            void recordSessionEvent({
+                eventType: 'logout',
+                userId: logoutUser.id,
+                username: logoutUser.username,
+                globalName: logoutUser.globalName ?? null,
+                avatarHash: logoutUser.avatar ?? null,
+                ip: req.ip ?? '',
+                userAgent: req.get('user-agent') ?? '',
+                createdAt: Date.now(),
+            }).catch((error) => {
+                authLogger.warn('SESSION_EVENT_RECORD_FAILED', 'Nie udalo sie zapisac zdarzenia sesji (logout).', { actorUserId }, error);
+            });
         }
 
         authLogger.info('DASHBOARD_LOGOUT_SUCCESS', 'Uzytkownik wylogowal sie z dashboardu.', {

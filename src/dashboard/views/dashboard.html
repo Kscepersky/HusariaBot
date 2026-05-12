@@ -71,6 +71,10 @@
         <span class="sidebar-icon">🧾</span>
         <span>Logi systemowe</span>
       </a>
+      <a href="#" class="sidebar-item" id="session-activity-nav-item" data-section="session-activity" style="display:none;">
+        <span class="sidebar-icon">👥</span>
+        <span>Aktywność sesji</span>
+      </a>
     </nav>
   </aside>
 
@@ -935,6 +939,35 @@
             <button class="btn-primary" id="stats-save-excluded-btn">Zapisz ustawienia</button>
             <span class="stats-save-status" id="stats-save-status"></span>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="section-session-activity" class="section-panel">
+      <div class="section-header">
+        <h2>👥 Aktywność sesji</h2>
+        <p>Widok tylko dla roli Dev. Kto jest teraz zalogowany oraz historia logowania i wylogowywania.</p>
+      </div>
+
+      <div class="creator-form-card">
+        <div class="scheduled-toolbar">
+          <span class="preview-note" id="session-activity-online-count">Zalogowani: —</span>
+          <button id="session-activity-refresh-btn" class="btn-secondary" type="button">Odswiez</button>
+        </div>
+
+        <h3 style="margin:12px 0 8px;font-size:14px;color:var(--text-muted)">Aktualnie zalogowani</h3>
+        <div id="session-online-list" class="scheduled-list"></div>
+
+        <h3 style="margin:16px 0 8px;font-size:14px;color:var(--text-muted)">Historia zdarzeń</h3>
+        <div id="session-events-list" class="scheduled-list"></div>
+
+        <div class="scheduled-toolbar">
+          <div class="image-pagination" id="session-activity-pagination" hidden>
+            <button id="session-activity-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
+            <span class="preview-note" id="session-activity-page-label">Strona 1/1</span>
+            <button id="session-activity-next-btn" class="btn-secondary" type="button">Nastepna ➡</button>
+          </div>
+          <span class="preview-note" id="session-activity-count-label">Zdarzenia: 0</span>
         </div>
       </div>
     </div>

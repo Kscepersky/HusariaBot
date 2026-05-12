@@ -14,6 +14,7 @@ export interface ScheduledPost {
     updatedAt: number;
     publisherName: string;
     publisherUserId?: string;
+    publisherAvatar?: string;
     messageId?: string;
     pingMessageId?: string;
     imageMessageId?: string;
