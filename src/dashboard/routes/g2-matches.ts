@@ -9,6 +9,9 @@ import {
     saveG2MatchesSyncError,
 } from '../g2-matches/repository.js';
 import type { G2MatchRecord, G2MatchesQueryFilters } from '../g2-matches/types.js';
+import { createLogger } from '../../utils/logger.js';
+
+const g2Logger = createLogger('dashboard:g2-matches');
 
 const REFRESH_COOLDOWN_MS = 30_000;
 
@@ -54,9 +57,51 @@ function buildFilters(query: Record<string, unknown>): G2MatchesQueryFilters {
     };
 }
 
-function toPublicMatch(match: G2MatchRecord): Omit<G2MatchRecord, 'rawPayload'> {
-    const { rawPayload: _rawPayload, ...publicMatch } = match;
-    return publicMatch;
+function getLiquipediaPath(gameLower: string): string {
+    if (gameLower.includes('valorant')) return 'valorant';
+    if (gameLower.includes('rainbow six') || gameLower.includes('r6')) return 'rainbowsix';
+    if (gameLower.includes('rocket league')) return 'rocketleague';
+    if (gameLower.includes('apex')) return 'apexlegends';
+    if (gameLower.includes('dota')) return 'dota2';
+    if (gameLower.includes('overwatch')) return 'overwatch';
+    if (gameLower.includes('starcraft')) return 'starcraft2';
+    return 'commons';
+}
+
+function buildTournamentUrl(gameName: string, leagueName: string): string | null {
+    const lower = gameName.toLowerCase().trim();
+    const searchTerm = leagueName.trim();
+    if (!searchTerm) return null;
+    if (lower.includes('counter-strike') || lower === 'cs2') {
+        return `https://www.hltv.org/search#query=${encodeURIComponent(searchTerm)}`;
+    }
+    if (lower.includes('league of legends')) {
+        return `https://lol.fandom.com/wiki/Special:Search?query=${encodeURIComponent(searchTerm)}`;
+    }
+    return `https://liquipedia.net/${getLiquipediaPath(lower)}/index.php?search=${encodeURIComponent(searchTerm)}`;
+}
+
+function toPublicMatch(match: G2MatchRecord) {
+    const { rawPayload, ...publicMatch } = match;
+    let gameImageUrl: string | null = null;
+    let directLeagueUrl: string | null = null;
+    try {
+        const raw = JSON.parse(rawPayload) as {
+            videogame?: { image_url?: string | null } | null;
+            league?: { url?: string | null } | null;
+        };
+        const imageUrl = raw.videogame?.image_url;
+        gameImageUrl = typeof imageUrl === 'string' && imageUrl.trim() ? imageUrl.trim() : null;
+        const leagueUrl = raw.league?.url;
+        directLeagueUrl = typeof leagueUrl === 'string' && leagueUrl.trim() ? leagueUrl.trim() : null;
+    } catch {
+        // non-critical — rawPayload malformed
+    }
+    return {
+        ...publicMatch,
+        gameImageUrl,
+        tournamentUrl: directLeagueUrl ?? buildTournamentUrl(match.game, match.leagueName),
+    };
 }
 
 g2MatchesRouter.get('/', async (req, res) => {
@@ -77,7 +122,7 @@ g2MatchesRouter.get('/', async (req, res) => {
             refreshInProgress,
         });
     } catch (error) {
-        console.error('Failed to load G2 matches:', error);
+        g2Logger.error('G2_MATCHES_LOAD_FAILED', 'Nie udało się załadować bazy meczów G2.', {}, error);
         res.status(500).json({ error: 'Nie udało się pobrać bazy meczów G2.' });
     }
 });
@@ -106,6 +151,10 @@ g2MatchesRouter.post('/refresh', async (_req, res) => {
         const result = await fetchUpcomingG2Matches();
         await replaceAllG2Matches(result.matches);
 
+        g2Logger.info('G2_MATCHES_REFRESHED', 'Odświeżono bazę meczów G2.', {
+            count: result.matches.length,
+            fetchedPages: result.fetchedPages,
+        });
         res.json({
             success: true,
             count: result.matches.length,
@@ -115,10 +164,10 @@ g2MatchesRouter.post('/refresh', async (_req, res) => {
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Nieznany błąd odświeżania.';
         await saveG2MatchesSyncError(errorMessage).catch((metaError) => {
-            console.error('Failed to persist G2 sync error:', metaError);
+            g2Logger.error('G2_SYNC_META_WRITE_FAILED', 'Nie udało się zapisać błędu synchronizacji G2.', {}, metaError);
         });
 
-        console.error('Failed to refresh G2 matches:', error);
+        g2Logger.error('G2_MATCHES_REFRESH_FAILED', 'Nie udało się odświeżyć bazy meczów G2.', {}, error);
         res.status(502).json({ error: errorMessage });
     } finally {
         refreshInProgress = false;

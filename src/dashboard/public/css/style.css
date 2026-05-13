@@ -909,6 +909,23 @@ input[name="colorName"] { display: none }
   font-weight: 600;
 }
 
+.role-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 4px;
+  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.role-badge-dev       { background: #e74c3c; color: #fff; }
+.role-badge-admin     { background: #e67e22; color: #fff; }
+.role-badge-moderator { background: #3498db; color: #fff; }
+.role-badge-community_manager { background: #9b59b6; color: #fff; }
+.role-badge-member    { background: #4e5058; color: #dcddde; }
+
 /* ─── Discord Embed (Preview) ────────────────────────────────────────── */
 .discord-embed {
   display: flex;

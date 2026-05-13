@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { Router } from 'express';
-import { deleteGuildScheduledEvent, editChannelMessage } from '../discord-api.js';
+import { deleteChannelMessage, deleteGuildScheduledEvent, editChannelMessage } from '../discord-api.js';
 import {
     buildDashboardAllowedMentions,
     buildDashboardMessagePayload,
@@ -30,10 +30,20 @@ import { registerScheduledPost, unregisterScheduledPost } from '../scheduler/ser
 import { registerWatchpartyLifecycle, unregisterWatchpartyLifecycle } from '../watchparty-lifecycle.js';
 import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
 import type { ScheduledPost } from '../scheduler/types.js';
+import type { SessionUser } from '../types.js';
 import { createLogger } from '../../utils/logger.js';
 
 export const scheduledRouter = Router();
 const scheduledLogger = createLogger('dashboard:scheduled-routes');
+
+function buildActorContext(user: SessionUser | undefined): { actorUserId?: string; actorUserName?: string; actorUserRole?: string } {
+    if (!user) return {};
+    return {
+        actorUserId: user.id,
+        actorUserName: user.globalName ?? user.username,
+        actorUserRole: user.dashboardRole,
+    };
+}
 
 interface ScheduledPostRequestBody extends Omit<EmbedFormData, 'mentionRoleEnabled'> {
     mentionRoleEnabled?: boolean | string;
@@ -369,7 +379,7 @@ scheduledRouter.post('/', async (req, res) => {
         registerScheduledPost(inserted);
 
         scheduledLogger.info('SCHEDULED_POST_CREATED', 'Utworzono zaplanowany post z dashboardu.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
             postId: inserted.id,
             channelId: inserted.payload.channelId,
             scheduledFor: inserted.scheduledFor,
@@ -459,7 +469,7 @@ scheduledRouter.patch('/:id', async (req, res) => {
         registerScheduledPost(updated);
 
         scheduledLogger.info('SCHEDULED_POST_UPDATED', 'Zaktualizowano zaplanowany post z dashboardu.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
             postId: updated.id,
             channelId: updated.payload.channelId,
             scheduledFor: updated.scheduledFor,
@@ -494,7 +504,7 @@ scheduledRouter.delete('/:id', async (req, res) => {
         unregisterWatchpartyLifecycle(postId);
 
         scheduledLogger.info('SCHEDULED_POST_DELETED', 'Usunieto zaplanowany post z dashboardu.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
             postId,
         });
 
@@ -854,7 +864,7 @@ scheduledRouter.patch('/sent/:id', async (req, res) => {
         registerWatchpartyLifecycle(responsePost);
 
         scheduledLogger.info('SENT_POST_EDITED', 'Zedytowano opublikowany post z dashboardu.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
             postId,
             channelId: responsePost.payload.channelId,
             messageId: responsePost.messageId,
@@ -955,6 +965,31 @@ scheduledRouter.delete('/sent/:id', async (req, res) => {
             }
         }
 
+        const channelId = post.payload.channelId;
+        const discordDeleteWarnings: string[] = [];
+
+        const messagesToDelete = [
+            { key: 'messageId', id: post.messageId },
+            { key: 'pingMessageId', id: post.pingMessageId },
+            { key: 'imageMessageId', id: post.imageMessageId },
+        ] as const;
+
+        for (const { key, id } of messagesToDelete) {
+            if (!id) continue;
+            try {
+                await deleteChannelMessage(channelId, id);
+            } catch (discordError) {
+                const msg = discordError instanceof Error ? discordError.message : String(discordError);
+                discordDeleteWarnings.push(`${key}: ${msg}`);
+                scheduledLogger.warn('SENT_POST_DISCORD_DELETE_FAILED', 'Nie udalo sie usunac wiadomosci z Discorda przy usuwaniu posta.', {
+                    ...buildActorContext(req.session.user),
+                    postId,
+                    channelId,
+                    [key]: id,
+                }, discordError);
+            }
+        }
+
         const deleted = await deleteScheduledPostById(postId);
         if (!deleted) {
             res.status(404).json({ error: 'Nie znaleziono wysłanego posta.' });
@@ -964,16 +999,23 @@ scheduledRouter.delete('/sent/:id', async (req, res) => {
         unregisterWatchpartyLifecycle(postId);
 
         scheduledLogger.info('SENT_POST_DELETED', 'Usunieto opublikowany post z dashboardu.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
             postId,
-            channelId: post.payload.channelId,
+            channelId,
             messageId: post.messageId,
             mode: post.payload.mode,
+            discordDeleteWarnings: discordDeleteWarnings.length > 0 ? discordDeleteWarnings : undefined,
         });
 
-        res.json({ success: true });
+        res.json({
+            success: true,
+            warnings: discordDeleteWarnings.length > 0 ? discordDeleteWarnings : undefined,
+        });
     } catch (error) {
-        console.error('Failed to delete sent post:', error);
+        scheduledLogger.error('SENT_POST_DELETE_FAILED', 'Nie udalo sie usunac opublikowanego posta.', {
+            ...buildActorContext(req.session.user),
+            postId,
+        }, error);
         res.status(500).json({ error: 'Nie udało się usunąć wysłanego posta.' });
     }
 });

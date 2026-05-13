@@ -4,6 +4,9 @@ import {
 } from './discord-api.js';
 import type { EmbedFormData } from './embed-handlers.js';
 import { parseWarsawDateTimeToTimestamp } from './scheduler/warsaw-time.js';
+import { createLogger } from '../utils/logger.js';
+
+const eventPublisherLogger = createLogger('dashboard:event-publisher');
 
 export type EventPublishStatus = 'not_requested' | 'created' | 'failed';
 
@@ -114,13 +117,14 @@ export async function tryCreateDiscordEventFromPayload(payload: EmbedFormData): 
             location,
         });
 
+        eventPublisherLogger.info('DISCORD_EVENT_PUBLISH_SUCCESS', 'Pomyślnie utworzono wydarzenie Discord.', { eventId });
         return {
             status: 'created',
             eventId,
             warnings: [],
         };
     } catch (error) {
-        console.error('Failed to create Discord event from payload:', error);
+        eventPublisherLogger.error('DISCORD_EVENT_PUBLISH_FAILED', 'Nie udało się utworzyć wydarzenia Discord z payload.', { title }, error);
         const eventError = 'Błąd usługi Discord podczas tworzenia wydarzenia.';
 
         return {

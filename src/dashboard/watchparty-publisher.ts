@@ -7,6 +7,9 @@ import {
 import type { EmbedFormData } from './embed-handlers.js';
 import { parseWarsawDateTimeToTimestamp } from './scheduler/warsaw-time.js';
 import type { ScheduledPostWatchpartyStatus } from './scheduler/types.js';
+import { createLogger } from '../utils/logger.js';
+
+const watchpartyPublisherLogger = createLogger('dashboard:watchparty-publisher');
 
 export type WatchpartyPublishStatus = Exclude<ScheduledPostWatchpartyStatus, 'pending' | 'deleted'>;
 
@@ -108,13 +111,15 @@ export async function tryCreateWatchpartyChannelFromPayload(payload: EmbedFormDa
         });
         invalidateGuildChannelsCache(guildId);
 
+        const status: WatchpartyPublishStatus = shouldOpenImmediately ? 'open' : 'scheduled';
+        watchpartyPublisherLogger.info('WATCHPARTY_CHANNEL_CREATED', 'Pomyślnie utworzono kanał watchparty.', { channelId, channelName, status });
         return {
-            status: shouldOpenImmediately ? 'open' : 'scheduled',
+            status,
             channelId,
             warnings: [],
         };
     } catch (error) {
-        console.error('Failed to create watchparty channel:', error);
+        watchpartyPublisherLogger.error('WATCHPARTY_CHANNEL_CREATE_FAILED', 'Nie udało się utworzyć kanału watchparty.', { channelName }, error);
         return {
             status: 'failed',
             watchpartyError: 'Błąd usługi Discord podczas tworzenia kanału watchparty.',

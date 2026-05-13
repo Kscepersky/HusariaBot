@@ -6,6 +6,9 @@ import {
     openWatchpartyChannel,
     resolveWatchpartyWindow,
 } from './watchparty-publisher.js';
+import { createLogger } from '../utils/logger.js';
+
+const watchpartyLifecycleLogger = createLogger('dashboard:watchparty-lifecycle');
 
 const MAX_TIMEOUT_MS = 2_147_000_000;
 const WATCHPARTY_DELETE_GRACE_MS = 60 * 60 * 1000;
@@ -31,10 +34,7 @@ function removeWatchpartyTimer(postId: string, timer: NodeJS.Timeout): void {
 
 function runScheduledWatchpartyAction(postId: string, action: () => Promise<void>): void {
     void action().catch((error) => {
-        console.error('Failed to run scheduled watchparty lifecycle action:', {
-            postId,
-            error,
-        });
+        watchpartyLifecycleLogger.error('WATCHPARTY_LIFECYCLE_ACTION_FAILED', 'Nie udało się wykonać zaplanowanej akcji lifecycle watchparty.', { postId }, error);
     });
 }
 
@@ -100,11 +100,12 @@ async function executeWatchpartyTransition(postId: string, transition: Watchpart
         try {
             await deleteWatchpartyChannel(channelId);
         } catch (error) {
-            console.error('Failed to delete watchparty channel during lifecycle:', error);
+            watchpartyLifecycleLogger.error('WATCHPARTY_DELETE_FAILED', 'Nie udało się usunąć kanału watchparty.', { postId, channelId }, error);
             await markWatchpartyTransitionFailure(postId, 'Nie udało się usunąć kanału watchparty po zakończeniu okna czasu.');
             return;
         }
 
+        watchpartyLifecycleLogger.info('WATCHPARTY_DELETED', 'Usunięto kanał watchparty.', { postId, channelId });
         await updateScheduledPost(postId, (existingPost) => ({
             ...existingPost,
             updatedAt: Date.now(),
@@ -133,11 +134,12 @@ async function executeWatchpartyTransition(postId: string, transition: Watchpart
         try {
             await openWatchpartyChannel(channelId, guildId);
         } catch (error) {
-            console.error('Failed to open watchparty channel during lifecycle:', error);
+            watchpartyLifecycleLogger.error('WATCHPARTY_OPEN_FAILED', 'Nie udało się otworzyć kanału watchparty.', { postId, channelId }, error);
             await markWatchpartyTransitionFailure(postId, 'Nie udało się otworzyć kanału watchparty o czasie startu.');
             return;
         }
 
+        watchpartyLifecycleLogger.info('WATCHPARTY_OPENED', 'Otwarto kanał watchparty.', { postId, channelId });
         await updateScheduledPost(postId, (existingPost) => ({
             ...existingPost,
             updatedAt: Date.now(),
@@ -154,11 +156,12 @@ async function executeWatchpartyTransition(postId: string, transition: Watchpart
     try {
         await closeWatchpartyChannel(channelId, guildId);
     } catch (error) {
-        console.error('Failed to close watchparty channel during lifecycle:', error);
+        watchpartyLifecycleLogger.error('WATCHPARTY_CLOSE_FAILED', 'Nie udało się zamknąć kanału watchparty.', { postId, channelId }, error);
         await markWatchpartyTransitionFailure(postId, 'Nie udało się zamknąć kanału watchparty o czasie zakończenia.');
         return;
     }
 
+    watchpartyLifecycleLogger.info('WATCHPARTY_CLOSED', 'Zamknięto kanał watchparty.', { postId, channelId });
     await updateScheduledPost(postId, (existingPost) => ({
         ...existingPost,
         updatedAt: Date.now(),

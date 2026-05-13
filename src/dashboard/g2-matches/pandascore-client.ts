@@ -160,6 +160,7 @@ function includesG2(value: string): boolean {
 }
 
 function isGenericTournamentStageName(value: string): boolean {
+    const normalized = normalizedLower(value);
     const genericStages = new Set([
         'regular season',
         'playoffs',
@@ -179,7 +180,16 @@ function isGenericTournamentStageName(value: string): boolean {
         'final',
     ]);
 
-    return genericStages.has(normalizedLower(value));
+    if (genericStages.has(normalized)) {
+        return true;
+    }
+
+    // Matches "Group A", "Group B", "Group 1", "Group Alpha", etc.
+    if (/^group\s+[a-z0-9]+$/i.test(value.trim())) {
+        return true;
+    }
+
+    return false;
 }
 
 function buildCompetitionName(match: PandaScoreMatch): string {

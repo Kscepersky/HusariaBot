@@ -1731,7 +1731,7 @@ function buildDashboardRoleChipHtml(role) {
     dev:               { label: 'Dev',               color: '#5865f2' },
     admin:             { label: 'Admin',              color: '#dc143c' },
     moderator:         { label: 'Moderator',          color: '#f0a500' },
-    community_manager: { label: 'Community Manager',  color: '#3ba55d' },
+    community_manager: { label: 'Community Manager',  color: '#9b59b6' },
   }
   const entry = map[role]
   if (!entry) return ''
@@ -1745,7 +1745,7 @@ function buildSessionUserCardHtml(user, isOnline) {
   const displayName = escapeHtml(user.globalName || user.username || user.userId)
   const loginTime = formatTimestampInWarsaw(Number(user.createdAt ?? Date.now()))
   const statusDot = isOnline
-    ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#3ba55d;margin-right:6px;vertical-align:middle;"></span>'
+    ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#57f287;margin-right:6px;vertical-align:middle;"></span>'
     : ''
   const roleChip = buildDashboardRoleChipHtml(user.dashboardRole)
 
@@ -1775,7 +1775,9 @@ function buildSessionEventCardHtml(event) {
   const displayName = escapeHtml(event.globalName || event.username || event.userId)
   const timestamp = formatTimestampInWarsaw(Number(event.createdAt ?? Date.now()))
   const typeLabel = isLogin ? 'Logowanie' : 'Wylogowanie'
-  const typeClass = isLogin ? 'log-level-info' : 'log-level-warn'
+  const typeStyle = isLogin
+    ? 'background:rgba(87,242,135,.18);color:#57f287;border-color:rgba(87,242,135,.35);'
+    : 'background:rgba(114,118,125,.18);color:#99aab5;border-color:rgba(114,118,125,.3);'
   const roleChip = buildDashboardRoleChipHtml(event.dashboardRole)
 
   return `
@@ -1788,7 +1790,7 @@ function buildSessionEventCardHtml(event) {
           ${roleChip}
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
-          <span class="scheduled-chip ${typeClass}">${typeLabel}</span>
+          <span class="scheduled-chip" style="${typeStyle}">${typeLabel}</span>
           <span class="preview-note" style="font-size:11px;">${timestamp}</span>
         </div>
       </div>
@@ -2039,10 +2041,10 @@ function renderDashboardLogs() {
       ? `<div class="log-error">Blad: ${escapeHtml(String(entry.error.message))}</div>`
       : ''
     const actorHtml = entry.actorUser?.displayName
-      ? buildAuthorHtml(entry.actorUser.displayName, null, null, 'Aktor', entry.actorUser.avatarUrl)
+      ? buildAuthorHtml(entry.actorUser.displayName, null, null, 'Aktor', entry.actorUser.avatarUrl, entry.actorUser.role ?? null)
       : ''
     const targetHtml = entry.targetUser?.displayName
-      ? buildAuthorHtml(entry.targetUser.displayName, null, null, 'Cel', entry.targetUser.avatarUrl)
+      ? buildAuthorHtml(entry.targetUser.displayName, null, null, 'Cel', entry.targetUser.avatarUrl, entry.targetUser.role ?? null)
       : ''
     const userChips = actorHtml || targetHtml
       ? `<div class="scheduled-card-meta">${actorHtml}${targetHtml}</div>`
@@ -2089,9 +2091,7 @@ function renderScheduledPosts() {
     const pingLabel = post?.payload?.mentionRoleEnabled
       ? resolvePingTargetLabel(post?.payload?.mentionRoleId)
       : 'brak pingu'
-    const previewHtml = post?.payload?.mode === 'embedded'
-      ? renderPreviewEmbedText(post?.payload?.title ?? '', post?.payload?.content ?? '')
-      : (renderMarkdown(post?.payload?.content ?? '') || '<span style="opacity:.45">Brak treści.</span>')
+    const previewHtml = buildDiscordMockupHtml(post)
     const authorHtml = buildAuthorHtml(post.publisherName, post.publisherUserId, post.publisherAvatar)
 
     return `
@@ -2151,9 +2151,7 @@ function renderSentPosts() {
       failed: 'Watchparty: błąd',
     }
 
-    const previewHtml = post?.payload?.mode === 'embedded'
-      ? renderPreviewEmbedText(post?.payload?.title ?? '', post?.payload?.content ?? '')
-      : (renderMarkdown(post?.payload?.content ?? '') || '<span style="opacity:.45">Brak treści.</span>')
+    const previewHtml = buildDiscordMockupHtml(post)
     const authorHtml = buildAuthorHtml(post.publisherName, post.publisherUserId, post.publisherAvatar)
     const editorHtml = post.editedBy
       ? buildAuthorHtml(post.editedBy, post.editedByUserId, null, 'edytował')
@@ -2668,7 +2666,7 @@ async function retrySentPostEvent(postId) {
 }
 
 async function deleteSentPost(postId) {
-  const shouldDelete = window.confirm('Czy na pewno chcesz usunąć wysłany post z historii?')
+  const shouldDelete = window.confirm('Czy na pewno chcesz usunąć wysłany post? Wiadomość zostanie również usunięta z Discorda.')
   if (!shouldDelete) {
     return
   }
@@ -2688,7 +2686,12 @@ async function deleteSentPost(postId) {
     }
 
     await loadSentPosts()
-    showToast('🗑️ Wysłany post został usunięty z historii.', 'success')
+
+    if (Array.isArray(json.warnings) && json.warnings.length > 0) {
+      showToast('Post usunięty z historii, ale nie wszystkie wiadomości Discord zostały usunięte. Sprawdź logi.', 'warn')
+    } else {
+      showToast('Post i powiązane wiadomości Discord zostały usunięte.', 'success')
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nieznany błąd'
     showToast(`❌ ${message}`, 'error')
@@ -4525,14 +4528,20 @@ function renderG2MatchesList() {
   }
 
   list.innerHTML = g2Matches.map((match) => {
+    const logoHtml = match.gameImageUrl
+      ? `<img src="${escapeHtml(match.gameImageUrl)}" alt="${escapeHtml(match.game)}" width="18" height="18" style="object-fit:contain;border-radius:3px;vertical-align:middle;margin-right:4px;">`
+      : ''
+    const tournamentHtml = match.tournamentUrl
+      ? `<a href="${escapeHtml(match.tournamentUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:none;">${escapeHtml(match.tournament)}</a>`
+      : escapeHtml(match.tournament)
     return `
       <article class="scheduled-card">
         <div class="scheduled-card-header">
-          <span class="scheduled-card-title">${escapeHtml(match.game)} | ${escapeHtml(match.g2TeamName ?? 'G2 Esports')} vs ${escapeHtml(match.opponent)}</span>
+          <span class="scheduled-card-title">${logoHtml}${escapeHtml(match.game)} | ${escapeHtml(match.g2TeamName ?? 'G2 Esports')} vs ${escapeHtml(match.opponent)}</span>
           <span class="scheduled-chip">${escapeHtml(match.matchType)}</span>
         </div>
         <div class="scheduled-card-meta">
-          <span class="scheduled-chip">Turniej: ${escapeHtml(match.tournament)}</span>
+          <span class="scheduled-chip">Turniej: ${tournamentHtml}</span>
           <span class="scheduled-chip">Data: ${escapeHtml(match.date)} ${escapeHtml(match.time)}</span>
           <span class="scheduled-chip">Status: ${escapeHtml(match.status)}</span>
         </div>
@@ -5657,6 +5666,51 @@ function renderInlineText(value) {
   return html
 }
 
+function buildDiscordMockupHtml(post) {
+  const payload = post?.payload ?? {}
+  const mode = payload.mode ?? 'embedded'
+  const color = COLOR_MAP[payload.colorName ?? 'czerwony'] ?? COLOR_MAP.czerwony
+
+  const pingEnabled = Boolean(payload.mentionRoleEnabled)
+  const pingLabel = pingEnabled ? resolvePingTargetLabel(payload.mentionRoleId ?? '') : ''
+  const pingHtml = pingEnabled && pingLabel
+    ? `<div class="preview-ping-line" style="display:inline-flex">Ping przed publikacją: ${escapeHtml(pingLabel)}</div>`
+    : ''
+
+  let contentHtml = ''
+  if (mode === 'embedded') {
+    contentHtml = `<div class="discord-embed">
+        <div class="embed-color-bar" style="background:${color}"></div>
+        <div class="embed-body">
+          <div class="embed-description">${renderPreviewEmbedText(payload.title ?? '', payload.content ?? '')}</div>
+        </div>
+      </div>`
+  } else {
+    const rendered = renderMarkdown(payload.content ?? '')
+    contentHtml = `<div class="discord-plain-message">${rendered || '<span style="opacity:.45">Brak treści.</span>'}</div>`
+  }
+
+  let imageHtml = ''
+  if (payload.imageMode === 'library' && payload.imageFilename) {
+    const src = `/img/${encodeURIComponent(String(payload.imageFilename))}`
+    imageHtml = `<div class="preview-image-block"><img class="preview-image" src="${src}" alt="Grafika"></div>`
+  } else if (payload.imageMode === 'upload') {
+    imageHtml = '<div class="preview-image-placeholder">🖼️ Wgrana grafika</div>'
+  }
+
+  return `<div class="discord-mockup">
+    <div class="discord-message">
+      <div class="discord-avatar"><img src="/img/DNA.png" alt="HusariaBot"></div>
+      <div class="discord-msg-content">
+        <span class="discord-bot-name">G2 Hussars <span class="bot-badge">BOT</span></span>
+        ${pingHtml}
+        ${contentHtml}
+        ${imageHtml}
+      </div>
+    </div>
+  </div>`
+}
+
 function collectFormDataSync() {
   const pingEnabled = document.getElementById('ping-role-enabled')?.checked ?? false
   const pingRoleId = document.getElementById('ping-role-select')?.value ?? ''
@@ -6291,14 +6345,15 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;')
 }
 
-function buildAuthorHtml(name, userId, avatarHash, prefix = 'dodał', resolvedAvatarUrl = null) {
+function buildAuthorHtml(name, userId, avatarHash, prefix = 'dodał', resolvedAvatarUrl = null, role = null) {
   if (!name) return ''
   const avatarUrl = resolvedAvatarUrl
     || (userId && avatarHash
       ? `https://cdn.discordapp.com/avatars/${encodeURIComponent(userId)}/${encodeURIComponent(avatarHash)}.png?size=32`
       : `https://cdn.discordapp.com/embed/avatars/0.png`)
   const imgHtml = `<img src="${avatarUrl}" alt="" class="author-avatar" width="16" height="16" style="border-radius:50%;vertical-align:middle;margin-right:4px;">`
-  return `<span class="scheduled-chip author-chip">${imgHtml}${escapeHtml(prefix)}: ${escapeHtml(name)}</span>`
+  const roleBadge = role ? ` <span class="role-badge role-badge-${escapeHtml(String(role).toLowerCase())}">${escapeHtml(String(role))}</span>` : ''
+  return `<span class="scheduled-chip author-chip">${imgHtml}${escapeHtml(prefix)}: ${escapeHtml(name)}${roleBadge}</span>`
 }
 
 // ─── Server Stats ──────────────────────────────────────────────────────────────
@@ -6583,7 +6638,7 @@ async function loadActiveUsers() {
     const payload = await parseApiResponse(res)
     if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
     const users = Array.isArray(payload.activeUsers) ? payload.activeUsers : []
-    renderTopUsersList(list, users, 'messages', 'voiceMinutes')
+    renderTopUsersList(list, users.slice(0, 5), 'messages', 'voiceMinutes')
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Błąd'
     list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
@@ -6666,7 +6721,7 @@ async function loadMessagesTopUsers(reset) {
     list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
   }
 
-  const BATCH = 10
+  const BATCH = 5
   try {
     const { startDate, endDate } = statsTabDates.messages
     const params = new URLSearchParams({ startDate, endDate, limit: String(messagesTopUsersOffset + BATCH) })
@@ -6695,7 +6750,7 @@ async function loadMessagesTopChannels() {
 
   try {
     const { startDate, endDate } = statsTabDates.messages
-    const params = new URLSearchParams({ startDate, endDate, limit: '10' })
+    const params = new URLSearchParams({ startDate, endDate, limit: '5' })
     const res = await fetch(`/api/stats/messages/top-channels?${params}`)
     const payload = await parseApiResponse(res)
     if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
@@ -6788,7 +6843,7 @@ async function loadVoiceTopUsers(reset) {
     list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
   }
 
-  const BATCH = 10
+  const BATCH = 5
   try {
     const { startDate, endDate } = statsTabDates.voice
     const params = new URLSearchParams({ startDate, endDate, limit: String(voiceTopUsersOffset + BATCH) })
@@ -6817,7 +6872,7 @@ async function loadVoiceTopChannels() {
 
   try {
     const { startDate, endDate } = statsTabDates.voice
-    const params = new URLSearchParams({ startDate, endDate, limit: '10' })
+    const params = new URLSearchParams({ startDate, endDate, limit: '5' })
     const res = await fetch(`/api/stats/voice/top-channels?${params}`)
     const payload = await parseApiResponse(res)
     if (!res.ok) throw new Error(payload.error ?? 'Błąd.')

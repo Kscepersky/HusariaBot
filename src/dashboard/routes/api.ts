@@ -105,6 +105,7 @@ import { createLogger } from '../../utils/logger.js';
 import { listDashboardLogs } from '../../utils/log-reader.js';
 import { enrichWithDiscordUser } from '../../utils/discord-user-cache.js';
 import { listSessionActivity } from '../session/session-events.js';
+import type { SessionUser } from '../types.js';
 import {
     getStoredLeaderboardProfile,
     pruneStoredLeaderboardProfiles,
@@ -114,6 +115,15 @@ import {
 config();
 
 export const apiRouter = Router();
+
+function buildActorContext(user: SessionUser | undefined): { actorUserId?: string; actorUserName?: string; actorUserRole?: string } {
+    if (!user) return {};
+    return {
+        actorUserId: user.id,
+        actorUserName: user.globalName ?? user.username,
+        actorUserRole: user.dashboardRole,
+    };
+}
 
 const LEADERBOARD_PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
 const LEADERBOARD_PROFILE_FAILURE_CACHE_TTL_MS = 30 * 1000;
@@ -1660,7 +1670,7 @@ apiRouter.get('/images', requireCurrentDashboardRole, (req, res) => {
         });
     } catch (error) {
         apiLogger.error('IMAGE_LIBRARY_LIST_FAILED', 'Nie udalo sie pobrac listy obrazow.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
         }, error);
         res.status(500).json({ error: 'Nie udało się pobrać listy obrazów.' });
     }
@@ -1924,7 +1934,7 @@ apiRouter.get('/tickets/history', requireCurrentDashboardRole, async (req, res) 
         });
     } catch (error) {
         apiLogger.error('TICKET_HISTORY_LIST_FAILED', 'Nie udalo sie pobrac historii ticketow.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
         }, error);
         res.status(500).json({ error: 'Nie udalo sie pobrac historii ticketow.' });
     }
@@ -1948,12 +1958,12 @@ apiRouter.delete('/tickets/history', requireCurrentDashboardRole, async (req, re
         await clearTicketHistory();
 
         apiLogger.info('TICKET_HISTORY_CLEARED', 'Wyczyszczono historie ticketow.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
         });
         res.json({ success: true });
     } catch (error) {
         apiLogger.error('TICKET_HISTORY_CLEAR_FAILED', 'Nie udalo sie wyczyscic historii ticketow.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
         }, error);
         res.status(500).json({ error: 'Nie udalo sie wyczyscic historii ticketow.' });
     }
@@ -1977,7 +1987,7 @@ apiRouter.get('/tickets/transcripts/:fileName', requireCurrentDashboardRole, (re
         res.sendFile(transcriptPath);
     } catch (error) {
         apiLogger.error('TICKET_TRANSCRIPT_DOWNLOAD_FAILED', 'Nie udalo sie pobrac transkryptu ticketu.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
             transcriptFileName: req.params.fileName,
         }, error);
         res.status(500).json({ error: 'Nie udalo sie pobrac transkryptu ticketu.' });
@@ -2006,9 +2016,16 @@ apiRouter.get('/logs', requireCurrentDashboardDevRole, async (req, res) => {
         const enrichedEntries = result.entries.map((entry) => {
             const actorId = typeof entry.context?.actorUserId === 'string' ? entry.context.actorUserId : undefined;
             const targetId = typeof entry.context?.targetUserId === 'string' ? entry.context.targetUserId : undefined;
+            const cachedActor = enrichWithDiscordUser(actorId);
+            const storedActorName = typeof entry.context?.actorUserName === 'string' ? entry.context.actorUserName : null;
+            const storedActorRole = typeof entry.context?.actorUserRole === 'string' ? entry.context.actorUserRole : null;
             return {
                 ...entry,
-                actorUser: enrichWithDiscordUser(actorId),
+                actorUser: {
+                    displayName: cachedActor.displayName ?? storedActorName,
+                    avatarUrl: cachedActor.avatarUrl,
+                    role: cachedActor.role ?? storedActorRole,
+                },
                 targetUser: enrichWithDiscordUser(targetId),
             };
         });
@@ -2029,7 +2046,7 @@ apiRouter.get('/logs', requireCurrentDashboardDevRole, async (req, res) => {
         });
     } catch (error) {
         apiLogger.error('DASHBOARD_LOGS_LIST_FAILED', 'Nie udalo sie pobrac logow systemowych.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
             level,
             search,
         }, error);
@@ -2047,7 +2064,7 @@ apiRouter.get('/sessions/activity', requireCurrentDashboardDevRole, async (req, 
         res.json({ success: true, ...result });
     } catch (error) {
         apiLogger.error('SESSION_ACTIVITY_LIST_FAILED', 'Nie udalo sie pobrac aktywnosci sesji.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
         }, error);
         res.status(500).json({ error: 'Nie udalo sie pobrac aktywnosci sesji.' });
     }
@@ -2349,6 +2366,10 @@ apiRouter.post('/events', async (req, res) => {
         });
 
         res.json({ success: true, eventId });
+        apiLogger.info('DISCORD_EVENT_CREATED', 'Utworzono wydarzenie Discord.', {
+            ...buildActorContext(req.session.user),
+            discordEventId: eventId,
+        });
     } catch (error) {
         handleDashboardEventMutationError(res, error, 'create');
     }
@@ -2390,6 +2411,10 @@ apiRouter.patch('/events/:id', async (req, res) => {
             success: true,
             event: mapDiscordEventToDashboardEvent(updated),
         });
+        apiLogger.info('DISCORD_EVENT_UPDATED', 'Zaktualizowano wydarzenie Discord.', {
+            ...buildActorContext(req.session.user),
+            discordEventId: eventId,
+        });
     } catch (error) {
         handleDashboardEventMutationError(res, error, 'update');
     }
@@ -2412,6 +2437,10 @@ apiRouter.delete('/events/:id', async (req, res) => {
     try {
         await deleteGuildScheduledEvent(guildId, eventId);
         res.json({ success: true });
+        apiLogger.info('DISCORD_EVENT_DELETED', 'Usunięto wydarzenie Discord.', {
+            ...buildActorContext(req.session.user),
+            discordEventId: eventId,
+        });
     } catch (error) {
         handleDashboardEventMutationError(res, error, 'delete');
     }
@@ -2614,7 +2643,7 @@ apiRouter.post('/embed', async (req, res) => {
         }
 
         apiLogger.error('EMBED_PUBLISH_FAILED', 'Krytyczny blad podczas publikowania posta z dashboardu.', {
-            actorUserId: req.session.user?.id,
+            ...buildActorContext(req.session.user),
             channelId: req.body?.channelId,
             mode: req.body?.mode,
         }, err);

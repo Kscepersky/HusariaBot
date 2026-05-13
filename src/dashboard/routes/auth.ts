@@ -150,7 +150,7 @@ authRouter.get('/discord/callback', async (req, res) => {
         });
 
         req.session.user = sessionUser;
-        cacheDiscordUser(sessionUser.id, sessionUser.username, sessionUser.globalName ?? null, sessionUser.avatar ?? null);
+        cacheDiscordUser(sessionUser.id, sessionUser.username, sessionUser.globalName ?? null, sessionUser.avatar ?? null, sessionUser.dashboardRole ?? null);
         void recordSessionEvent({
             eventType: 'login',
             userId: sessionUser.id,

@@ -14,6 +14,10 @@ const schedulerLogger = createLogger('dashboard:scheduler');
 
 const timers = new Map<string, NodeJS.Timeout>();
 const MAX_TIMEOUT_MS = 2_147_000_000;
+// Tolerance window: if a post's scheduledFor is more than this far in the future when
+// executeScheduledPost runs, the timer fired for a stale schedule (e.g. post was edited
+// while the old timer was already queued). Re-register instead of publishing immediately.
+const EXECUTION_GRACE_PERIOD_MS = 30_000;
 let schedulerInitialized = false;
 let schedulerInitializationPromise: Promise<void> | null = null;
 
@@ -30,8 +34,26 @@ function clearScheduledTimer(postId: string): void {
 async function executeScheduledPost(postId: string): Promise<void> {
     clearScheduledTimer(postId);
 
-    const scheduledPost = await getScheduledPostById(postId);
+    let scheduledPost: ScheduledPost | null;
+    try {
+        scheduledPost = await getScheduledPostById(postId);
+    } catch (fetchError) {
+        schedulerLogger.error('SCHEDULER_FETCH_FAILED', 'Nie udało się odczytać zaplanowanego posta przed wysyłką.', { postId }, fetchError);
+        return;
+    }
+
     if (!scheduledPost || scheduledPost.status !== 'pending') {
+        return;
+    }
+
+    // If the post was rescheduled to a future time while this (now stale) timer was already
+    // queued in the event loop, re-register with the correct time instead of publishing early.
+    if (scheduledPost.scheduledFor > Date.now() + EXECUTION_GRACE_PERIOD_MS) {
+        schedulerLogger.info('SCHEDULER_STALE_TIMER', 'Timer uruchomił się dla przesuniętego posta — ponowna rejestracja.', {
+            postId,
+            scheduledFor: scheduledPost.scheduledFor,
+        });
+        schedulePendingPost(scheduledPost);
         return;
     }
 
@@ -129,7 +151,7 @@ function schedulePendingPost(post: ScheduledPost): void {
             ...existingPost,
             status: 'skipped',
             updatedAt: Date.now(),
-            lastError: 'Czas publikacji minął podczas restartu dashboardu.',
+            lastError: 'Czas publikacji minął przed wykonaniem (restart lub opóźnienie systemu).',
         }));
         return;
     }

@@ -9,6 +9,8 @@ let logWriteLock = Promise.resolve();
 
 export interface LogContext {
     actorUserId?: string;
+    actorUserName?: string;
+    actorUserRole?: string;
     targetUserId?: string;
     guildId?: string;
     requestId?: string;
