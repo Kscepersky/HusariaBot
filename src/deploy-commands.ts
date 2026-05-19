@@ -15,6 +15,9 @@ import { leaderboardXpCommand } from './commands/leaderboard-xp.js';
 import { stankontaCommand } from './commands/stankonta.js';
 import { levelCommand } from './commands/level.js';
 import { muteCommand } from './commands/mute.js';
+import { sklepCommand } from './commands/sklep.js';
+import { kupCommand } from './commands/kup.js';
+import { zamowieniaCommand } from './commands/zamowienia.js';
 
 config();
 
@@ -48,6 +51,9 @@ const commands = [
     stankontaCommand.data.toJSON(),
     levelCommand.data.toJSON(),
     muteCommand.data.toJSON(),
+    sklepCommand.data.toJSON(),
+    kupCommand.data.toJSON(),
+    zamowieniaCommand.data.toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(token);

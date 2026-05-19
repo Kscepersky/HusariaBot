@@ -50,7 +50,12 @@ import { handleEconomyLeaderboardButton } from './economy/leaderboard-buttons.js
 import { handleEconomyMessageCreate, startEconomyVoiceXpTicker } from './economy/runtime.js';
 import { recordMemberJoin, recordMemberLeave, recordMemberSnapshot } from './economy/stats-store.js';
 import { startTimeoutExpiryTicker } from './timeouts/runtime.js';
+import { sklepCommand } from './commands/sklep.js';
+import { kupCommand } from './commands/kup.js';
+import { zamowieniaCommand } from './commands/zamowienia.js';
+import { handleShopButton } from './shop/shop-buttons.js';
 import { createLogger } from './utils/logger.js';
+import { setBotClient } from './bot-client.js';
 // Załaduj zmienne środowiskowe z .env
 config();
 
@@ -86,7 +91,7 @@ declare module 'discord.js' {
     }
 }
 
-// Stwórz klienta Discord
+// Stwórz klienta Discord i zarejestruj singleton
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -96,6 +101,8 @@ const client = new Client({
         GatewayIntentBits.GuildMembers,
     ],
 });
+
+setBotClient(client);
 
 // Zarejestruj komendy w kolekcji
 client.commands = new Collection();
@@ -114,6 +121,9 @@ client.commands.set(leaderboardXpCommand.data.name, leaderboardXpCommand);
 client.commands.set(stankontaCommand.data.name, stankontaCommand);
 client.commands.set(levelCommand.data.name, levelCommand);
 client.commands.set(muteCommand.data.name, muteCommand);
+client.commands.set(sklepCommand.data.name, sklepCommand);
+client.commands.set(kupCommand.data.name, kupCommand);
+client.commands.set(zamowieniaCommand.data.name, zamowieniaCommand);
 
 // Event: Bot jest gotowy
 client.on('clientReady', () => {
@@ -249,6 +259,10 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             if (await handleEconomyLeaderboardButton(interaction)) {
+                return;
+            }
+
+            if (await handleShopButton(interaction)) {
                 return;
             }
 

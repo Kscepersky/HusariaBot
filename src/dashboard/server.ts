@@ -8,6 +8,7 @@ import { authRouter }  from './routes/auth.js';
 import { apiRouter }   from './routes/api.js';
 import { scheduledRouter } from './routes/scheduled.js';
 import { g2MatchesRouter } from './routes/g2-matches.js';
+import { shopApiRouter } from './routes/api.shop.js';
 import { pagesRouter } from './routes/pages.js';
 import { ensureCsrfTokenForSession, requireCsrfToken } from './middleware/csrf.js';
 import { authRateLimiter, globalRateLimiter, mutationRateLimiter } from './middleware/rate-limit.js';
@@ -233,6 +234,7 @@ export function createDashboardApp() {
     app.use('/api',  apiRouter);
     app.use('/api/scheduled', scheduledRouter);
     app.use('/api/g2-matches', g2MatchesRouter);
+    app.use('/api/shop', shopApiRouter);
     app.use('/',     pagesRouter);
 
     app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {

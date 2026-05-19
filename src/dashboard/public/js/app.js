@@ -157,6 +157,27 @@ let g2FilterOptions = {
   statuses: [],
 }
 let g2SyncMeta = null
+
+let shopSectionBound = false
+let shopActiveTab = 'items'
+let shopItems = []
+let shopItemsPage = 1
+let shopItemsTotalPages = 1
+let shopItemsTotalItems = 0
+let shopItemsIncludeInactive = false
+let shopItemsLoadRequestId = 0
+let shopEditingItemId = null
+let shopOrders = []
+let shopOrdersPage = 1
+let shopOrdersTotalPages = 1
+let shopOrdersTotalItems = 0
+let shopOrdersStatusFilter = 'all'
+let shopOrdersUserFilter = ''
+let shopOrdersUserFilterDebounceId = null
+let shopOrdersLoadRequestId = 0
+let shopExpandedOrderId = null
+/** @type {Map<string, {displayName: string, avatarUrl: string|null}>} */
+let shopMemberProfiles = new Map()
 let g2RefreshInProgress = false
 let g2RefreshCooldownMs = 30000
 let g2FilterDebounceId = null
@@ -448,6 +469,10 @@ function switchSection(section) {
   if (section === 'server-stats') {
     initStatsSectionIfNeeded()
     void loadActiveStatsTab()
+  }
+
+  if (section === 'shop') {
+    void initShopSection()
   }
 
   if (typeof window.onDashboardSectionChanged === 'function') {
@@ -7085,5 +7110,500 @@ async function saveStatsExcludedChannels() {
       setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'stats-save-status' }, 3000)
     }
     showToast(`❌ ${msg}`, 'error')
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  SHOP SECTION
+// ═══════════════════════════════════════════════════════
+
+async function initShopSection() {
+  if (!shopSectionBound) {
+    shopSectionBound = true
+    bindShopSectionListeners()
+  }
+
+  renderShopItems()
+  renderShopOrders()
+  await loadShopItems({ silent: true })
+}
+
+function bindShopSectionListeners() {
+  // Tab switching
+  document.querySelectorAll('[data-shop-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.shopTab
+      if (!tab || tab === shopActiveTab) return
+      shopActiveTab = tab
+      document.querySelectorAll('[data-shop-tab]').forEach((b) => b.classList.toggle('active', b.dataset.shopTab === tab))
+      document.querySelectorAll('#shop-tab-items, #shop-tab-orders').forEach((p) => {
+        p.classList.toggle('active', p.id === `shop-tab-${tab}`)
+      })
+      if (tab === 'orders') void loadShopOrders({ silent: false })
+    })
+  })
+
+  // Items tab
+  document.getElementById('shop-add-item-btn')?.addEventListener('click', () => openShopItemForm(null))
+  document.getElementById('shop-items-refresh-btn')?.addEventListener('click', () => void loadShopItems({ silent: false }))
+  document.getElementById('shop-items-include-inactive')?.addEventListener('change', (e) => {
+    shopItemsIncludeInactive = e.target.checked
+    shopItemsPage = 1
+    void loadShopItems({ silent: false })
+  })
+  document.getElementById('shop-items-prev-btn')?.addEventListener('click', () => {
+    if (shopItemsPage <= 1) return
+    void loadShopItems({ page: shopItemsPage - 1, silent: true })
+  })
+  document.getElementById('shop-items-next-btn')?.addEventListener('click', () => {
+    if (shopItemsPage >= shopItemsTotalPages) return
+    void loadShopItems({ page: shopItemsPage + 1, silent: true })
+  })
+
+  // Item form
+  document.getElementById('shop-form-cancel-btn')?.addEventListener('click', () => closeShopItemForm())
+  document.getElementById('shop-form-submit-btn')?.addEventListener('click', () => void submitShopItemForm())
+
+  // Orders tab
+  document.getElementById('shop-orders-refresh-btn')?.addEventListener('click', () => void loadShopOrders({ silent: false }))
+  document.getElementById('shop-orders-status-filter')?.addEventListener('change', (e) => {
+    shopOrdersStatusFilter = String(e.target.value ?? 'all')
+    shopOrdersPage = 1
+    void loadShopOrders({ silent: true })
+  })
+  document.getElementById('shop-orders-user-filter')?.addEventListener('input', (e) => {
+    const val = String(e.target.value ?? '').trim()
+    shopOrdersUserFilter = /^\d{17,20}$/.test(val) ? val : ''
+    shopOrdersPage = 1
+    clearTimeout(shopOrdersUserFilterDebounceId)
+    shopOrdersUserFilterDebounceId = setTimeout(() => void loadShopOrders({ silent: true }), 400)
+  })
+  document.getElementById('shop-orders-prev-btn')?.addEventListener('click', () => {
+    if (shopOrdersPage <= 1) return
+    void loadShopOrders({ page: shopOrdersPage - 1, silent: true })
+  })
+  document.getElementById('shop-orders-next-btn')?.addEventListener('click', () => {
+    if (shopOrdersPage >= shopOrdersTotalPages) return
+    void loadShopOrders({ page: shopOrdersPage + 1, silent: true })
+  })
+
+  // Event delegation for dynamically rendered item buttons
+  document.getElementById('shop-items-list')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]')
+    if (!btn) return
+    const action = btn.dataset.action
+    const itemId = Number(btn.dataset.itemId)
+    if (action === 'edit-item') openShopItemForm(itemId)
+    else if (action === 'delete-item') void deleteShopItem(itemId, btn.dataset.itemName ?? '')
+  })
+
+  // Event delegation for dynamically rendered order buttons
+  document.getElementById('shop-orders-list')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]')
+    if (!btn) return
+    const action = btn.dataset.action
+    if (action === 'copy-userid') {
+      void navigator.clipboard?.writeText(btn.dataset.userid ?? '')
+      showToast('UserID skopiowany do schowka.', 'success')
+      return
+    }
+    const orderId = Number(btn.dataset.orderId)
+    if (action === 'toggle-order') toggleShopOrderExpand(orderId)
+    else if (action === 'complete-order') void completeShopOrder(orderId)
+    else if (action === 'cancel-order') void confirmCancelOrder(orderId)
+  })
+}
+
+async function loadShopItems({ page = shopItemsPage, silent = false } = {}) {
+  const requestId = ++shopItemsLoadRequestId
+  if (!silent) {
+    const list = document.getElementById('shop-items-list')
+    if (list) list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+  }
+
+  try {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: '20',
+      includeInactive: String(shopItemsIncludeInactive),
+    })
+    const response = await fetch(`/api/shop/items?${params}`)
+    if (requestId !== shopItemsLoadRequestId) return
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      showToast(payload.error ?? 'Nie udało się pobrać przedmiotów.', 'error')
+      return
+    }
+
+    const data = payload.data
+    shopItems = data.items ?? []
+    shopItemsPage = data.page ?? 1
+    shopItemsTotalPages = data.totalPages ?? 1
+    shopItemsTotalItems = data.total ?? 0
+    renderShopItems()
+  } catch {
+    if (requestId !== shopItemsLoadRequestId) return
+    showToast('Błąd sieci podczas pobierania przedmiotów.', 'error')
+  }
+}
+
+function renderShopItems() {
+  const list = document.getElementById('shop-items-list')
+  const countLabel = document.getElementById('shop-items-count-label')
+  const pageLabel = document.getElementById('shop-items-page-label')
+  const pagination = document.getElementById('shop-items-pagination')
+  const prevBtn = document.getElementById('shop-items-prev-btn')
+  const nextBtn = document.getElementById('shop-items-next-btn')
+
+  if (!list) return
+
+  if (countLabel) countLabel.textContent = `Przedmioty: ${shopItemsTotalItems}`
+  if (pageLabel) pageLabel.textContent = `Strona ${shopItemsPage}/${shopItemsTotalPages}`
+  if (pagination) pagination.hidden = shopItemsTotalPages <= 1
+  if (prevBtn instanceof HTMLButtonElement) prevBtn.disabled = shopItemsPage <= 1
+  if (nextBtn instanceof HTMLButtonElement) nextBtn.disabled = shopItemsPage >= shopItemsTotalPages
+
+  if (shopItems.length === 0) {
+    list.innerHTML = '<div class="scheduled-empty">Brak przedmiotów w sklepie.</div>'
+    return
+  }
+
+  list.innerHTML = shopItems.map((item) => {
+    const statusChip = item.isActive
+      ? '<span class="scheduled-chip" style="background:#43b581;color:#fff;">Aktywny</span>'
+      : '<span class="scheduled-chip" style="background:#72767d;color:#fff;">Nieaktywny</span>'
+    const stockValue = item.stock === 0 ? 'Nieograniczona' : String(item.stock)
+    const stockColor = !item.isActive ? '#72767d' : item.stock === 0 ? '#43b581' : item.stock < 5 ? '#faa61a' : '#43b581'
+    const stockChip = `<span class="scheduled-chip" style="border-color:${stockColor}40;color:${stockColor};">Ilość: ${escapeHtml(stockValue)}</span>`
+    const maxPerUserText = item.maxPerUser === 0 ? 'Brak limitu' : `Max ${item.maxPerUser}/user`
+    return `
+      <article class="scheduled-card" data-item-id="${item.id}">
+        <div class="scheduled-card-header">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <span class="scheduled-chip" style="font-size:11px;color:var(--text-muted);flex-shrink:0;">#${item.id}</span>
+            <span class="scheduled-card-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(item.name)}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+            ${statusChip}
+            <button class="btn-secondary" style="padding:2px 10px;font-size:12px;" data-action="edit-item" data-item-id="${item.id}">✏️ Edytuj</button>
+            <button class="btn-danger" style="padding:2px 10px;font-size:12px;" data-action="delete-item" data-item-id="${item.id}" data-item-name="${escapeHtml(item.name)}">🗑 Usuń</button>
+          </div>
+        </div>
+        <div class="scheduled-card-meta">
+          <span class="scheduled-chip leaderboard-chip-coins">💰 ${item.price} 🧅</span>
+          ${stockChip}
+          <span class="scheduled-chip">${escapeHtml(maxPerUserText)}</span>
+        </div>
+        ${item.description ? `<div style="font-size:13px;color:var(--text-secondary);line-height:1.4;">${escapeHtml(item.description)}</div>` : ''}
+      </article>`
+  }).join('')
+}
+
+function openShopItemForm(itemId) {
+  shopEditingItemId = itemId
+  const formCard = document.getElementById('shop-item-form-card')
+  const title = document.getElementById('shop-form-title')
+  const statusEl = document.getElementById('shop-form-status')
+
+  if (!formCard) return
+
+  if (itemId === null) {
+    if (title) title.textContent = '➕ Dodaj przedmiot'
+    document.getElementById('shop-form-name').value = ''
+    document.getElementById('shop-form-description').value = ''
+    document.getElementById('shop-form-price').value = ''
+    document.getElementById('shop-form-stock').value = ''
+    document.getElementById('shop-form-max-per-user').value = '0'
+    document.getElementById('shop-form-is-active').checked = true
+  } else {
+    const item = shopItems.find((i) => i.id === itemId)
+    if (!item) return
+    if (title) title.textContent = `✏️ Edytuj przedmiot #${item.id}`
+    document.getElementById('shop-form-name').value = item.name
+    document.getElementById('shop-form-description').value = item.description
+    document.getElementById('shop-form-price').value = String(item.price)
+    document.getElementById('shop-form-stock').value = String(item.stock)
+    document.getElementById('shop-form-max-per-user').value = String(item.maxPerUser)
+    document.getElementById('shop-form-is-active').checked = item.isActive
+  }
+
+  if (statusEl) statusEl.textContent = ''
+  formCard.style.display = ''
+  formCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+}
+
+function closeShopItemForm() {
+  shopEditingItemId = null
+  const formCard = document.getElementById('shop-item-form-card')
+  if (formCard) formCard.style.display = 'none'
+}
+
+async function submitShopItemForm() {
+  const nameEl = document.getElementById('shop-form-name')
+  const descEl = document.getElementById('shop-form-description')
+  const priceEl = document.getElementById('shop-form-price')
+  const stockEl = document.getElementById('shop-form-stock')
+  const maxPerUserEl = document.getElementById('shop-form-max-per-user')
+  const isActiveEl = document.getElementById('shop-form-is-active')
+  const statusEl = document.getElementById('shop-form-status')
+  const submitBtn = document.getElementById('shop-form-submit-btn')
+
+  const name = String(nameEl?.value ?? '').trim()
+  const description = String(descEl?.value ?? '').trim()
+  const price = Number.parseInt(String(priceEl?.value ?? ''), 10)
+  const stock = Number.parseInt(String(stockEl?.value ?? ''), 10)
+  const maxPerUser = Number.parseInt(String(maxPerUserEl?.value ?? '0'), 10)
+  const isActive = Boolean(isActiveEl?.checked)
+
+  if (!name || name.length < 1) {
+    if (statusEl) statusEl.textContent = '⚠ Podaj nazwę przedmiotu.'
+    return
+  }
+  if (!Number.isFinite(price) || price < 1) {
+    if (statusEl) statusEl.textContent = '⚠ Podaj prawidłową cenę (min. 1).'
+    return
+  }
+  if (!Number.isFinite(stock) || stock < 0) {
+    if (statusEl) statusEl.textContent = '⚠ Podaj prawidłową ilość (min. 0).'
+    return
+  }
+  if (!Number.isFinite(maxPerUser) || maxPerUser < 0) {
+    if (statusEl) statusEl.textContent = '⚠ Podaj prawidłowy limit na użytkownika (min. 0).'
+    return
+  }
+
+  if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = true
+  if (statusEl) statusEl.textContent = 'Zapisywanie...'
+
+  const body = { name, description, price, stock, maxPerUser, isActive }
+  const isEditing = shopEditingItemId !== null
+
+  try {
+    const response = await fetchWithCsrf(
+      isEditing ? `/api/shop/items/${shopEditingItemId}` : '/api/shop/items',
+      { method: isEditing ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    )
+    const payload = await parseApiResponse(response)
+
+    if (!response.ok) {
+      if (statusEl) statusEl.textContent = `⚠ ${payload.error ?? 'Błąd serwera.'}`
+      showToast(payload.error ?? 'Nie udało się zapisać przedmiotu.', 'error')
+      return
+    }
+
+    showToast(isEditing ? '✅ Przedmiot zaktualizowany.' : '✅ Przedmiot dodany.', 'success')
+    closeShopItemForm()
+    void loadShopItems({ page: isEditing ? shopItemsPage : 1, silent: true })
+  } catch {
+    if (statusEl) statusEl.textContent = '⚠ Błąd sieci.'
+    showToast('Błąd sieci podczas zapisywania przedmiotu.', 'error')
+  } finally {
+    if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false
+  }
+}
+
+async function deleteShopItem(itemId, itemName) {
+  if (!confirm(`Czy na pewno chcesz usunąć przedmiot "${itemName}"? Tej operacji nie można cofnąć.`)) return
+
+  try {
+    const response = await fetchWithCsrf(`/api/shop/items/${itemId}`, { method: 'DELETE' })
+    const payload = await parseApiResponse(response)
+
+    if (response.status === 409) {
+      showToast('Nie można usunąć — przedmiot ma aktywne zamówienia.', 'error')
+      return
+    }
+
+    if (!response.ok) {
+      showToast(payload.error ?? 'Nie udało się usunąć przedmiotu.', 'error')
+      return
+    }
+
+    showToast('✅ Przedmiot usunięty.', 'success')
+    void loadShopItems({ silent: true })
+  } catch {
+    showToast('Błąd sieci podczas usuwania przedmiotu.', 'error')
+  }
+}
+
+async function loadShopOrders({ page = shopOrdersPage, silent = false } = {}) {
+  const requestId = ++shopOrdersLoadRequestId
+  if (!silent) {
+    const list = document.getElementById('shop-orders-list')
+    if (list) list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+  }
+
+  try {
+    const params = new URLSearchParams({ page: String(page), pageSize: '20', status: shopOrdersStatusFilter })
+    if (shopOrdersUserFilter) params.set('userId', shopOrdersUserFilter)
+
+    const response = await fetch(`/api/shop/orders?${params}`)
+    if (requestId !== shopOrdersLoadRequestId) return
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      showToast(payload.error ?? 'Nie udało się pobrać zamówień.', 'error')
+      return
+    }
+
+    const data = payload.data
+    shopOrders = data.orders ?? []
+    shopOrdersPage = data.page ?? 1
+    shopOrdersTotalPages = data.totalPages ?? 1
+    shopOrdersTotalItems = data.total ?? 0
+
+    const unknownIds = [...new Set(shopOrders.map((o) => o.userId))].filter((id) => !shopMemberProfiles.has(id))
+    if (unknownIds.length > 0) {
+      try {
+        const profRes = await fetch(`/api/members/by-ids?ids=${unknownIds.join(',')}`)
+        if (requestId !== shopOrdersLoadRequestId) return
+        const profPayload = await profRes.json()
+        for (const m of profPayload.members ?? []) {
+          shopMemberProfiles.set(m.id, { displayName: m.displayName, avatarUrl: m.avatarUrl ?? null })
+        }
+      } catch { /* profiles are optional — fall back to ID display */ }
+    }
+
+    if (requestId !== shopOrdersLoadRequestId) return
+    renderShopOrders()
+  } catch {
+    if (requestId !== shopOrdersLoadRequestId) return
+    showToast('Błąd sieci podczas pobierania zamówień.', 'error')
+  }
+}
+
+function renderShopOrders() {
+  const list = document.getElementById('shop-orders-list')
+  const countLabel = document.getElementById('shop-orders-count-label')
+  const pageLabel = document.getElementById('shop-orders-page-label')
+  const pagination = document.getElementById('shop-orders-pagination')
+  const prevBtn = document.getElementById('shop-orders-prev-btn')
+  const nextBtn = document.getElementById('shop-orders-next-btn')
+
+  if (!list) return
+
+  if (countLabel) countLabel.textContent = `Zamówienia: ${shopOrdersTotalItems}`
+  if (pageLabel) pageLabel.textContent = `Strona ${shopOrdersPage}/${shopOrdersTotalPages}`
+  if (pagination) pagination.hidden = shopOrdersTotalPages <= 1
+  if (prevBtn instanceof HTMLButtonElement) prevBtn.disabled = shopOrdersPage <= 1
+  if (nextBtn instanceof HTMLButtonElement) nextBtn.disabled = shopOrdersPage >= shopOrdersTotalPages
+
+  if (shopOrders.length === 0) {
+    list.innerHTML = '<div class="scheduled-empty">Brak zamówień dla wybranych filtrów.</div>'
+    return
+  }
+
+  list.innerHTML = shopOrders.map((order) => {
+    const statusChip = shopOrderStatusChip(order.status)
+    const dateStr = formatTimestampInWarsaw(order.createdAt)
+    const isExpanded = shopExpandedOrderId === order.id
+
+    const cancelForm = isExpanded && order.status === 'pending'
+      ? `<div style="margin-top:10px;">
+          <label style="display:block;font-size:12px;color:var(--text-secondary);margin-bottom:4px;">Powód anulowania (wymagany):</label>
+          <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;">
+            <input type="text" class="form-input" id="shop-cancel-reason-${order.id}" maxlength="500" placeholder="Podaj powód anulowania..." style="flex:1;min-width:180px;">
+            <button class="btn-danger" data-action="cancel-order" data-order-id="${order.id}">🚫 Anuluj zamówienie</button>
+          </div>
+         </div>`
+      : ''
+
+    const profile = shopMemberProfiles.get(String(order.userId))
+    const avatarHtml = profile?.avatarUrl
+      ? `<img class="leaderboard-avatar" src="${escapeHtml(profile.avatarUrl)}" alt="" loading="lazy">`
+      : `<span class="leaderboard-avatar leaderboard-avatar-placeholder">${escapeHtml(((profile?.displayName ?? String(order.userId))[0] ?? '?').toUpperCase())}</span>`
+    const userHtml = `<div class="leaderboard-user-main" style="gap:8px;">
+      ${avatarHtml}
+      <div>
+        <div style="font-weight:600;font-size:13px;color:var(--text-primary);">${escapeHtml(profile?.displayName ?? String(order.userId))}</div>
+        <div style="font-size:11px;color:var(--text-muted);cursor:pointer;" title="Kliknij aby skopiować UserID" data-action="copy-userid" data-userid="${escapeHtml(String(order.userId))}">${escapeHtml(String(order.userId))}</div>
+      </div>
+    </div>`
+
+    return `
+      <article class="scheduled-card" id="shop-order-card-${order.id}">
+        <div class="scheduled-card-header">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <span class="scheduled-card-title">Zamówienie #${order.id}</span>
+            ${statusChip}
+          </div>
+          <button class="btn-secondary" style="padding:2px 10px;font-size:12px;flex-shrink:0;" data-action="toggle-order" data-order-id="${order.id}">${isExpanded ? 'Zwiń ▲' : 'Rozwiń ▼'}</button>
+        </div>
+        <div class="scheduled-card-meta" style="align-items:center;">
+          ${userHtml}
+          <span class="scheduled-chip leaderboard-chip-coins">🛍 ${escapeHtml(order.itemNameSnapshot)} · ${order.itemPriceSnapshot} 🧅</span>
+          <span class="scheduled-chip">📅 ${escapeHtml(dateStr)}</span>
+        </div>
+        ${isExpanded && order.status === 'pending' ? `<div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn-primary" data-action="complete-order" data-order-id="${order.id}">✅ Zrealizuj zamówienie</button>
+        </div>` : ''}
+        ${cancelForm}
+      </article>`
+  }).join('')
+}
+
+function shopOrderStatusChip(status) {
+  if (status === 'pending') return '<span class="scheduled-chip" style="background:#faa61a;color:#000;">Złożone</span>'
+  if (status === 'completed') return '<span class="scheduled-chip" style="background:#43b581;color:#fff;">Zrealizowane</span>'
+  if (status === 'cancelled') return '<span class="scheduled-chip" style="background:#ed4245;color:#fff;">Anulowane</span>'
+  return `<span class="scheduled-chip">${escapeHtml(status)}</span>`
+}
+
+function toggleShopOrderExpand(orderId) {
+  shopExpandedOrderId = shopExpandedOrderId === orderId ? null : orderId
+  renderShopOrders()
+}
+
+async function completeShopOrder(orderId) {
+  if (!confirm(`Czy na pewno chcesz zrealizować zamówienie #${orderId}?`)) return
+
+  try {
+    const response = await fetchWithCsrf(`/api/shop/orders/${orderId}/complete`, { method: 'POST' })
+    const payload = await parseApiResponse(response)
+
+    if (!response.ok) {
+      showToast(payload.error ?? 'Nie udało się zrealizować zamówienia.', 'error')
+      return
+    }
+
+    showToast(`✅ Zamówienie #${orderId} zrealizowane.`, 'success')
+    shopExpandedOrderId = null
+    void loadShopOrders({ silent: true })
+  } catch {
+    showToast('Błąd sieci podczas realizacji zamówienia.', 'error')
+  }
+}
+
+async function confirmCancelOrder(orderId) {
+  const reasonEl = document.getElementById(`shop-cancel-reason-${orderId}`)
+  const reason = String(reasonEl?.value ?? '').trim()
+  if (!reason) {
+    showToast('Podaj powód anulowania.', 'error')
+    reasonEl?.focus()
+    return
+  }
+
+  if (!confirm(`Czy na pewno chcesz anulować zamówienie #${orderId}? Użytkownik otrzyma zwrot cebulionów.`)) return
+
+  try {
+    const response = await fetchWithCsrf(`/api/shop/orders/${orderId}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
+    const payload = await parseApiResponse(response)
+
+    if (!response.ok) {
+      showToast(payload.error ?? 'Nie udało się anulować zamówienia.', 'error')
+      return
+    }
+
+    const refunded = payload.data?.refunded ?? false
+    showToast(`✅ Zamówienie #${orderId} anulowane.${refunded ? ' Coins zwrócone.' : ''}`, 'success')
+    shopExpandedOrderId = null
+    void loadShopOrders({ silent: true })
+  } catch {
+    showToast('Błąd sieci podczas anulowania zamówienia.', 'error')
   }
 }

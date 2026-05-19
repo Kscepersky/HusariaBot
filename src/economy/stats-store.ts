@@ -180,6 +180,7 @@ export async function recordMemberSnapshot(
     memberCount: number,
     nowTimestamp: number,
 ): Promise<void> {
+    if (memberCount <= 0) return;
     const db = await getEconomyDatabase();
     const dateStr = new Date(nowTimestamp).toISOString().slice(0, 10);
     await db.run(
@@ -458,18 +459,27 @@ export async function getMemberSummary(
 ): Promise<ServerStatsMemberSummary> {
     const db = await getEconomyDatabase();
 
-    const row = await db.get<{ joins: number; leaves: number; latest_member_count: number }>(
-        `SELECT SUM(joins) AS joins, SUM(leaves) AS leaves,
-                MAX(member_count) AS latest_member_count
-         FROM daily_member_counts
-         WHERE guild_id = ? AND date >= ? AND date <= ?`,
-        guildId, startDate, endDate,
-    );
+    const [activityRow, countRow] = await Promise.all([
+        db.get<{ joins: number; leaves: number }>(
+            `SELECT SUM(joins) AS joins, SUM(leaves) AS leaves
+             FROM daily_member_counts
+             WHERE guild_id = ? AND date >= ? AND date <= ?`,
+            guildId, startDate, endDate,
+        ),
+        db.get<{ member_count: number }>(
+            `SELECT member_count
+             FROM daily_member_counts
+             WHERE guild_id = ? AND member_count > 0
+             ORDER BY date DESC
+             LIMIT 1`,
+            guildId,
+        ),
+    ]);
 
     return {
-        totalJoins: Number(row?.joins ?? 0),
-        totalLeaves: Number(row?.leaves ?? 0),
-        latestMemberCount: Number(row?.latest_member_count ?? 0),
+        totalJoins: Number(activityRow?.joins ?? 0),
+        totalLeaves: Number(activityRow?.leaves ?? 0),
+        latestMemberCount: Number(countRow?.member_count ?? 0),
     };
 }
 

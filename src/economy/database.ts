@@ -108,6 +108,49 @@ async function ensureEconomyUserColumns(db: Database): Promise<void> {
     }
 }
 
+async function ensureShopTables(db: Database): Promise<void> {
+    await db.exec(`
+        CREATE TABLE IF NOT EXISTS shop_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            price INTEGER NOT NULL CHECK (price > 0),
+            stock INTEGER NOT NULL CHECK (stock >= 0),
+            max_per_user INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            extra_info_types TEXT NOT NULL DEFAULT '[]',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS shop_orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            item_id INTEGER NOT NULL,
+            item_name_snapshot TEXT NOT NULL,
+            item_price_snapshot INTEGER NOT NULL,
+            extra_info TEXT,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'completed', 'cancelled')),
+            cancelled_by_user_id TEXT,
+            cancel_reason TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (item_id) REFERENCES shop_items(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_shop_orders_guild_status
+            ON shop_orders(guild_id, status);
+
+        CREATE INDEX IF NOT EXISTS idx_shop_orders_user
+            ON shop_orders(guild_id, user_id, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_shop_orders_created
+            ON shop_orders(created_at);
+    `);
+}
+
 async function initializeSchema(db: Database): Promise<void> {
     await db.exec('PRAGMA journal_mode = WAL;');
 
@@ -292,6 +335,7 @@ async function initializeSchema(db: Database): Promise<void> {
 
     await ensureEconomyConfigColumns(db);
     await ensureEconomyUserColumns(db);
+    await ensureShopTables(db);
 
     const now = Date.now();
     const defaultDailyMessages = JSON.stringify([

@@ -94,6 +94,7 @@ export interface DiscordChannel {
     type: number;
     position: number;
     parent_id: string | null;
+    topic?: string | null;
 }
 
 export interface DiscordRole {
@@ -1098,3 +1099,4 @@ export async function getGuildAllChannels(guildId: string): Promise<DiscordChann
 export function invalidateGuildMemberCache(guildId: string, userId: string): void {
     guildMemberCache.delete(`${guildId}:${userId}`);
 }
+

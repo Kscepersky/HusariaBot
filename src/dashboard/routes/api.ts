@@ -1362,7 +1362,11 @@ apiRouter.get('/members/by-ids', requireCurrentDashboardRole, async (req, res) =
                 const member = await getGuildMember(id, guildId);
                 if (!member) return null;
                 const displayName = member.nick ?? member.user?.global_name ?? member.user?.username ?? id;
-                return { id, displayName };
+                const avatarHash = member.user?.avatar ?? null;
+                const avatarUrl = avatarHash
+                    ? `https://cdn.discordapp.com/avatars/${encodeURIComponent(id)}/${encodeURIComponent(avatarHash)}.png?size=64`
+                    : null;
+                return { id, displayName, avatarUrl };
             }),
         );
 

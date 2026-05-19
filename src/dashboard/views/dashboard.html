@@ -54,6 +54,10 @@
         <span class="sidebar-icon">🏆</span>
         <span>Leaderboard ekonomii</span>
       </a>
+      <a href="#" class="sidebar-item" data-section="shop">
+        <span class="sidebar-icon">🛒</span>
+        <span>Sklep</span>
+      </a>
       <a href="#" class="sidebar-item" data-section="timeouts-system">
         <span class="sidebar-icon">🔇</span>
         <span>System timeoutow</span>
@@ -1126,6 +1130,110 @@
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
             <button class="btn-danger" id="stats-reset-btn">Resetuj wszystkie statystyki</button>
             <span id="stats-reset-status" style="font-size:0.85em;color:#ccc;"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="section-shop" class="section-panel">
+      <div class="section-header">
+        <h2>🛒 Sklep</h2>
+        <p>Zarządzaj przedmiotami w sklepie oraz realizuj zamówienia użytkowników.</p>
+      </div>
+
+      <div class="stats-tabs-nav">
+        <button class="stats-tab-btn active" data-shop-tab="items">📦 Przedmioty</button>
+        <button class="stats-tab-btn" data-shop-tab="orders">📋 Zamówienia</button>
+      </div>
+
+      <!-- ───── TAB: Przedmioty ───── -->
+      <div class="stats-tab-panel active" id="shop-tab-items">
+        <div class="creator-form-card" id="shop-item-form-card" style="display:none;">
+          <div class="section-header">
+            <h3 id="shop-form-title">➕ Dodaj przedmiot</h3>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 20px;margin-bottom:16px;">
+            <div class="form-group">
+              <label class="form-label">Nazwa</label>
+              <input type="text" class="form-input" id="shop-form-name" maxlength="100" placeholder="Nazwa przedmiotu...">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cena (cebuliony 🧅)</label>
+              <input type="number" class="form-input" id="shop-form-price" min="1" max="10000000" placeholder="100">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Ilość (0 = nieograniczona)</label>
+              <input type="number" class="form-input" id="shop-form-stock" min="0" max="100000" placeholder="10">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Max na użytkownika (0 = brak limitu)</label>
+              <input type="number" class="form-input" id="shop-form-max-per-user" min="0" max="10000" placeholder="1">
+            </div>
+            <div class="form-group" style="grid-column:1/-1;">
+              <label class="form-label">Opis</label>
+              <textarea class="form-input" id="shop-form-description" maxlength="500" rows="3" placeholder="Krótki opis przedmiotu..."></textarea>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Status</label>
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:6px;">
+                <input type="checkbox" id="shop-form-is-active" checked>
+                <span style="font-size:13px;">Aktywny (widoczny i dostępny do zakupu)</span>
+              </label>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn-primary" id="shop-form-submit-btn">Zapisz</button>
+            <button class="btn-secondary" id="shop-form-cancel-btn">Anuluj</button>
+            <span id="shop-form-status" style="font-size:0.85em;color:var(--text-muted);"></span>
+          </div>
+        </div>
+
+        <div class="creator-form-card">
+          <div class="scheduled-toolbar">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button class="btn-primary" id="shop-add-item-btn">➕ Dodaj przedmiot</button>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text-muted);">
+                <input type="checkbox" id="shop-items-include-inactive">
+                <span>Pokaż nieaktywne</span>
+              </label>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <span class="preview-note" id="shop-items-count-label">Przedmioty: 0</span>
+              <button class="btn-secondary" id="shop-items-refresh-btn" type="button">Odśwież</button>
+            </div>
+          </div>
+          <div id="shop-items-list" class="scheduled-list"></div>
+          <div class="scheduled-toolbar">
+            <div class="image-pagination" id="shop-items-pagination" hidden>
+              <button id="shop-items-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
+              <span class="preview-note" id="shop-items-page-label">Strona 1/1</span>
+              <button id="shop-items-next-btn" class="btn-secondary" type="button">Następna ➡</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───── TAB: Zamówienia ───── -->
+      <div class="stats-tab-panel" id="shop-tab-orders">
+        <div class="creator-form-card">
+          <div class="scheduled-toolbar image-library-toolbar" style="flex-wrap:wrap;gap:8px;">
+            <select class="form-select" id="shop-orders-status-filter" style="min-width:160px;">
+              <option value="all">Status: wszystkie</option>
+              <option value="pending">Złożone</option>
+              <option value="completed">Zrealizowane</option>
+              <option value="cancelled">Anulowane</option>
+            </select>
+            <input type="text" class="form-input" id="shop-orders-user-filter" placeholder="Filtruj po UserID..." style="max-width:220px;">
+            <button class="btn-secondary" id="shop-orders-refresh-btn" type="button">Odśwież</button>
+            <span class="preview-note" id="shop-orders-count-label">Zamówienia: 0</span>
+          </div>
+          <div id="shop-orders-list" class="scheduled-list"></div>
+          <div class="scheduled-toolbar">
+            <div class="image-pagination" id="shop-orders-pagination" hidden>
+              <button id="shop-orders-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
+              <span class="preview-note" id="shop-orders-page-label">Strona 1/1</span>
+              <button id="shop-orders-next-btn" class="btn-secondary" type="button">Następna ➡</button>
+            </div>
           </div>
         </div>
       </div>

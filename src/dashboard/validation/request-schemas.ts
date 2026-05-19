@@ -149,6 +149,28 @@ export const scheduledPayloadSchema = embedPayloadSchema.extend({
 
 export const scheduledSentEditPayloadSchema = embedPayloadSchema.strip();
 
+export const shopItemCreateSchema = z.object({
+    name: z.string().trim().min(1).max(100),
+    description: z.string().trim().min(1).max(500),
+    price: z.number().int().min(1).max(10_000_000),
+    stock: z.number().int().min(0).max(100_000),
+    maxPerUser: z.number().int().min(0).max(10_000),
+    isActive: z.boolean(),
+}).strip();
+
+export const shopItemUpdateSchema = z.object({
+    name: z.string().trim().min(1).max(100).optional(),
+    description: z.string().trim().min(1).max(500).optional(),
+    price: z.number().int().min(1).max(10_000_000).optional(),
+    stock: z.number().int().min(0).max(100_000).optional(),
+    maxPerUser: z.number().int().min(0).max(10_000).optional(),
+    isActive: z.boolean().optional(),
+}).strip();
+
+export const shopOrderCancelSchema = z.object({
+    reason: z.string().trim().min(1).max(500),
+}).strip();
+
 export function zodErrorToMessage(error: z.ZodError): string {
     const issue = error.issues[0];
     if (!issue) {
