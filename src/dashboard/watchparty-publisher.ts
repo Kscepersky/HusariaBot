@@ -107,7 +107,7 @@ export async function tryCreateWatchpartyChannelFromPayload(payload: EmbedFormDa
         const channelId = await createGuildVoiceChannel(guildId, {
             name: channelName,
             categoryId: categoryId || undefined,
-            initiallyOpen: true,
+            initiallyOpen: shouldOpenImmediately,
         });
         invalidateGuildChannelsCache(guildId);
 

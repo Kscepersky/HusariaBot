@@ -1254,7 +1254,8 @@ export async function importEconomyCsvSnapshot(input: {
                 seenUserIds.add(userId);
 
                 const level = parseCsvIntegerField(levelRaw, lineNumber, 'level', ECONOMY_MIN_LEVEL);
-                const totalXp = parseCsvIntegerField(totalXpRaw, lineNumber, 'totalxp', 0);
+                const xpInLevel = parseCsvIntegerField(totalXpRaw, lineNumber, 'xp_w_levelu', 0);
+                const totalXp = resolveXpSpentForLevel(level, config) + xpInLevel;
                 const messageCount = parseCsvIntegerField(messageCountRaw, lineNumber, 'messages', 0);
                 const voiceMinutes = parseCsvIntegerField(voiceMinutesRaw, lineNumber, 'voiceMinutes', 0);
 

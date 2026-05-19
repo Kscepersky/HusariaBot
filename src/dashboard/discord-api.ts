@@ -7,6 +7,7 @@ config();
 const DISCORD_API = 'https://discord.com/api/v10';
 const MANAGE_EVENTS_PERMISSION = 1n << 33n;
 const ADMINISTRATOR_PERMISSION = 1n << 3n;
+const MANAGE_CHANNELS_PERMISSION = 1n << 4n;
 const VIEW_CHANNEL_PERMISSION = 1n << 10n;
 const CONNECT_PERMISSION = 1n << 20n;
 const SPEAK_PERMISSION = 1n << 21n;
@@ -860,12 +861,21 @@ export async function createGuildVoiceChannel(
         throw new Error('Nazwa kanału watchparty jest wymagana.');
     }
 
+    const botUser = await getBotUser();
     const trimmedCategoryId = input.categoryId?.trim() ?? '';
     const body = {
         name: channelName,
         type: 2,
         ...(trimmedCategoryId && isValidDiscordId(trimmedCategoryId) ? { parent_id: trimmedCategoryId } : {}),
-        permission_overwrites: [buildWatchpartyPermissionOverwrite(guildId, input.initiallyOpen === true)],
+        permission_overwrites: [
+            buildWatchpartyPermissionOverwrite(guildId, input.initiallyOpen === true),
+            {
+                id: botUser.id,
+                type: 1,
+                allow: MANAGE_CHANNELS_PERMISSION.toString(),
+                deny: '0',
+            },
+        ],
     };
 
     const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/channels`, {

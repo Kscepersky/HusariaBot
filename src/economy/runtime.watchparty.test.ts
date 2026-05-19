@@ -15,6 +15,12 @@ vi.mock('../dashboard/scheduler/store.js', () => ({
     listScheduledPosts: vi.fn(),
 }));
 
+vi.mock('./stats-store.js', () => ({
+    getStatsExcludedChannelIds: vi.fn().mockResolvedValue([]),
+    incrementChannelMessageStats: vi.fn(),
+    incrementChannelVoiceStats: vi.fn(),
+}));
+
 import {
     awardVoiceXp,
     awardWatchpartyVoiceActivity,

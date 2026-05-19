@@ -4,6 +4,7 @@ vi.mock('./discord-api.js', () => ({
     createGuildVoiceChannel: vi.fn(),
     updateChannelRolePermissions: vi.fn(),
     deleteGuildChannel: vi.fn(),
+    invalidateGuildChannelsCache: vi.fn(),
 }));
 
 import {
