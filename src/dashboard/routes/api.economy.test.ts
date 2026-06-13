@@ -96,15 +96,6 @@ vi.mock('../event-publisher.js', () => ({
     tryCreateDiscordEventFromPayload: vi.fn(),
 }));
 
-vi.mock('../watchparty-lifecycle.js', () => ({
-    registerWatchpartyLifecycle: vi.fn(),
-}));
-
-vi.mock('../watchparty-publisher.js', () => ({
-    tryCreateWatchpartyChannelFromPayload: vi.fn(),
-    deleteWatchpartyChannel: vi.fn(),
-}));
-
 vi.mock('../../tickets/history-store.js', () => ({
     listTicketHistoryEntries: vi.fn(),
     resolveTicketTranscriptFilePath: vi.fn(),
@@ -156,7 +147,6 @@ import {
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
 import { publishDashboardPost } from '../publish-flow.js';
 import { insertScheduledPost, updateScheduledPost } from '../scheduler/store.js';
-import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
 import { listTicketHistoryEntries, resolveTicketTranscriptFilePath } from '../../tickets/history-store.js';
 import {
     getStoredLeaderboardProfile,
@@ -185,8 +175,6 @@ function buildConfig(overrides: Partial<EconomyConfig> = {}): EconomyConfig {
         xpVoiceAllowSelfMute: true,
         xpVoiceAllowSelfDeaf: false,
         xpVoiceAllowAfk: false,
-        watchpartyXpMultiplier: 1,
-        watchpartyCoinBonusPerMinute: 0,
         levelUpCoinsBase: 25,
         levelUpCoinsPerLevel: 10,
         ...overrides,
@@ -198,12 +186,6 @@ function buildEmbedPayload(overrides: Record<string, unknown> = {}): Record<stri
         mode: 'message',
         channelId: '123456789012345678',
         content: 'test payload',
-        watchpartyDraft: {
-            enabled: true,
-            channelName: 'G2 vs FNC | watchparty',
-            startAtLocal: '2099-05-01T20:00',
-            endAtLocal: '2099-05-01T22:00',
-        },
         ...overrides,
     };
 }
@@ -1831,95 +1813,6 @@ describe('api economy settings routes', () => {
                 .filter(([userId]) => userId === rateLimitedUserId);
             expect(memberCallsForRateLimitedUser).toHaveLength(1);
             expect(vi.mocked(getDiscordUserById)).not.toHaveBeenCalled();
-        });
-    });
-
-    it('rollbackuje utworzony kanał watchparty gdy zapis statusu po /api/embed nie powiedzie się', async () => {
-        vi.mocked(publishDashboardPost).mockResolvedValue({
-            messageId: 'message-1',
-            pingMessageId: undefined,
-            imageMessageId: undefined,
-            warnings: [],
-        } as any);
-        vi.mocked(tryCreateDiscordEventFromPayload).mockResolvedValue({
-            status: 'not_requested',
-            eventId: undefined,
-            eventError: undefined,
-            warnings: [],
-        } as any);
-        vi.mocked(insertScheduledPost).mockResolvedValue({ id: 'post-1' } as any);
-        vi.mocked(tryCreateWatchpartyChannelFromPayload).mockResolvedValue({
-            status: 'scheduled',
-            channelId: 'watchparty-created-before-persist-fail',
-            watchpartyError: undefined,
-            warnings: [],
-        } as any);
-        vi.mocked(updateScheduledPost).mockResolvedValue(null);
-        vi.mocked(deleteWatchpartyChannel).mockResolvedValue(undefined);
-
-        await withServer(async (baseUrl) => {
-            const response = await fetch(`${baseUrl}/api/embed`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(buildEmbedPayload()),
-            });
-
-            const body = await parseJsonResponse(response);
-
-            expect(response.status).toBe(200);
-            expect(body.success).toBe(true);
-            expect(body.watchpartyStatus).toBe('failed');
-            expect(body.watchpartyChannelId).toBeUndefined();
-            expect(body.watchpartyError).toBe('Nie utworzono kanału watchparty, bo nie udało się zapisać jego statusu.');
-            expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledWith('watchparty-created-before-persist-fail');
-        });
-    });
-
-    it('zwraca ostrzezenie o recznym sprzataniu gdy rollback kanału watchparty po /api/embed sie nie powiedzie', async () => {
-        vi.mocked(publishDashboardPost).mockResolvedValue({
-            messageId: 'message-rollback-warning',
-            pingMessageId: undefined,
-            imageMessageId: undefined,
-            warnings: [],
-        } as any);
-        vi.mocked(tryCreateDiscordEventFromPayload).mockResolvedValue({
-            status: 'not_requested',
-            eventId: undefined,
-            eventError: undefined,
-            warnings: [],
-        } as any);
-        vi.mocked(insertScheduledPost).mockResolvedValue({ id: 'post-rollback-warning' } as any);
-        vi.mocked(tryCreateWatchpartyChannelFromPayload).mockResolvedValue({
-            status: 'scheduled',
-            channelId: 'watchparty-rollback-warning-channel',
-            watchpartyError: undefined,
-            warnings: [],
-        } as any);
-        vi.mocked(updateScheduledPost).mockRejectedValueOnce(new Error('persist update failed'));
-        vi.mocked(deleteWatchpartyChannel).mockRejectedValueOnce(new Error('rollback delete failed'));
-
-        await withServer(async (baseUrl) => {
-            const response = await fetch(`${baseUrl}/api/embed`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(buildEmbedPayload({
-                    content: 'test rollback warning',
-                })),
-            });
-
-            const body = await parseJsonResponse(response);
-
-            expect(response.status).toBe(200);
-            expect(body.success).toBe(true);
-            expect(body.watchpartyStatus).toBe('failed');
-            expect(body.watchpartyError).toBe('Nie utworzono kanału watchparty, bo nie udało się zapisać jego statusu.');
-            expect(Array.isArray(body.warnings)).toBe(true);
-            expect((body.warnings as string[]).some((warning) => warning.includes('Wymagane ręczne sprzątanie kanału'))).toBe(true);
-            expect(vi.mocked(deleteWatchpartyChannel)).toHaveBeenCalledWith('watchparty-rollback-warning-channel');
         });
     });
 

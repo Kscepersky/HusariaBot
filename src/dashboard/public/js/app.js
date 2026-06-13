@@ -957,11 +957,6 @@ function bindEmbedSectionListeners() {
   const eventLocationInput = document.getElementById('event-location')
   const eventStartAtInput = document.getElementById('event-start-at')
   const eventEndAtInput = document.getElementById('event-end-at')
-  const watchpartyEnabledInput = document.getElementById('watchparty-enabled')
-  const watchpartyFields = document.getElementById('watchparty-fields')
-  const watchpartyChannelNameInput = document.getElementById('watchparty-channel-name')
-  const watchpartyStartAtInput = document.getElementById('watchparty-start-at')
-  const watchpartyEndAtInput = document.getElementById('watchparty-end-at')
   const timestampDateTimeInput = document.getElementById('timestamp-datetime')
   const timestampFormatList = document.getElementById('timestamp-format-list')
 
@@ -1006,7 +1001,6 @@ function bindEmbedSectionListeners() {
 
     renderMatchHelperOptions()
     updateEventDefaultsFromMatch()
-    updateWatchpartyDefaultsFromMatch()
     updatePreview()
     updateSendButton()
   })
@@ -1019,7 +1013,6 @@ function bindEmbedSectionListeners() {
     selectedMatchInfo = findMatchById(matchHelperSelectInput.value)
     renderMatchHelperChips(selectedMatchInfo)
     updateEventDefaultsFromMatch()
-    updateWatchpartyDefaultsFromMatch()
     updatePreview()
     updateSendButton()
   })
@@ -1044,25 +1037,12 @@ function bindEmbedSectionListeners() {
     updateSendButton()
   })
 
-  watchpartyEnabledInput?.addEventListener('change', () => {
-    if (watchpartyFields) {
-      watchpartyFields.hidden = !watchpartyEnabledInput.checked
-    }
-
-    updateWatchpartyDefaultsFromMatch()
-    updatePreview()
-    updateSendButton()
-  })
-
   ;[
     eventTitleInput,
     eventDescriptionInput,
     eventLocationInput,
     eventStartAtInput,
     eventEndAtInput,
-    watchpartyChannelNameInput,
-    watchpartyStartAtInput,
-    watchpartyEndAtInput,
   ].forEach((input) => {
     input?.addEventListener('input', updateHandler)
     input?.addEventListener('change', updateHandler)
@@ -2159,21 +2139,11 @@ function renderSentPosts() {
     const channelName = channels.find((channel) => channel.id === post?.payload?.channelId)?.name ?? 'nieznany-kanał'
     const sentAtLabel = post.sentAt ? formatTimestampInWarsaw(post.sentAt) : formatTimestampInWarsaw(post.updatedAt)
     const eventStatus = post.eventStatus ?? 'not_requested'
-    const watchpartyStatus = post.watchpartyStatus ?? 'not_requested'
     const eventLabelMap = {
       not_requested: 'Event: brak',
       pending: 'Event: oczekuje',
       created: 'Event: utworzono',
       failed: 'Event: błąd',
-    }
-    const watchpartyLabelMap = {
-      not_requested: 'Watchparty: brak',
-      pending: 'Watchparty: oczekuje',
-      scheduled: 'Watchparty: zaplanowane',
-      open: 'Watchparty: otwarte',
-      closed: 'Watchparty: zamknięte',
-      deleted: 'Watchparty: usunięte',
-      failed: 'Watchparty: błąd',
     }
 
     const previewHtml = buildDiscordMockupHtml(post)
@@ -2192,7 +2162,6 @@ function renderSentPosts() {
           <span class="scheduled-chip">Kanał: #${escapeHtml(channelName)}</span>
           <span class="scheduled-chip">Wysłano: ${escapeHtml(sentAtLabel)}</span>
           <span class="scheduled-chip">${escapeHtml(eventLabelMap[eventStatus] ?? 'Event: brak')}</span>
-          <span class="scheduled-chip">${escapeHtml(watchpartyLabelMap[watchpartyStatus] ?? 'Watchparty: brak')}</span>
           ${authorHtml}
           ${editorHtml}
         </div>
@@ -2497,12 +2466,6 @@ function applyPostPayloadToCreator(payload) {
   const eventLocationInput = document.getElementById('event-location')
   const eventStartAtInput = document.getElementById('event-start-at')
   const eventEndAtInput = document.getElementById('event-end-at')
-  const watchpartyEnabledInput = document.getElementById('watchparty-enabled')
-  const watchpartyFields = document.getElementById('watchparty-fields')
-  const watchpartyChannelNameInput = document.getElementById('watchparty-channel-name')
-  const watchpartyStartAtInput = document.getElementById('watchparty-start-at')
-  const watchpartyEndAtInput = document.getElementById('watchparty-end-at')
-
   if (titleInput) {
     titleInput.value = payload.title ?? ''
   }
@@ -2607,27 +2570,6 @@ function applyPostPayloadToCreator(payload) {
 
   if (eventEndAtInput) {
     eventEndAtInput.value = payload.eventDraft?.endAtLocal ?? ''
-  }
-
-  const watchpartyEnabled = Boolean(payload.watchpartyDraft?.enabled)
-  if (watchpartyEnabledInput) {
-    watchpartyEnabledInput.checked = watchpartyEnabled
-  }
-
-  if (watchpartyFields) {
-    watchpartyFields.hidden = !watchpartyEnabled
-  }
-
-  if (watchpartyChannelNameInput) {
-    watchpartyChannelNameInput.value = payload.watchpartyDraft?.channelName ?? ''
-  }
-
-  if (watchpartyStartAtInput) {
-    watchpartyStartAtInput.value = payload.watchpartyDraft?.startAtLocal ?? ''
-  }
-
-  if (watchpartyEndAtInput) {
-    watchpartyEndAtInput.value = payload.watchpartyDraft?.endAtLocal ?? ''
   }
 
   updateModeUI()
@@ -3653,8 +3595,6 @@ function collectEconomySettingsForm() {
   const xpTextPerMessage = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-text-per-message'), 'XP text: za wiadomosc'))
   const xpTextCooldownSeconds = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-text-cooldown-seconds'), 'XP text: cooldown'))
   const xpVoicePerMinute = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-voice-per-minute'), 'XP voice: za minute'))
-  const watchpartyXpMultiplier = toFiniteNumber(readEconomyInputValue('economy-watchparty-xp-multiplier'), 'Watchparty: mnoznik XP')
-  const watchpartyCoinBonusPerMinute = Math.floor(toFiniteNumber(readEconomyInputValue('economy-watchparty-coin-bonus-per-minute'), 'Watchparty: bonus coin/min'))
 
   if (dailyMaxCoins < dailyMinCoins) {
     throw new Error('Daily: max coins nie moze byc mniejsze niz min coins.')
@@ -3682,8 +3622,6 @@ function collectEconomySettingsForm() {
     xpVoiceAllowSelfMute: readEconomyCheckboxValue('economy-xp-voice-allow-self-mute'),
     xpVoiceAllowSelfDeaf: readEconomyCheckboxValue('economy-xp-voice-allow-self-deaf'),
     xpVoiceAllowAfk: readEconomyCheckboxValue('economy-xp-voice-allow-afk'),
-    watchpartyXpMultiplier,
-    watchpartyCoinBonusPerMinute,
     levelUpCoinsBase: economyHiddenLevelingConfig.levelUpCoinsBase,
     levelUpCoinsPerLevel: economyHiddenLevelingConfig.levelUpCoinsPerLevel,
   }
@@ -3713,8 +3651,6 @@ function setEconomySettingsForm(config) {
   setValue('economy-xp-text-per-message', config.xpTextPerMessage)
   setValue('economy-xp-text-cooldown-seconds', config.xpTextCooldownSeconds)
   setValue('economy-xp-voice-per-minute', config.xpVoicePerMinute)
-  setValue('economy-watchparty-xp-multiplier', config.watchpartyXpMultiplier)
-  setValue('economy-watchparty-coin-bonus-per-minute', config.watchpartyCoinBonusPerMinute)
   setChecked('economy-xp-voice-require-two-users', config.xpVoiceRequireTwoUsers)
   setChecked('economy-xp-voice-allow-self-mute', config.xpVoiceAllowSelfMute)
   setChecked('economy-xp-voice-allow-self-deaf', config.xpVoiceAllowSelfDeaf)
@@ -4758,36 +4694,6 @@ function updateEventDefaultsFromMatch() {
   }
 }
 
-function updateWatchpartyDefaultsFromMatch() {
-  const watchpartyEnabled = document.getElementById('watchparty-enabled')?.checked ?? false
-  if (!watchpartyEnabled || !selectedMatchInfo) {
-    return
-  }
-
-  const watchpartyChannelNameInput = document.getElementById('watchparty-channel-name')
-  const watchpartyStartAtInput = document.getElementById('watchparty-start-at')
-  const watchpartyEndAtInput = document.getElementById('watchparty-end-at')
-
-  const beginAtTimestamp = Number(selectedMatchInfo.beginAtTimestamp)
-  const hasMatchTime = Number.isFinite(beginAtTimestamp)
-
-  if (watchpartyChannelNameInput && !watchpartyChannelNameInput.value.trim()) {
-    const teamName = selectedMatchInfo.g2TeamName ?? 'G2 Esports'
-    const opponent = selectedMatchInfo.opponent ?? 'TBD'
-    watchpartyChannelNameInput.value = `${teamName} vs ${opponent} | watchparty`
-  }
-
-  if (hasMatchTime) {
-    if (watchpartyStartAtInput && !watchpartyStartAtInput.value.trim()) {
-      watchpartyStartAtInput.value = formatTimestampForDateTimeInput(beginAtTimestamp - (10 * 60 * 1000))
-    }
-
-    if (watchpartyEndAtInput && !watchpartyEndAtInput.value.trim()) {
-      watchpartyEndAtInput.value = formatTimestampForDateTimeInput(beginAtTimestamp + (130 * 60 * 1000))
-    }
-  }
-}
-
 async function loadChannels() {
   try {
     const resp = await fetch('/api/channels')
@@ -5743,7 +5649,6 @@ function collectFormDataSync() {
   const scheduleAtLocal = document.getElementById('schedule-at')?.value ?? ''
   const matchHelperEnabled = document.getElementById('match-helper-enabled')?.checked ?? false
   const eventEnabled = document.getElementById('event-enabled')?.checked ?? false
-  const watchpartyEnabled = document.getElementById('watchparty-enabled')?.checked ?? false
 
   const matchInfo = matchHelperEnabled && selectedMatchInfo
     ? {
@@ -5768,13 +5673,6 @@ function collectFormDataSync() {
     endAtLocal: document.getElementById('event-end-at')?.value ?? '',
   }
 
-  const watchpartyDraft = {
-    enabled: watchpartyEnabled,
-    channelName: document.getElementById('watchparty-channel-name')?.value ?? '',
-    startAtLocal: document.getElementById('watchparty-start-at')?.value ?? '',
-    endAtLocal: document.getElementById('watchparty-end-at')?.value ?? '',
-  }
-
   return {
     mode: currentMode,
     channelId: document.getElementById('channel-select')?.value ?? '',
@@ -5788,7 +5686,6 @@ function collectFormDataSync() {
     imageFilename: imageMode === 'library' ? (selectedImageName ?? '') : '',
     matchInfo,
     eventDraft,
-    watchpartyDraft,
   }
 }
 
@@ -5854,17 +5751,7 @@ function updateSendButton() {
     && eventEndTimestamp > eventStartTimestamp
   )
 
-  const watchpartyDraftEnabled = data.watchpartyDraft?.enabled === true
-  const watchpartyStartTimestamp = data.watchpartyDraft?.startAtLocal ? Date.parse(data.watchpartyDraft.startAtLocal) : NaN
-  const watchpartyEndTimestamp = data.watchpartyDraft?.endAtLocal ? Date.parse(data.watchpartyDraft.endAtLocal) : NaN
-  const watchpartyReady = !watchpartyDraftEnabled || (
-    Boolean(data.watchpartyDraft?.channelName?.trim())
-    && Number.isFinite(watchpartyStartTimestamp)
-    && Number.isFinite(watchpartyEndTimestamp)
-    && watchpartyEndTimestamp > watchpartyStartTimestamp
-  )
-
-  button.disabled = !(hasChannel && hasContent && pingReady && imageReady && matchReady && eventReady && watchpartyReady)
+  button.disabled = !(hasChannel && hasContent && pingReady && imageReady && matchReady && eventReady)
 
   if (editingSentPostId) {
     buttonText.textContent = 'Zapisz zmiany wysłanego posta'
@@ -7187,6 +7074,13 @@ function bindShopSectionListeners() {
     void loadShopOrders({ page: shopOrdersPage + 1, silent: true })
   })
 
+  // Dev-only: show clear-history toolbar
+  const shopOrdersDevToolbar = document.getElementById('shop-orders-dev-toolbar')
+  if (shopOrdersDevToolbar && currentDashboardRole === 'dev') {
+    shopOrdersDevToolbar.hidden = false
+  }
+  document.getElementById('shop-orders-clear-btn')?.addEventListener('click', () => void clearAllShopOrders())
+
   // Event delegation for dynamically rendered item buttons
   document.getElementById('shop-items-list')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action]')
@@ -7572,6 +7466,31 @@ async function completeShopOrder(orderId) {
     void loadShopOrders({ silent: true })
   } catch {
     showToast('Błąd sieci podczas realizacji zamówienia.', 'error')
+  }
+}
+
+async function clearAllShopOrders() {
+  if (!confirm('Czy na pewno chcesz usunąć CAŁĄ historię zamówień? Tej operacji nie można cofnąć.')) return
+  if (!confirm('Ostatnie ostrzeżenie: wszystkie zamówienia zostaną trwale usunięte. Kontynuować?')) return
+
+  try {
+    const response = await fetchWithCsrf('/api/shop/orders/all', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'DELETE_ALL_ORDERS' }),
+    })
+    const payload = await parseApiResponse(response)
+
+    if (!response.ok) {
+      showToast(payload.error ?? 'Nie udało się usunąć historii zamówień.', 'error')
+      return
+    }
+
+    showToast(`Usunięto ${payload.data?.deletedCount ?? 0} zamówień.`, 'success')
+    shopOrdersPage = 1
+    void loadShopOrders({ silent: false })
+  } catch {
+    showToast('Błąd sieci podczas usuwania historii zamówień.', 'error')
   }
 }
 

@@ -279,24 +279,6 @@
             </div>
           </details>
 
-          <details class="form-group form-disclosure" id="watchparty-group">
-            <summary class="disclosure-summary">Kanał Watchparty</summary>
-            <div class="disclosure-content">
-              <label class="form-checkbox">
-                <input type="checkbox" id="watchparty-enabled">
-                <span>Przygotuj ustawienia watchparty dla tego posta (kanał + okno czasu).</span>
-              </label>
-              <div id="watchparty-fields" class="watchparty-fields" hidden>
-                <label class="form-label" for="watchparty-channel-name">Nazwa kanału watchparty</label>
-                <input id="watchparty-channel-name" type="text" class="form-input" placeholder="np. G2 vs FNC | watchparty">
-                <label class="form-label" for="watchparty-start-at">Start watchparty (Europe/Warsaw)</label>
-                <input id="watchparty-start-at" type="datetime-local" class="form-input">
-                <label class="form-label" for="watchparty-end-at">Koniec watchparty (Europe/Warsaw)</label>
-                <input id="watchparty-end-at" type="datetime-local" class="form-input">
-              </div>
-            </div>
-          </details>
-
           <div class="form-group">
             <label class="form-label" for="channel-select">Kanał docelowy</label>
             <div class="select-wrapper">
@@ -495,12 +477,6 @@
 
           <label class="form-label" for="economy-xp-voice-per-minute">XP voice: za minutę</label>
           <input id="economy-xp-voice-per-minute" type="number" class="form-input" min="0" step="1">
-
-          <label class="form-label" for="economy-watchparty-xp-multiplier">Watchparty: mnożnik XP voice</label>
-          <input id="economy-watchparty-xp-multiplier" type="number" class="form-input" min="0" step="0.01">
-
-          <label class="form-label" for="economy-watchparty-coin-bonus-per-minute">Watchparty: bonus coin/min</label>
-          <input id="economy-watchparty-coin-bonus-per-minute" type="number" class="form-input" min="0" step="1">
 
           <label class="form-checkbox">
             <input id="economy-xp-voice-require-two-users" type="checkbox">
@@ -1226,6 +1202,9 @@
             <input type="text" class="form-input" id="shop-orders-user-filter" placeholder="Filtruj po UserID..." style="max-width:220px;">
             <button class="btn-secondary" id="shop-orders-refresh-btn" type="button">Odśwież</button>
             <span class="preview-note" id="shop-orders-count-label">Zamówienia: 0</span>
+            <div id="shop-orders-dev-toolbar" hidden style="margin-left:auto;">
+              <button class="btn-danger" id="shop-orders-clear-btn" type="button">Wyczyść całą historię zamówień</button>
+            </div>
           </div>
           <div id="shop-orders-list" class="scheduled-list"></div>
           <div class="scheduled-toolbar">

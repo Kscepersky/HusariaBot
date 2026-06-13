@@ -4,7 +4,6 @@ import {
     ButtonInteraction,
     ButtonStyle,
     ChannelType,
-    Client,
     EmbedBuilder,
     Message,
     MessageFlags,
@@ -658,63 +657,6 @@ export async function handleAdminCloseTicketCancel(interaction: ButtonInteractio
     await interaction.update({ content: '❌ Anulowano zamykanie ticketu.', components: [] });
 }
 
-export async function closeOrderTicketProgrammatic(params: {
-    client: Client;
-    guildId: string;
-    orderId: number;
-    notificationMessage: string;
-    closedByUserId: string;
-    closedByTag: string;
-    closeReason: string;
-}): Promise<boolean> {
-    const guild = params.client.guilds.cache.get(params.guildId)
-        ?? await params.client.guilds.fetch(params.guildId).catch(() => null);
-    if (!guild) return false;
-
-    const channels = await guild.channels.fetch();
-    const suffix = `-${params.orderId}`;
-    const ticketChannel = [...channels.values()].find(
-        (ch): ch is TextChannel =>
-            isGuildTextChannel(ch)
-            && ch.parentId === SUPPORT_CATEGORY_ID
-            && ch.name.startsWith('zamowienie-')
-            && ch.name.endsWith(suffix),
-    );
-
-    if (!ticketChannel) return false;
-
-    await ticketChannel.send({
-        content: params.notificationMessage,
-        allowedMentions: { parse: ['everyone'] },
-    });
-
-    setTimeout(() => {
-        void (async () => {
-            try {
-                await archiveTicketClosure({
-                    channel: ticketChannel,
-                    ownerId: extractTicketOwnerId(ticketChannel.topic),
-                    closeType: 'admin',
-                    closeReason: params.closeReason,
-                    closedByUserId: params.closedByUserId,
-                    closedByTag: params.closedByTag,
-                });
-            } catch (err) {
-                ticketLogger.error('TICKET_ORDER_ARCHIVE_FAILED', 'Nie udalo sie zapisac historii ticketu zamowienia.', {
-                    guildId: params.guildId,
-                    orderId: params.orderId,
-                    closedByUserId: params.closedByUserId,
-                }, err);
-            }
-
-            if (ticketChannel.deletable) {
-                await ticketChannel.delete(`Order ticket closed by admin ${params.closedByUserId}`).catch(() => {});
-            }
-        })();
-    }, 60_000).unref();
-
-    return true;
-}
 
 export async function handleAdminCloseReasonModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
     if (!(await ensureSupportRole(interaction, SUPPORT_ACCESS_DENIED_MESSAGE))) {

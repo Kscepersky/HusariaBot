@@ -379,6 +379,12 @@ export async function completeOrder(orderId: number): Promise<ShopOrder | null> 
     return getOrderById(orderId);
 }
 
+export async function deleteAllOrders(): Promise<{ deletedCount: number }> {
+    const db = await getEconomyDatabase();
+    const result = await db.run('DELETE FROM shop_orders');
+    return { deletedCount: result.changes ?? 0 };
+}
+
 export async function cancelOrder(input: ShopOrderCancelInput): Promise<{ order: ShopOrder | null; refunded: number }> {
     const db = await getEconomyDatabase();
     const now = Date.now();

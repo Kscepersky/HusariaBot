@@ -20,8 +20,6 @@ const baseConfig: EconomyConfig = {
     xpVoiceAllowSelfMute: true,
     xpVoiceAllowSelfDeaf: false,
     xpVoiceAllowAfk: false,
-    watchpartyXpMultiplier: 1,
-    watchpartyCoinBonusPerMinute: 0,
     levelUpCoinsBase: 25,
     levelUpCoinsPerLevel: 10,
 };

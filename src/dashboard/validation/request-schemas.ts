@@ -25,13 +25,6 @@ const eventDraftSchema = z.object({
     endAtLocal: optionalStringSchema,
 }).strip();
 
-const watchpartyDraftSchema = z.object({
-    enabled: booleanLikeSchema.optional(),
-    channelName: optionalStringSchema,
-    startAtLocal: optionalStringSchema,
-    endAtLocal: optionalStringSchema,
-}).strip();
-
 export const dashboardEventSchema = z.object({
     title: optionalStringSchema,
     description: optionalStringSchema,
@@ -58,8 +51,6 @@ export const economyConfigSchema = z.object({
     xpVoiceAllowSelfMute: z.boolean(),
     xpVoiceAllowSelfDeaf: z.boolean(),
     xpVoiceAllowAfk: z.boolean(),
-    watchpartyXpMultiplier: z.number().min(0).max(10),
-    watchpartyCoinBonusPerMinute: z.number().int().min(0).max(10_000),
     levelUpCoinsBase: z.number().int().min(0).max(1_000_000),
     levelUpCoinsPerLevel: z.number().int().min(0).max(1_000_000),
 }).refine((value) => value.dailyMaxCoins >= value.dailyMinCoins, {
@@ -139,7 +130,6 @@ export const embedPayloadSchema = z.object({
     uploadBase64: optionalStringSchema,
     matchInfo: matchInfoSchema.optional(),
     eventDraft: eventDraftSchema.optional(),
-    watchpartyDraft: watchpartyDraftSchema.optional(),
     scheduleAtLocal: optionalStringSchema,
 }).strip();
 
@@ -169,6 +159,10 @@ export const shopItemUpdateSchema = z.object({
 
 export const shopOrderCancelSchema = z.object({
     reason: z.string().trim().min(1).max(500),
+}).strip();
+
+export const shopDeleteAllOrdersSchema = z.object({
+    confirmation: z.literal('DELETE_ALL_ORDERS'),
 }).strip();
 
 export function zodErrorToMessage(error: z.ZodError): string {

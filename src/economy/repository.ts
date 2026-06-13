@@ -51,8 +51,6 @@ interface EconomyConfigRow {
     xp_voice_allow_self_mute: number;
     xp_voice_allow_self_deaf: number;
     xp_voice_allow_afk: number;
-    watchparty_xp_multiplier: number;
-    watchparty_coin_bonus_per_minute: number;
     level_up_coins_base: number;
     level_up_coins_per_level: number;
 }
@@ -201,8 +199,6 @@ function normalizeEconomyConfig(input: EconomyConfig): EconomyConfig {
         xpVoiceAllowSelfMute: input.xpVoiceAllowSelfMute === true,
         xpVoiceAllowSelfDeaf: input.xpVoiceAllowSelfDeaf === true,
         xpVoiceAllowAfk: input.xpVoiceAllowAfk === true,
-        watchpartyXpMultiplier: clampFloat(input.watchpartyXpMultiplier, 0, 10),
-        watchpartyCoinBonusPerMinute: clampInt(input.watchpartyCoinBonusPerMinute, 0, 10_000),
         levelUpCoinsBase: clampInt(input.levelUpCoinsBase, 0, 1_000_000),
         levelUpCoinsPerLevel: clampInt(input.levelUpCoinsPerLevel, 0, 1_000_000),
     };
@@ -288,8 +284,6 @@ function toEconomyConfig(row: EconomyConfigRow): EconomyConfig {
         xpVoiceAllowSelfMute: row.xp_voice_allow_self_mute === 1,
         xpVoiceAllowSelfDeaf: row.xp_voice_allow_self_deaf === 1,
         xpVoiceAllowAfk: row.xp_voice_allow_afk === 1,
-        watchpartyXpMultiplier: row.watchparty_xp_multiplier,
-        watchpartyCoinBonusPerMinute: row.watchparty_coin_bonus_per_minute,
         levelUpCoinsBase: row.level_up_coins_base,
         levelUpCoinsPerLevel: row.level_up_coins_per_level,
     };
@@ -624,8 +618,6 @@ async function getEconomyConfigFromDatabase(db: Database): Promise<EconomyConfig
             xp_voice_allow_self_mute,
             xp_voice_allow_self_deaf,
             xp_voice_allow_afk,
-            watchparty_xp_multiplier,
-            watchparty_coin_bonus_per_minute,
             level_up_coins_base,
             level_up_coins_per_level
         FROM economy_config
@@ -675,8 +667,6 @@ export async function updateEconomyConfig(
                     xp_voice_allow_self_mute = ?,
                     xp_voice_allow_self_deaf = ?,
                     xp_voice_allow_afk = ?,
-                    watchparty_xp_multiplier = ?,
-                    watchparty_coin_bonus_per_minute = ?,
                     level_up_coins_base = ?,
                     level_up_coins_per_level = ?,
                     updated_at = ?
@@ -699,8 +689,6 @@ export async function updateEconomyConfig(
                 config.xpVoiceAllowSelfMute ? 1 : 0,
                 config.xpVoiceAllowSelfDeaf ? 1 : 0,
                 config.xpVoiceAllowAfk ? 1 : 0,
-                config.watchpartyXpMultiplier,
-                config.watchpartyCoinBonusPerMinute,
                 config.levelUpCoinsBase,
                 config.levelUpCoinsPerLevel,
                 nowTimestamp,
@@ -1542,27 +1530,9 @@ export async function awardVoiceXp(
     guildId: string,
     userId: string,
     nowTimestamp: number,
-    multiplier: number = 1,
 ): Promise<EconomyXpAwardResult> {
     const config = await getEconomyConfig();
-    const amount = Math.max(0, Math.floor(config.xpVoicePerMinute * Math.max(0, multiplier)));
-    return awardXp(guildId, userId, nowTimestamp, amount, {
-        config,
-        source: 'natural',
-    });
-}
-
-export async function awardWatchpartyVoiceActivity(
-    guildId: string,
-    userId: string,
-    nowTimestamp: number,
-    config: EconomyConfig,
-): Promise<EconomyXpAwardResult> {
-    const xpAmount = Math.max(0, Math.floor(config.xpVoicePerMinute * config.watchpartyXpMultiplier));
-    const bonusCoins = Math.max(0, Math.floor(config.watchpartyCoinBonusPerMinute));
-
-    return awardXp(guildId, userId, nowTimestamp, xpAmount, {
-        bonusCoins,
+    return awardXp(guildId, userId, nowTimestamp, config.xpVoicePerMinute, {
         config,
         source: 'natural',
     });

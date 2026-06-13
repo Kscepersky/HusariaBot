@@ -1,9 +1,7 @@
 import type { Client, Guild, GuildMember, Message, VoiceBasedChannel } from 'discord.js';
-import { listScheduledPosts } from '../dashboard/scheduler/store.js';
 import {
     awardMessageXp,
     awardVoiceXp,
-    awardWatchpartyVoiceActivity,
     getEconomyConfig,
     getEconomyLevelRoleMappings,
     incrementMessageCount,
@@ -230,21 +228,6 @@ async function applyNaturalLevelUpSideEffects(
     }
 }
 
-async function getOpenWatchpartyChannelIds(): Promise<Set<string>> {
-    try {
-        const posts = await listScheduledPosts();
-        const openWatchpartyChannelIds = posts
-            .filter((post) => post.status === 'sent' && post.watchpartyStatus === 'open')
-            .map((post) => post.watchpartyChannelId)
-            .filter((channelId): channelId is string => typeof channelId === 'string' && channelId.trim().length > 0);
-
-        return new Set(openWatchpartyChannelIds);
-    } catch (error) {
-        console.error('❌  Nie udalo sie pobrac aktywnych kanalow watchparty:', error);
-        return new Set();
-    }
-}
-
 export function shouldAwardVoiceXpByRule(config: EconomyConfig, input: VoiceEligibilityInput): boolean {
     if (input.isBot) {
         return false;
@@ -311,7 +294,6 @@ export async function handleEconomyMessageCreate(message: Message): Promise<void
 async function processVoiceChannelXpTick(client: Client): Promise<void> {
     const nowTimestamp = Date.now();
     const config = await getCachedEconomyConfig(nowTimestamp);
-    const openWatchpartyChannelIds = await getOpenWatchpartyChannelIds();
     const levelRoleMappingsByGuild = new Map<string, Promise<EconomyLevelRoleMapping[]>>();
 
     const getLevelRoleMappingsForGuild = (guildId: string): Promise<EconomyLevelRoleMapping[]> => {
@@ -337,8 +319,6 @@ async function processVoiceChannelXpTick(client: Client): Promise<void> {
             if (voiceChannel.members.size === 0) {
                 continue;
             }
-
-            const isOpenWatchpartyChannel = openWatchpartyChannelIds.has(voiceChannel.id);
 
             const activeMembers = voiceChannel.members.filter((member) => !member.user.bot);
             const activeMemberCount = activeMembers.size;
@@ -381,9 +361,7 @@ async function processVoiceChannelXpTick(client: Client): Promise<void> {
                 }
 
                 try {
-                    const awardResult = isOpenWatchpartyChannel
-                        ? await awardWatchpartyVoiceActivity(guild.id, member.id, nowTimestamp, config)
-                        : await awardVoiceXp(guild.id, member.id, nowTimestamp);
+                    const awardResult = await awardVoiceXp(guild.id, member.id, nowTimestamp);
 
                     try {
                         const levelRoleMappings = await getLevelRoleMappingsForGuild(guild.id);

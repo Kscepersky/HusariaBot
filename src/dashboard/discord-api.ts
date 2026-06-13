@@ -7,10 +7,6 @@ config();
 const DISCORD_API = 'https://discord.com/api/v10';
 const MANAGE_EVENTS_PERMISSION = 1n << 33n;
 const ADMINISTRATOR_PERMISSION = 1n << 3n;
-const MANAGE_CHANNELS_PERMISSION = 1n << 4n;
-const VIEW_CHANNEL_PERMISSION = 1n << 10n;
-const CONNECT_PERMISSION = 1n << 20n;
-const SPEAK_PERMISSION = 1n << 21n;
 const SCHEDULED_EVENTS_CACHE_TTL_MS = 15_000;
 const SCHEDULED_EVENTS_DEFAULT_RETRY_MS = 1_000;
 const SCHEDULED_EVENTS_MAX_CACHE_ENTRIES = 20;
@@ -138,12 +134,6 @@ export interface DiscordScheduledEvent {
     } | null;
 }
 
-export interface CreateGuildVoiceChannelInput {
-    name: string;
-    categoryId?: string;
-    initiallyOpen?: boolean;
-}
-
 export interface UpdateExternalScheduledEventInput {
     name: string;
     description?: string;
@@ -156,6 +146,25 @@ export interface DiscordEmoji {
     id: string;
     name: string | null;
     animated?: boolean;
+}
+
+export interface DiscordMessageAuthor {
+    id: string;
+    username: string;
+    global_name: string | null;
+    discriminator: string;
+}
+
+export interface DiscordMessageAttachment {
+    url: string;
+}
+
+export interface DiscordMessage {
+    id: string;
+    author: DiscordMessageAuthor;
+    content: string;
+    timestamp: string;
+    attachments: DiscordMessageAttachment[];
 }
 
 export interface DiscordMessagePayload {
@@ -176,27 +185,6 @@ export interface DiscordMentionUser {
 }
 
 export type DiscordMemberRoleUpdateOutcome = 'updated' | 'not_found';
-
-function buildWatchpartyPermissionOverwrite(guildId: string, initiallyOpen: boolean): {
-    id: string;
-    type: number;
-    allow: string;
-    deny: string;
-} {
-    const allow = initiallyOpen
-        ? (VIEW_CHANNEL_PERMISSION | CONNECT_PERMISSION | SPEAK_PERMISSION)
-        : VIEW_CHANNEL_PERMISSION;
-    const deny = initiallyOpen
-        ? 0n
-        : (CONNECT_PERMISSION | SPEAK_PERMISSION);
-
-    return {
-        id: guildId,
-        type: 0,
-        allow: allow.toString(),
-        deny: deny.toString(),
-    };
-}
 
 function isValidDiscordId(value: string): boolean {
     return /^\d{17,20}$/.test(value);
@@ -818,7 +806,11 @@ export async function sendMessageToChannel(channelId: string, payload: DiscordMe
     return msg.id;
 }
 
-export async function sendDirectMessage(userId: string, content: string): Promise<void> {
+export async function sendDirectMessage(
+    userId: string,
+    content: string,
+    options?: { allowedMentions?: { parse?: string[]; users?: string[] } },
+): Promise<void> {
     if (!isValidDiscordId(userId)) {
         throw new Error('Invalid user ID format.');
     }
@@ -837,6 +829,7 @@ export async function sendDirectMessage(userId: string, content: string): Promis
         throw new Error(`Failed to open DM channel: ${openDmChannelResponse.status} — ${JSON.stringify(errPayload)}`);
     }
 
+    const safeContent = content.slice(0, 2000);
     const dmChannel = await openDmChannelResponse.json() as { id: string };
     const sendMessageResponse = await fetch(`${DISCORD_API}/channels/${dmChannel.id}/messages`, {
         method: 'POST',
@@ -844,82 +837,15 @@ export async function sendDirectMessage(userId: string, content: string): Promis
             Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({
+            content: safeContent,
+            allowed_mentions: options?.allowedMentions ?? { parse: [] },
+        }),
     });
 
     if (!sendMessageResponse.ok) {
         const errPayload = await sendMessageResponse.json().catch(() => ({}));
         throw new Error(`Failed to send DM: ${sendMessageResponse.status} — ${JSON.stringify(errPayload)}`);
-    }
-}
-
-export async function createGuildVoiceChannel(
-    guildId: string,
-    input: CreateGuildVoiceChannelInput,
-): Promise<string> {
-    const channelName = input.name.trim();
-    if (!channelName) {
-        throw new Error('Nazwa kanału watchparty jest wymagana.');
-    }
-
-    const botUser = await getBotUser();
-    const trimmedCategoryId = input.categoryId?.trim() ?? '';
-    const body = {
-        name: channelName,
-        type: 2,
-        ...(trimmedCategoryId && isValidDiscordId(trimmedCategoryId) ? { parent_id: trimmedCategoryId } : {}),
-        permission_overwrites: [
-            buildWatchpartyPermissionOverwrite(guildId, input.initiallyOpen === true),
-            {
-                id: botUser.id,
-                type: 1,
-                allow: MANAGE_CHANNELS_PERMISSION.toString(),
-                deny: '0',
-            },
-        ],
-    };
-
-    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/channels`, {
-        method: 'POST',
-        headers: {
-            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(`Failed to create voice channel: ${resp.status} — ${JSON.stringify(err)}`);
-    }
-
-    const created = await resp.json() as { id: string };
-    return created.id;
-}
-
-export async function updateChannelRolePermissions(
-    channelId: string,
-    roleId: string,
-    options: { open: boolean },
-): Promise<void> {
-    const overwrite = buildWatchpartyPermissionOverwrite(roleId, options.open);
-
-    const resp = await fetch(`${DISCORD_API}/channels/${channelId}/permissions/${roleId}`, {
-        method: 'PUT',
-        headers: {
-            Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            allow: overwrite.allow,
-            deny: overwrite.deny,
-            type: overwrite.type,
-        }),
-    });
-
-    if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(`Failed to update channel permissions: ${resp.status} — ${JSON.stringify(err)}`);
     }
 }
 
@@ -1096,7 +1022,26 @@ export async function getGuildAllChannels(guildId: string): Promise<DiscordChann
     return [...channels];
 }
 
+export function invalidateGuildAllChannelsCache(guildId: string): void {
+    guildAllChannelsCache.delete(guildId);
+}
+
 export function invalidateGuildMemberCache(guildId: string, userId: string): void {
     guildMemberCache.delete(`${guildId}:${userId}`);
+}
+
+export async function fetchChannelMessages(channelId: string, beforeId?: string): Promise<DiscordMessage[]> {
+    const params = new URLSearchParams({ limit: '100' });
+    if (beforeId) params.set('before', beforeId);
+
+    const resp = await fetch(`${DISCORD_API}/channels/${channelId}/messages?${params}`, {
+        headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+    });
+
+    if (!resp.ok) {
+        throw new Error(`Failed to fetch channel messages: ${resp.status}`);
+    }
+
+    return resp.json() as Promise<DiscordMessage[]>;
 }
 

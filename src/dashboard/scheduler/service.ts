@@ -1,7 +1,5 @@
 import { publishDashboardPost } from '../publish-flow.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
-import { registerWatchpartyLifecycle } from '../watchparty-lifecycle.js';
-import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
 import {
     getScheduledPostById,
     listScheduledPosts,
@@ -57,9 +55,6 @@ async function executeScheduledPost(postId: string): Promise<void> {
         return;
     }
 
-    let createdWatchpartyChannelId: string | null = null;
-    let persistedSuccessfully = false;
-
     try {
         const result = await publishDashboardPost(scheduledPost.payload, {
             publishedBy: scheduledPost.publisherName,
@@ -67,9 +62,7 @@ async function executeScheduledPost(postId: string): Promise<void> {
         });
 
         const eventResult = await tryCreateDiscordEventFromPayload(scheduledPost.payload);
-        const watchpartyResult = await tryCreateWatchpartyChannelFromPayload(scheduledPost.payload);
-        createdWatchpartyChannelId = watchpartyResult.channelId ?? null;
-        const warnings = [...result.warnings, ...eventResult.warnings, ...watchpartyResult.warnings];
+        const warnings = [...result.warnings, ...eventResult.warnings];
 
         const updatedPost = await updateScheduledPost(postId, (post) => ({
             ...post,
@@ -83,9 +76,6 @@ async function executeScheduledPost(postId: string): Promise<void> {
             eventStatus: eventResult.status,
             discordEventId: eventResult.eventId,
             eventLastError: eventResult.eventError,
-            watchpartyStatus: watchpartyResult.status,
-            watchpartyChannelId: watchpartyResult.channelId,
-            watchpartyLastError: watchpartyResult.watchpartyError,
             source: post.source ?? 'scheduled',
         }));
 
@@ -93,40 +83,14 @@ async function executeScheduledPost(postId: string): Promise<void> {
             throw new Error('Nie znaleziono posta po zapisie statusu wysyłki.');
         }
 
-        persistedSuccessfully = true;
-
-        registerWatchpartyLifecycle(updatedPost);
-
         return;
     } catch (error) {
-        let rollbackFailureNote = '';
-
-        if (!persistedSuccessfully && createdWatchpartyChannelId) {
-            try {
-                await deleteWatchpartyChannel(createdWatchpartyChannelId);
-            } catch (cleanupError) {
-                schedulerLogger.error('WATCHPARTY_ROLLBACK_FAILED', 'Nie udalo sie cofnac kanalu watchparty po bledzie zapisu schedulera.', {
-                    postId,
-                    channelId: createdWatchpartyChannelId,
-                }, cleanupError);
-                rollbackFailureNote = `Rollback kanału watchparty nie powiódł się (channelId=${createdWatchpartyChannelId}).`;
-            }
-        }
-
-        const baseMessage = error instanceof Error ? error.message : 'Nieznany błąd';
-        const watchpartyFailureNote = createdWatchpartyChannelId
-            ? `Nie udało się zakończyć bezpiecznie operacji watchparty (channelId=${createdWatchpartyChannelId}).`
-            : '';
-        const message = rollbackFailureNote
-            ? `${baseMessage} | ${rollbackFailureNote}`
-            : (watchpartyFailureNote ? `${baseMessage} | ${watchpartyFailureNote}` : baseMessage);
+        const message = error instanceof Error ? error.message : 'Nieznany błąd';
 
         await updateScheduledPost(postId, (post) => ({
             ...post,
             status: 'failed',
             updatedAt: Date.now(),
-            watchpartyStatus: createdWatchpartyChannelId ? 'failed' : post.watchpartyStatus,
-            watchpartyLastError: rollbackFailureNote || watchpartyFailureNote || post.watchpartyLastError,
             lastError: message,
         }));
     }
@@ -188,7 +152,6 @@ export async function initializeDashboardScheduler(): Promise<void> {
 
         await Promise.all(posts.map(async (post) => {
             if (post.status !== 'pending') {
-                registerWatchpartyLifecycle(post);
                 return;
             }
 

@@ -33,7 +33,6 @@ import {
     type EmbedFormData,
     type EventDraftFormData,
     type MatchInfoSnapshot,
-    type WatchpartyDraftFormData,
 } from '../embed-handlers.js';
 import {
     dashboardEventSchema,
@@ -51,8 +50,6 @@ import {
 } from '../validation/request-schemas.js';
 import { publishDashboardPost } from '../publish-flow.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
-import { registerWatchpartyLifecycle } from '../watchparty-lifecycle.js';
-import { deleteWatchpartyChannel, tryCreateWatchpartyChannelFromPayload } from '../watchparty-publisher.js';
 import { insertScheduledPost, updateScheduledPost } from '../scheduler/store.js';
 import { parseWarsawDateTimeToTimestamp } from '../scheduler/warsaw-time.js';
 import type { ScheduledPost } from '../scheduler/types.js';
@@ -1061,21 +1058,6 @@ function sanitizeEventDraft(input: unknown): EventDraftFormData | undefined {
     };
 }
 
-function sanitizeWatchpartyDraft(input: unknown): WatchpartyDraftFormData | undefined {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) {
-        return undefined;
-    }
-
-    const raw = input as Partial<WatchpartyDraftFormData>;
-
-    return {
-        enabled: normalizeBoolean(raw.enabled),
-        channelName: normalizeTrimmedString(raw.channelName),
-        startAtLocal: normalizeTrimmedString(raw.startAtLocal),
-        endAtLocal: normalizeTrimmedString(raw.endAtLocal),
-    };
-}
-
 function sanitizeEmbedPayload(rawBody: unknown): EmbedFormData {
     const body = (rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody))
         ? rawBody as Record<string, unknown>
@@ -1098,7 +1080,6 @@ function sanitizeEmbedPayload(rawBody: unknown): EmbedFormData {
         uploadBase64: normalizeTrimmedString(body.uploadBase64),
         matchInfo: sanitizeMatchInfo(body.matchInfo),
         eventDraft: sanitizeEventDraft(body.eventDraft),
-        watchpartyDraft: sanitizeWatchpartyDraft(body.watchpartyDraft),
     };
 }
 
@@ -2510,20 +2491,6 @@ apiRouter.post('/embed', async (req, res) => {
         });
 
         const eventResult = await tryCreateDiscordEventFromPayload(data);
-        const initialWatchpartyStatus: ScheduledPost['watchpartyStatus'] = data.watchpartyDraft?.enabled
-            ? 'pending'
-            : 'not_requested';
-        let watchpartyResult: {
-            status: 'not_requested' | 'scheduled' | 'open' | 'closed' | 'failed';
-            channelId?: string;
-            watchpartyError?: string;
-            warnings: string[];
-        } = {
-            status: 'not_requested',
-            channelId: undefined,
-            watchpartyError: undefined,
-            warnings: [],
-        };
         const warnings = [...publishResult.warnings, ...eventResult.warnings];
 
         const now = Date.now();
@@ -2544,9 +2511,6 @@ apiRouter.post('/embed', async (req, res) => {
             eventStatus: eventResult.status,
             discordEventId: eventResult.eventId,
             eventLastError: eventResult.eventError,
-            watchpartyStatus: initialWatchpartyStatus,
-            watchpartyChannelId: watchpartyResult.channelId,
-            watchpartyLastError: watchpartyResult.watchpartyError,
             lastError: warnings.length > 0 ? warnings.join(' | ') : undefined,
         };
 
@@ -2576,56 +2540,6 @@ apiRouter.post('/embed', async (req, res) => {
             }, persistError);
         }
 
-        if (insertedPost && data.watchpartyDraft?.enabled) {
-            watchpartyResult = await tryCreateWatchpartyChannelFromPayload(data);
-            warnings.push(...watchpartyResult.warnings);
-
-            let updatedPost: ScheduledPost | null = null;
-            try {
-                updatedPost = await updateScheduledPost(insertedPost.id, (post) => ({
-                    ...post,
-                    updatedAt: Date.now(),
-                    watchpartyStatus: watchpartyResult.status,
-                    watchpartyChannelId: watchpartyResult.channelId,
-                    watchpartyLastError: watchpartyResult.watchpartyError,
-                    lastError: warnings.length > 0 ? warnings.join(' | ') : undefined,
-                }));
-            } catch (persistWatchpartyError) {
-                apiLogger.warn('WATCHPARTY_STATUS_PERSIST_FAILED', 'Failed to persist watchparty status for sent post.', {}, persistWatchpartyError);
-            }
-
-            if (updatedPost) {
-                registerWatchpartyLifecycle(updatedPost);
-            } else {
-                warnings.push('Nie udało się zaktualizować statusu watchparty w historii wysłanych postów. Uruchomiono rollback kanału.');
-
-                if (watchpartyResult.channelId) {
-                    try {
-                        await deleteWatchpartyChannel(watchpartyResult.channelId);
-                    } catch (watchpartyCleanupError) {
-                        apiLogger.warn('WATCHPARTY_CHANNEL_ROLLBACK_FAILED', 'Failed to rollback watchparty channel after persist error.', {}, watchpartyCleanupError);
-                        warnings.push('Rollback kanału watchparty po błędzie zapisu nie powiódł się. Wymagane ręczne sprzątanie kanału.');
-                    }
-                }
-
-                watchpartyResult = {
-                    status: 'failed',
-                    channelId: undefined,
-                    watchpartyError: 'Nie utworzono kanału watchparty, bo nie udało się zapisać jego statusu.',
-                    warnings: [],
-                };
-            }
-        }
-
-        if (!insertedPost && data.watchpartyDraft?.enabled) {
-            watchpartyResult = {
-                status: 'failed',
-                channelId: undefined,
-                watchpartyError: 'Nie utworzono kanału watchparty, bo nie udało się zapisać wpisu historii.',
-                warnings: [],
-            };
-        }
-
         res.json({
             success: true,
             messageId: publishResult.messageId,
@@ -2635,9 +2549,6 @@ apiRouter.post('/embed', async (req, res) => {
             eventStatus: eventResult.status,
             eventError: eventResult.eventError,
             discordEventId: eventResult.eventId,
-            watchpartyStatus: watchpartyResult.status,
-            watchpartyError: watchpartyResult.watchpartyError,
-            watchpartyChannelId: watchpartyResult.channelId,
             postId: sentPost.id,
         });
     } catch (err) {

@@ -4,6 +4,7 @@ import {
     shopItemCreateSchema,
     shopItemUpdateSchema,
     shopOrderCancelSchema,
+    shopDeleteAllOrdersSchema,
     zodErrorToMessage,
 } from '../validation/request-schemas.js';
 import {
@@ -15,15 +16,16 @@ import {
     getOrdersPage,
     completeOrder,
     cancelOrder,
+    deleteAllOrders,
 } from '../../shop/repository.js';
 import {
     getGuildMember,
     getGuildEmojis,
     hasRequiredRole,
+    hasDevRole,
     sendDirectMessage,
 } from '../discord-api.js';
-import { closeOrderTicketProgrammatic } from '../../tickets/flow.js';
-import { getBotClient } from '../../bot-client.js';
+import { closeOrderTicketViaRest } from '../../shop/order-ticket-closer.js';
 import { createLogger } from '../../utils/logger.js';
 
 const shopApiLogger = createLogger('dashboard:api:shop');
@@ -64,6 +66,33 @@ async function requireShopAdminRole(req: Request, res: Response, next: NextFunct
         next();
     } catch (error) {
         shopApiLogger.error('SHOP_ROLE_VERIFY_FAILED', 'Nie udało się zweryfikować uprawnień do sklepu.', { userId }, error);
+        res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień użytkownika.' });
+    }
+}
+
+async function requireDevRole(req: Request, res: Response, next: NextFunction): Promise<void> {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    const userId = req.session.user?.id;
+    if (!userId) {
+        res.status(401).json({ error: 'Brak autoryzacji.' });
+        return;
+    }
+
+    try {
+        const member = await getGuildMember(userId, guildId);
+        if (!member || !hasDevRole(member)) {
+            res.status(403).json({ error: 'Brak uprawnień deweloperskich.' });
+            return;
+        }
+
+        next();
+    } catch (error) {
+        shopApiLogger.error('SHOP_DEV_ROLE_VERIFY_FAILED', 'Nie udało się zweryfikować uprawnień dev.', { userId }, error);
         res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień użytkownika.' });
     }
 }
@@ -262,11 +291,9 @@ shopApiRouter.post('/orders/:id/complete', requireAuth, requireShopAdminRole, as
         });
 
         const guildId = process.env.GUILD_ID;
-        const botClient = getBotClient();
-        if (guildId && botClient) {
+        if (guildId) {
             const adminMention = actorUserId ? `<@${actorUserId}>` : 'administratora';
-            void closeOrderTicketProgrammatic({
-                client: botClient,
+            void closeOrderTicketViaRest({
                 guildId,
                 orderId,
                 notificationMessage: `@here Zamówienie **#${orderId}** zostało zrealizowane przez ${adminMention}. Ticket zostanie zamknięty za 60 sekund...`,
@@ -335,10 +362,8 @@ shopApiRouter.post('/orders/:id/cancel', requireAuth, requireShopAdminRole, asyn
         });
 
         const guildId = process.env.GUILD_ID;
-        const botClient = getBotClient();
-        if (guildId && botClient) {
-            void closeOrderTicketProgrammatic({
-                client: botClient,
+        if (guildId) {
+            void closeOrderTicketViaRest({
                 guildId,
                 orderId,
                 notificationMessage: `@here Zamówienie **#${orderId}** zostało anulowane przez <@${actorUserId}>. Ticket zostanie zamknięty za 60 sekund...`,
@@ -360,6 +385,31 @@ shopApiRouter.post('/orders/:id/cancel', requireAuth, requireShopAdminRole, asyn
     }
 });
 
+// DELETE /api/shop/orders/all  — dev-only: wipe entire order history
+shopApiRouter.delete('/orders/all', requireAuth, requireShopAdminRole, requireDevRole, async (req, res) => {
+    const parsed = shopDeleteAllOrdersSchema.safeParse(req.body);
+    if (!parsed.success) {
+        res.status(400).json({ success: false, error: 'Wymagane potwierdzenie operacji.' });
+        return;
+    }
+
+    const actorUserId = req.session.user?.id;
+
+    try {
+        const { deletedCount } = await deleteAllOrders();
+        shopApiLogger.warn('SHOP_ORDERS_ALL_DELETED', 'Usunięto całą historię zamówień.', {
+            deletedCount,
+            actorUserId,
+        });
+        res.json({ success: true, data: { deletedCount } });
+    } catch (error) {
+        shopApiLogger.error('SHOP_ORDERS_ALL_DELETE_ERROR', 'Błąd podczas usuwania historii zamówień.', {
+            actorUserId,
+        }, error);
+        res.status(500).json({ success: false, error: 'Błąd serwera.' });
+    }
+});
+
 function resolveStatusFilter(value: unknown): 'pending' | 'completed' | 'cancelled' | 'all' {
     if (value === 'pending' || value === 'completed' || value === 'cancelled') return value;
     return 'all';
@@ -373,7 +423,8 @@ function resolveUserIdFilter(value: unknown): string | undefined {
 }
 
 async function sendCompletionDm(userId: string, orderId: number): Promise<void> {
-    const content = `✅ Twoje zamówienie **#${orderId}** zostało zrealizowane.`;
+    const g2Emoji = await resolveG2HussarsEmoji();
+    const content = `${g2Emoji} Twoje zamówienie **#${orderId}** zostało zrealizowane.`;
     await sendDirectMessage(userId, content);
 }
 
@@ -393,6 +444,10 @@ async function resolveG2HussarsEmoji(): Promise<string> {
     }
 }
 
+function escapeDiscordMarkdown(text: string): string {
+    return text.replace(/[\\*_~`|>[\](){}#!]/g, '\\$&');
+}
+
 async function sendCancellationDm(
     userId: string,
     orderId: number,
@@ -400,6 +455,7 @@ async function sendCancellationDm(
     reason: string,
 ): Promise<void> {
     const g2Emoji = await resolveG2HussarsEmoji();
-    const content = `${g2Emoji} Twoje zamówienie o numerze **#${orderId}** zostało anulowane przez <@${cancelledByUserId}> z powodu: ${reason}`;
-    await sendDirectMessage(userId, content);
+    const safeReason = escapeDiscordMarkdown(reason);
+    const content = `${g2Emoji} Twoje zamówienie o numerze **#${orderId}** zostało anulowane przez <@${cancelledByUserId}> z powodu: ${safeReason}`;
+    await sendDirectMessage(userId, content, { allowedMentions: { parse: [] } });
 }

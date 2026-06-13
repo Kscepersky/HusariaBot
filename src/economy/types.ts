@@ -19,8 +19,6 @@ export interface EconomyConfig {
     xpVoiceAllowSelfMute: boolean;
     xpVoiceAllowSelfDeaf: boolean;
     xpVoiceAllowAfk: boolean;
-    watchpartyXpMultiplier: number;
-    watchpartyCoinBonusPerMinute: number;
     levelUpCoinsBase: number;
     levelUpCoinsPerLevel: number;
 }

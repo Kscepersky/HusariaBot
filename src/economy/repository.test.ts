@@ -9,7 +9,6 @@ import {
     addXpByAdmin,
     awardMessageXp,
     awardVoiceXp,
-    awardWatchpartyVoiceActivity,
     createEconomyTimeout,
     claimDailyReward,
     getActiveEconomyTimeoutForUser,
@@ -555,7 +554,9 @@ describe('economy daily repository', () => {
     it('nalicza drip tylko dla naturalnych zrodel XP', async () => {
         await withTempEconomyDb(async () => {
             const nowTimestamp = Date.UTC(2026, 3, 3, 10, 0, 0, 0);
-            const voiceAward = await awardVoiceXp(GUILD_ID, USER_ID, nowTimestamp, 4);
+            const currentConfig = await getEconomyConfig();
+            await updateEconomyConfig({ ...currentConfig, xpVoicePerMinute: 20 }, nowTimestamp - 1);
+            const voiceAward = await awardVoiceXp(GUILD_ID, USER_ID, nowTimestamp);
 
             expect(voiceAward.awardedXp).toBe(20);
             expect(voiceAward.coinsAwarded).toBe(1);
@@ -570,30 +571,6 @@ describe('economy daily repository', () => {
             });
 
             expect(adminMutation.currentCoins).toBe(1);
-        });
-    });
-
-    it('watchparty nalicza naturalny drip, bonus coins i level-up reward', async () => {
-        await withTempEconomyDb(async () => {
-            const nowTimestamp = Date.UTC(2026, 3, 3, 10, 30, 0, 0);
-            const currentConfig = await getEconomyConfig();
-            const updatedConfig = await updateEconomyConfig({
-                ...currentConfig,
-                xpVoicePerMinute: 100,
-                watchpartyXpMultiplier: 1.5,
-                watchpartyCoinBonusPerMinute: 2,
-            }, nowTimestamp);
-
-            const award = await awardWatchpartyVoiceActivity(
-                GUILD_ID,
-                USER_ID,
-                nowTimestamp + 1_000,
-                updatedConfig,
-            );
-
-            expect(award.awardedXp).toBe(150);
-            expect(award.currentLevel).toBe(2);
-            expect(award.coinsAwarded).toBe(resolveExpectedLevelReward(2) + 12 + 2);
         });
     });
 
