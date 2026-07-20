@@ -6,6 +6,9 @@ import {
 import { getShopItemById } from '../shop/repository.js';
 import { getEconomyUserState } from '../economy/repository.js';
 import { buildPurchaseConfirmEmbed, buildPurchaseConfirmButtons } from '../shop/shop-ui.js';
+import { trackConfirmation, buildConfirmKey } from '../shop/confirmation-tracker.js';
+
+const CONFIRMATION_TIMEOUT_MS = 60_000;
 
 export const kupCommand = {
     data: new SlashCommandBuilder()
@@ -55,6 +58,15 @@ export const kupCommand = {
             const embed = buildPurchaseConfirmEmbed(item, userState.coins);
             const buttons = buildPurchaseConfirmButtons(item.id);
             await interaction.reply({ embeds: [embed], components: [buttons], flags: MessageFlags.Ephemeral });
+
+            const confirmKey = buildConfirmKey(interaction.user.id, itemId);
+            trackConfirmation(confirmKey, CONFIRMATION_TIMEOUT_MS, async () => {
+                try {
+                    await interaction.editReply({ content: '⌛ Czas na potwierdzenie zakupu minął.', embeds: [], components: [] });
+                } catch {
+                    // interaction token expired or message already updated
+                }
+            });
         } catch (error) {
             const errorContent = '❌ Wystąpił błąd podczas pobierania przedmiotu.';
             if (interaction.deferred || interaction.replied) {

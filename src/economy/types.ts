@@ -21,6 +21,7 @@ export interface EconomyConfig {
     xpVoiceAllowAfk: boolean;
     levelUpCoinsBase: number;
     levelUpCoinsPerLevel: number;
+    startingCoins: number;
 }
 
 export interface EconomyUserState {

@@ -77,6 +77,10 @@ async function ensureEconomyConfigColumns(db: Database): Promise<void> {
             name: 'stats_excluded_channel_ids',
             sql: "ALTER TABLE economy_config ADD COLUMN stats_excluded_channel_ids TEXT NOT NULL DEFAULT '[]'",
         },
+        {
+            name: 'starting_coins',
+            sql: 'ALTER TABLE economy_config ADD COLUMN starting_coins INTEGER NOT NULL DEFAULT 0',
+        },
     ];
 
     for (const migration of migrations) {
@@ -205,6 +209,7 @@ async function initializeSchema(db: Database): Promise<void> {
             watchparty_coin_bonus_per_minute INTEGER NOT NULL DEFAULT 0,
             level_up_coins_base INTEGER NOT NULL DEFAULT 25,
             level_up_coins_per_level INTEGER NOT NULL DEFAULT 10,
+            starting_coins INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             CHECK (daily_min_coins >= 0),
@@ -218,7 +223,8 @@ async function initializeSchema(db: Database): Promise<void> {
             CHECK (leveling_base_xp >= 1),
             CHECK (leveling_exponent >= 1),
             CHECK (watchparty_xp_multiplier >= 0),
-            CHECK (watchparty_coin_bonus_per_minute >= 0)
+            CHECK (watchparty_coin_bonus_per_minute >= 0),
+            CHECK (starting_coins >= 0)
         );
 
         CREATE TABLE IF NOT EXISTS economy_admin_mutations (
@@ -368,9 +374,10 @@ async function initializeSchema(db: Database): Promise<void> {
             watchparty_coin_bonus_per_minute,
             level_up_coins_base,
             level_up_coins_per_level,
+            starting_coins,
             created_at,
             updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         1,
         100,
@@ -395,6 +402,7 @@ async function initializeSchema(db: Database): Promise<void> {
         0,
         25,
         10,
+        0,
         now,
         now,
     );

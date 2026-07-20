@@ -432,20 +432,32 @@ export async function getMemberTimeSeries(
 ): Promise<ServerStatsMemberPoint[]> {
     const db = await getEconomyDatabase();
 
-    const rows = await db.all<DailyMemberRow[]>(
-        `SELECT date, member_count, joins, leaves
-         FROM daily_member_counts
-         WHERE guild_id = ? AND date >= ? AND date <= ?
-         ORDER BY date ASC`,
-        guildId, startDate, endDate,
-    );
+    const [priorRow, rows] = await Promise.all([
+        db.get<{ member_count: number }>(
+            `SELECT member_count
+             FROM daily_member_counts
+             WHERE guild_id = ? AND date < ? AND member_count > 0
+             ORDER BY date DESC
+             LIMIT 1`,
+            guildId, startDate,
+        ),
+        db.all<DailyMemberRow[]>(
+            `SELECT date, member_count, joins, leaves
+             FROM daily_member_counts
+             WHERE guild_id = ? AND date >= ? AND date <= ?
+             ORDER BY date ASC`,
+            guildId, startDate, endDate,
+        ),
+    ]);
 
     const byDate = new Map(rows.map((r) => [r.date, r]));
+    let lastKnownCount = Number(priorRow?.member_count ?? 0);
     return fillDateRange(startDate, endDate).map((date) => {
         const row = byDate.get(date);
+        if (row) lastKnownCount = Number(row.member_count);
         return {
             date,
-            memberCount: Number(row?.member_count ?? 0),
+            memberCount: row ? Number(row.member_count) : lastKnownCount,
             joins: Number(row?.joins ?? 0),
             leaves: Number(row?.leaves ?? 0),
         };

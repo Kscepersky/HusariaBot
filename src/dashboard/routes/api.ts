@@ -38,6 +38,7 @@ import {
     dashboardEventSchema,
     economyCsvImportSchema,
     economyConfigSchema,
+    economyDenominateCoinsSchema,
     economyLevelRoleMappingsSchema,
     economyUserMutationSchema,
     embedPayloadSchema,
@@ -60,6 +61,8 @@ import {
     addLevelsByAdmin,
     addXpByAdmin,
     createEconomyTimeout,
+    denominateEconomyCoins,
+    exportEconomyCsvSnapshot,
     getActiveEconomyTimeoutForUser,
     getEconomyConfig,
     getEconomyLeaderboardPage,
@@ -2100,6 +2103,48 @@ apiRouter.post('/economy/reset-users', requireCurrentDashboardDevRole, async (_r
     }
 });
 
+// POST /api/economy/denominate-coins — divide every user's coins by a divisor (e.g. 100:1), no other state changes
+apiRouter.post('/economy/denominate-coins', requireCurrentDashboardDevRole, async (req, res) => {
+    const parsedBody = economyDenominateCoinsSchema.safeParse(req.body ?? {});
+    if (!parsedBody.success) {
+        res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
+        return;
+    }
+
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    try {
+        const affectedCount = await denominateEconomyCoins(guildId, parsedBody.data.divisor ?? 100);
+        res.json({ success: true, affectedCount });
+    } catch (error) {
+        apiLogger.error('ECONOMY_DENOMINATE_COINS_FAILED', 'Failed to denominate economy coins.', {}, error);
+        res.status(500).json({ error: 'Nie udało się wykonać denominacji coinsów.' });
+    }
+});
+
+// GET /api/economy/export-csv — export current economy snapshot as importable CSV
+apiRouter.get('/economy/export-csv', requireCurrentDashboardDevRole, async (_req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    try {
+        const csvContent = await exportEconomyCsvSnapshot(guildId);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="economy-snapshot-${Date.now()}.csv"`);
+        res.send(csvContent);
+    } catch (error) {
+        apiLogger.error('ECONOMY_EXPORT_CSV_FAILED', 'Failed to export economy CSV snapshot.', {}, error);
+        res.status(500).json({ error: 'Nie udało się wyeksportować snapshotu CSV ekonomii.' });
+    }
+});
+
 // POST /api/economy/user-mutation — apply manual economy mutation for one user
 apiRouter.post('/economy/user-mutation', requireCurrentDashboardDevRole, async (req, res) => {
     const parsedBody = economyUserMutationSchema.safeParse(req.body);
@@ -2209,7 +2254,7 @@ apiRouter.put('/economy/level-roles', requireCurrentDashboardDevRole, async (req
     }
 });
 
-// POST /api/economy/import-csv — strict snapshot import (userId,level,xp,messages,voiceMinutes)
+// POST /api/economy/import-csv — strict snapshot import (userId,level,xp,messages,voiceMinutes[,coins])
 apiRouter.post('/economy/import-csv', requireCurrentDashboardDevRole, async (req, res) => {
     const parsedBody = economyCsvImportSchema.safeParse(req.body);
     if (!parsedBody.success) {

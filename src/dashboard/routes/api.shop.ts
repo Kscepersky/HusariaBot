@@ -70,7 +70,7 @@ async function requireShopAdminRole(req: Request, res: Response, next: NextFunct
     }
 }
 
-async function requireDevRole(req: Request, res: Response, next: NextFunction): Promise<void> {
+async function requireShopDevRole(req: Request, res: Response, next: NextFunction): Promise<void> {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -85,7 +85,11 @@ async function requireDevRole(req: Request, res: Response, next: NextFunction): 
 
     try {
         const member = await getGuildMember(userId, guildId);
-        if (!member || !hasDevRole(member)) {
+        if (!member || !hasRequiredRole(member)) {
+            res.status(403).json({ error: 'Brak uprawnień do zarządzania sklepem.' });
+            return;
+        }
+        if (!hasDevRole(member)) {
             res.status(403).json({ error: 'Brak uprawnień deweloperskich.' });
             return;
         }
@@ -386,7 +390,7 @@ shopApiRouter.post('/orders/:id/cancel', requireAuth, requireShopAdminRole, asyn
 });
 
 // DELETE /api/shop/orders/all  — dev-only: wipe entire order history
-shopApiRouter.delete('/orders/all', requireAuth, requireShopAdminRole, requireDevRole, async (req, res) => {
+shopApiRouter.delete('/orders/all', requireAuth, requireShopDevRole, async (req, res) => {
     const parsed = shopDeleteAllOrdersSchema.safeParse(req.body);
     if (!parsed.success) {
         res.status(400).json({ success: false, error: 'Wymagane potwierdzenie operacji.' });

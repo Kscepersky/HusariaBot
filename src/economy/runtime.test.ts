@@ -22,6 +22,7 @@ const baseConfig: EconomyConfig = {
     xpVoiceAllowAfk: false,
     levelUpCoinsBase: 25,
     levelUpCoinsPerLevel: 10,
+    startingCoins: 0,
 };
 
 describe('shouldAwardVoiceXpByRule', () => {

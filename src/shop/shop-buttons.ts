@@ -19,6 +19,7 @@ import {
     SHOP_ORDERS_PAGE_SIZE,
 } from './shop-ui.js';
 import { createOrderTicket } from './shop-ticket.js';
+import { markConfirmationHandled, buildConfirmKey } from './confirmation-tracker.js';
 import { createLogger } from '../utils/logger.js';
 
 const shopLogger = createLogger('shop:buttons');
@@ -43,7 +44,7 @@ export async function handleShopButton(interaction: ButtonInteraction): Promise<
 
     const cancelParsed = parseShopCancelBuyCustomId(customId);
     if (cancelParsed) {
-        await handleCancelPurchase(interaction);
+        await handleCancelPurchase(interaction, cancelParsed.itemId);
         return true;
     }
 
@@ -71,6 +72,7 @@ async function handleShopBrowsePage(interaction: ButtonInteraction, guildId: str
 
 async function handleConfirmPurchase(interaction: ButtonInteraction, guildId: string, itemId: number): Promise<void> {
     await interaction.deferUpdate();
+    markConfirmationHandled(buildConfirmKey(interaction.user.id, itemId));
 
     if (!checkAndSetPurchaseCooldown(interaction.user.id)) {
         await interaction.editReply({ content: '⏳ Poczekaj chwilę przed kolejnym zakupem.', embeds: [], components: [] });
@@ -110,7 +112,8 @@ async function handleConfirmPurchase(interaction: ButtonInteraction, guildId: st
     }
 }
 
-async function handleCancelPurchase(interaction: ButtonInteraction): Promise<void> {
+async function handleCancelPurchase(interaction: ButtonInteraction, itemId: number): Promise<void> {
+    markConfirmationHandled(buildConfirmKey(interaction.user.id, itemId));
     await interaction.update({ content: '❌ Zakup anulowany.', embeds: [], components: [] });
 }
 

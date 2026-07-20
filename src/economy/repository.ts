@@ -53,6 +53,7 @@ interface EconomyConfigRow {
     xp_voice_allow_afk: number;
     level_up_coins_base: number;
     level_up_coins_per_level: number;
+    starting_coins: number;
 }
 
 interface LeaderboardRow {
@@ -201,6 +202,7 @@ function normalizeEconomyConfig(input: EconomyConfig): EconomyConfig {
         xpVoiceAllowAfk: input.xpVoiceAllowAfk === true,
         levelUpCoinsBase: clampInt(input.levelUpCoinsBase, 0, 1_000_000),
         levelUpCoinsPerLevel: clampInt(input.levelUpCoinsPerLevel, 0, 1_000_000),
+        startingCoins: clampInt(input.startingCoins, 0, 1_000_000),
     };
 }
 
@@ -286,6 +288,7 @@ function toEconomyConfig(row: EconomyConfigRow): EconomyConfig {
         xpVoiceAllowAfk: row.xp_voice_allow_afk === 1,
         levelUpCoinsBase: row.level_up_coins_base,
         levelUpCoinsPerLevel: row.level_up_coins_per_level,
+        startingCoins: row.starting_coins,
     };
 }
 
@@ -549,6 +552,8 @@ async function getOrCreateEconomyUser(
     userId: string,
     nowTimestamp: number,
 ): Promise<EconomyUserState> {
+    const config = await getEconomyConfigFromDatabase(db);
+
     await db.run(
         `
         INSERT OR IGNORE INTO economy_users (
@@ -569,7 +574,7 @@ async function getOrCreateEconomyUser(
         userId,
         0,
         ECONOMY_MIN_LEVEL,
-        0,
+        config.startingCoins,
         0,
         0,
         0,
@@ -619,7 +624,8 @@ async function getEconomyConfigFromDatabase(db: Database): Promise<EconomyConfig
             xp_voice_allow_self_deaf,
             xp_voice_allow_afk,
             level_up_coins_base,
-            level_up_coins_per_level
+            level_up_coins_per_level,
+            starting_coins
         FROM economy_config
         WHERE id = 1
         LIMIT 1
@@ -669,6 +675,7 @@ export async function updateEconomyConfig(
                     xp_voice_allow_afk = ?,
                     level_up_coins_base = ?,
                     level_up_coins_per_level = ?,
+                    starting_coins = ?,
                     updated_at = ?
                 WHERE id = 1
                 `,
@@ -691,6 +698,7 @@ export async function updateEconomyConfig(
                 config.xpVoiceAllowAfk ? 1 : 0,
                 config.levelUpCoinsBase,
                 config.levelUpCoinsPerLevel,
+                config.startingCoins,
                 nowTimestamp,
             );
 
@@ -709,6 +717,38 @@ export async function resetEconomyUsers(guildId: string): Promise<number> {
                 DELETE FROM economy_users
                 WHERE guild_id = ?
                 `,
+                guildId,
+            );
+
+            await db.run(
+                `
+                UPDATE economy_config
+                SET starting_coins = 0,
+                    updated_at = ?
+                WHERE id = 1
+                `,
+                Date.now(),
+            );
+
+            return Number(result?.changes ?? 0);
+        });
+    });
+}
+
+export async function denominateEconomyCoins(guildId: string, divisor = 100): Promise<number> {
+    const db = await getEconomyDatabase();
+
+    return withWriteLock(async () => {
+        return withTransaction(db, async () => {
+            const result = await db.run(
+                `
+                UPDATE economy_users
+                SET coins = coins / ?,
+                    updated_at = ?
+                WHERE guild_id = ?
+                `,
+                divisor,
+                Date.now(),
                 guildId,
             );
 
@@ -1223,13 +1263,13 @@ export async function importEconomyCsvSnapshot(input: {
                 const lineNumber = index + 1;
                 const columns = rows[index].split(',').map((value) => value.trim());
 
-                if (columns.length !== 5) {
+                if (columns.length !== 5 && columns.length !== 6) {
                     throw new EconomyCsvImportValidationError(
-                        `Wiersz ${lineNumber}: oczekiwano 5 kolumn w formacie userId,level,totalxp,messages,voiceMinutes.`,
+                        `Wiersz ${lineNumber}: oczekiwano 5 lub 6 kolumn w formacie userId,level,totalxp,messages,voiceMinutes,coins.`,
                     );
                 }
 
-                const [userId, levelRaw, totalXpRaw, messageCountRaw, voiceMinutesRaw] = columns;
+                const [userId, levelRaw, totalXpRaw, messageCountRaw, voiceMinutesRaw, coinsRaw] = columns;
 
                 if (!/^\d{17,20}$/.test(userId)) {
                     throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: pole userId ma niepoprawny format.`);
@@ -1251,7 +1291,9 @@ export async function importEconomyCsvSnapshot(input: {
                     throw new EconomyCsvImportValidationError(`Wiersz ${lineNumber}: level nie moze przekraczac 10000.`);
                 }
 
-                const importedCoins = resolveLevelUpCoins(ECONOMY_MIN_LEVEL, level, config);
+                const importedCoins = coinsRaw !== undefined
+                    ? parseCsvIntegerField(coinsRaw, lineNumber, 'coins', 0)
+                    : resolveLevelUpCoins(ECONOMY_MIN_LEVEL, level, config);
 
                 const updateResult = await db.run(
                     `
@@ -1319,6 +1361,37 @@ export async function importEconomyCsvSnapshot(input: {
             };
         });
     });
+}
+
+interface EconomyExportRow {
+    user_id: string;
+    xp: number;
+    level: number;
+    coins: number;
+    message_count: number;
+    voice_minutes: number;
+}
+
+export async function exportEconomyCsvSnapshot(guildId: string): Promise<string> {
+    const db = await getEconomyDatabase();
+    const config = await getEconomyConfigFromDatabase(db);
+
+    const rows = await db.all<EconomyExportRow[]>(
+        `
+        SELECT user_id, xp, level, coins, message_count, voice_minutes
+        FROM economy_users
+        WHERE guild_id = ?
+        ORDER BY user_id
+        `,
+        guildId,
+    );
+
+    return rows
+        .map((row) => {
+            const xpIntoLevel = resolveLevelProgress(row.xp, row.level, config).xpIntoLevel;
+            return [row.user_id, row.level, xpIntoLevel, row.message_count, row.voice_minutes, row.coins].join(',');
+        })
+        .join('\n');
 }
 
 export async function getEconomyUserState(

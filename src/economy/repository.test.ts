@@ -11,6 +11,8 @@ import {
     awardVoiceXp,
     createEconomyTimeout,
     claimDailyReward,
+    denominateEconomyCoins,
+    exportEconomyCsvSnapshot,
     getActiveEconomyTimeoutForUser,
     getEconomyConfig,
     getEconomyLeaderboardPage,
@@ -705,6 +707,95 @@ describe('economy daily repository', () => {
 
             const guild2User = await getEconomyUserState('guild-2', 'user-c', nowTimestamp + 2_000);
             expect(guild2User.coins).toBe(400);
+        });
+    });
+
+    it('przyznaje startowa ilosc cebulionow nowym uzytkownikom i zeruje ja po resecie ekonomii', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 10, 0, 0, 0);
+
+            const currentConfig = await getEconomyConfig();
+            await updateEconomyConfig({ ...currentConfig, startingCoins: 250 }, nowTimestamp);
+
+            const newUser = await getEconomyUserState('guild-1', 'user-new', nowTimestamp + 1_000);
+            expect(newUser.coins).toBe(250);
+
+            await resetEconomyUsers('guild-1');
+
+            const configAfterReset = await getEconomyConfig();
+            expect(configAfterReset.startingCoins).toBe(0);
+
+            const anotherNewUser = await getEconomyUserState('guild-1', 'user-after-reset', nowTimestamp + 2_000);
+            expect(anotherNewUser.coins).toBe(0);
+        });
+    });
+
+    it('denominuje coinsy 100:1 bez resetowania levelu, XP, wiadomosci i voice minutes', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 10, 0, 0, 0);
+
+            await addCoinsByAdmin({
+                guildId: 'guild-1',
+                targetUserId: 'user-a',
+                adminUserId: 'admin-1',
+                reason: 'Seed',
+                amount: 25_000,
+                nowTimestamp,
+            });
+
+            await incrementMessageCount('guild-1', 'user-a', nowTimestamp + 100);
+            await incrementVoiceMinutes('guild-1', 'user-a', 7, nowTimestamp + 200);
+
+            const beforeState = await getEconomyUserState('guild-1', 'user-a', nowTimestamp + 300);
+
+            const affectedCount = await denominateEconomyCoins('guild-1', 100);
+            expect(affectedCount).toBe(1);
+
+            const afterState = await getEconomyUserState('guild-1', 'user-a', nowTimestamp + 400);
+            expect(afterState.coins).toBe(250);
+            expect(afterState.xp).toBe(beforeState.xp);
+            expect(afterState.level).toBe(beforeState.level);
+            expect(afterState.messageCount).toBe(1);
+            expect(afterState.voiceMinutes).toBe(7);
+        });
+    });
+
+    it('eksportuje snapshot CSV i odtwarza identyczne coinsy po imporcie', async () => {
+        await withTempEconomyDb(async () => {
+            const nowTimestamp = Date.UTC(2026, 3, 3, 10, 0, 0, 0);
+            const userId = '111111111111111111';
+
+            await addCoinsByAdmin({
+                guildId: 'guild-1',
+                targetUserId: userId,
+                adminUserId: 'admin-1',
+                reason: 'Seed',
+                amount: 777,
+                nowTimestamp,
+            });
+
+            await incrementMessageCount('guild-1', userId, nowTimestamp + 100);
+            await incrementVoiceMinutes('guild-1', userId, 9, nowTimestamp + 200);
+
+            const beforeState = await getEconomyUserState('guild-1', userId, nowTimestamp + 300);
+
+            const csvContent = await exportEconomyCsvSnapshot('guild-1');
+            expect(csvContent).toBe(`${userId},${beforeState.level},${beforeState.xp},1,9,${beforeState.coins}`);
+
+            await resetEconomyUsers('guild-1');
+
+            await importEconomyCsvSnapshot({
+                guildId: 'guild-1',
+                csvContent,
+                nowTimestamp: nowTimestamp + 1_000,
+            });
+
+            const restoredState = await getEconomyUserState('guild-1', userId, nowTimestamp + 2_000);
+            expect(restoredState.coins).toBe(beforeState.coins);
+            expect(restoredState.xp).toBe(beforeState.xp);
+            expect(restoredState.level).toBe(beforeState.level);
+            expect(restoredState.messageCount).toBe(1);
+            expect(restoredState.voiceMinutes).toBe(9);
         });
     });
 

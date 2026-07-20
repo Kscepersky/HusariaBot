@@ -451,6 +451,9 @@
         </div>
 
         <div class="events-form-grid">
+          <label class="form-label" for="economy-starting-coins">Startowa ilość cebulionów (nowi użytkownicy)</label>
+          <input id="economy-starting-coins" type="number" class="form-input" min="0" step="1">
+
           <label class="form-label" for="economy-daily-min">Daily: min coins</label>
           <input id="economy-daily-min" type="number" class="form-input" min="0" step="1">
 
@@ -503,7 +506,9 @@
         <div class="scheduled-actions">
           <button id="economy-settings-save-btn" class="btn-primary" type="button">Zapisz ustawienia ekonomii</button>
           <button id="economy-settings-reset-users-btn" class="btn-secondary" type="button">Resetuj wszystkich użytkowników ekonomii</button>
+          <button id="economy-settings-denominate-btn" class="btn-secondary" type="button">Denominacja coinsów 100:1</button>
         </div>
+        <p class="form-help">Denominacja dzieli coinsy każdego użytkownika przez 100 (zostaje 1%). Level, XP, wiadomości i voice minutes NIE zmieniają się.</p>
 
         <hr class="section-divider">
 
@@ -607,17 +612,18 @@
         <hr class="section-divider">
 
         <div class="section-header">
-          <h3>📥 Import CSV (snapshot)</h3>
-          <p>Format bez nagłówka: userId,level,xp,messages,voiceMinutes. Jeden błędny wiersz anuluje cały import.</p>
+          <h3>📥 Snapshot CSV (backup / import)</h3>
+          <p>Format bez nagłówka: userId,level,xp,messages,voiceMinutes,coins (kolumna coins opcjonalna — bez niej coins są przeliczane ze wzoru nagród). Jeden błędny wiersz anuluje cały import.</p>
         </div>
 
         <div class="events-form-grid">
           <label class="form-label" for="economy-csv-import-file">Plik CSV</label>
           <input id="economy-csv-import-file" type="file" class="form-input" accept=".csv,text/csv">
-          <p class="form-help">Przykład wiersza: 123456789012345678,12,45,1000,250</p>
+          <p class="form-help">Przykład wiersza: 123456789012345678,12,45,1000,250,3200</p>
         </div>
 
         <div class="scheduled-actions">
+          <button id="economy-csv-export-btn" class="btn-secondary" type="button">Eksportuj snapshot CSV</button>
           <button id="economy-csv-import-btn" class="btn-secondary" type="button">Importuj snapshot CSV</button>
         </div>
 

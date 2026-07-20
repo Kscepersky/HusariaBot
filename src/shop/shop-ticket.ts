@@ -1,7 +1,4 @@
 import {
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
     ChannelType,
     Client,
     EmbedBuilder,
@@ -13,11 +10,7 @@ import {
 import { HusariaColors } from '../utils/husaria-theme.js';
 import { createLogger } from '../utils/logger.js';
 import { sanitizeTicketUsername } from '../tickets/counter-store.js';
-import {
-    SUPPORT_CATEGORY_ID,
-    TICKET_CLOSE_ADMIN_BUTTON_ID,
-    TICKET_CLOSE_USER_BUTTON_ID,
-} from '../tickets/constants.js';
+import { SUPPORT_CATEGORY_ID } from '../tickets/constants.js';
 import { SUPPORT_ROLE_IDS, DEV_ROLE_ID } from '../utils/role-access.js';
 import type { ShopOrder } from './types.js';
 
@@ -117,18 +110,6 @@ export async function createOrderTicket(
             content: supportMentions.length > 0 ? supportMentions : undefined,
             embeds: [embed],
             allowedMentions: { users: [user.id], roles: SUPPORT_ROLE_IDS },
-            components: [
-                new ActionRowBuilder<ButtonBuilder>().addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(TICKET_CLOSE_USER_BUTTON_ID)
-                        .setLabel('Zamknij ticket')
-                        .setStyle(ButtonStyle.Danger),
-                    new ButtonBuilder()
-                        .setCustomId(TICKET_CLOSE_ADMIN_BUTTON_ID)
-                        .setLabel('Zamknij Ticket (Administracja)')
-                        .setStyle(ButtonStyle.Danger),
-                ),
-            ],
         });
 
         shopTicketLogger.info('SHOP_ORDER_TICKET_CREATED', 'Utworzono kanał zamówienia.', {

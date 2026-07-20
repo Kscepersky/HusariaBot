@@ -42,6 +42,8 @@ vi.mock('../../economy/repository.js', () => ({
     addLevelsByAdmin: vi.fn(),
     addXpByAdmin: vi.fn(),
     createEconomyTimeout: vi.fn(),
+    denominateEconomyCoins: vi.fn(),
+    exportEconomyCsvSnapshot: vi.fn(),
     getActiveEconomyTimeoutForUser: vi.fn(),
     getEconomyConfig: vi.fn(),
     getEconomyLeaderboardPage: vi.fn(),
@@ -121,6 +123,8 @@ import {
     addLevelsByAdmin,
     addXpByAdmin,
     createEconomyTimeout,
+    denominateEconomyCoins,
+    exportEconomyCsvSnapshot,
     getActiveEconomyTimeoutForUser,
     getEconomyConfig,
     getEconomyLeaderboardPage,
@@ -177,6 +181,7 @@ function buildConfig(overrides: Partial<EconomyConfig> = {}): EconomyConfig {
         xpVoiceAllowAfk: false,
         levelUpCoinsBase: 25,
         levelUpCoinsPerLevel: 10,
+        startingCoins: 0,
         ...overrides,
     };
 }
@@ -775,6 +780,72 @@ describe('api economy settings routes', () => {
         });
     });
 
+    it('denominuje coinsy uzytkownikow 100:1 bez resetu poziomu i XP', async () => {
+        vi.mocked(denominateEconomyCoins).mockResolvedValue(5);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/denominate-coins`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ divisor: 100 }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.success).toBe(true);
+            expect(body.affectedCount).toBe(5);
+            expect(vi.mocked(denominateEconomyCoins)).toHaveBeenCalledWith('123456789012345678', 100);
+        });
+    });
+
+    it('denominuje coinsy z domyslnym dzielnikiem 100 gdy nie podano divisor', async () => {
+        vi.mocked(denominateEconomyCoins).mockResolvedValue(3);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/denominate-coins`, {
+                method: 'POST',
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(200);
+            expect(body.affectedCount).toBe(3);
+            expect(vi.mocked(denominateEconomyCoins)).toHaveBeenCalledWith('123456789012345678', 100);
+        });
+    });
+
+    it('zwraca 400 przy niepoprawnym divisor denominacji', async () => {
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/denominate-coins`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ divisor: 1 }),
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(400);
+            expect(vi.mocked(denominateEconomyCoins)).not.toHaveBeenCalled();
+            expect(body.error).toBeTruthy();
+        });
+    });
+
+    it('zwraca 500 przy bledzie denominacji coinsow', async () => {
+        vi.mocked(denominateEconomyCoins).mockRejectedValue(new Error('db update failed'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/denominate-coins`, {
+                method: 'POST',
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(500);
+            expect(body.error).toBe('Nie udało się wykonać denominacji coinsów.');
+        });
+    });
+
     it('zwraca 500 przy bledzie resetu ekonomii', async () => {
         vi.mocked(resetEconomyUsers).mockRejectedValue(new Error('db delete failed'));
 
@@ -1026,6 +1097,41 @@ describe('api economy settings routes', () => {
                 skippedUsers: 1,
                 failedUsers: 0,
             });
+        });
+    });
+
+    it('eksportuje snapshot CSV ekonomii jako plik do pobrania', async () => {
+        vi.mocked(exportEconomyCsvSnapshot).mockResolvedValue(
+            '123456789012345678,12,45,1000,250,3200\n987654321098765432,1,0,0,0,0',
+        );
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/export-csv`, {
+                method: 'GET',
+            });
+
+            const text = await response.text();
+
+            expect(response.status).toBe(200);
+            expect(response.headers.get('content-type')).toContain('text/csv');
+            expect(response.headers.get('content-disposition')).toContain('attachment');
+            expect(text).toBe('123456789012345678,12,45,1000,250,3200\n987654321098765432,1,0,0,0,0');
+            expect(vi.mocked(exportEconomyCsvSnapshot)).toHaveBeenCalledWith('123456789012345678');
+        });
+    });
+
+    it('zwraca 500 przy bledzie eksportu snapshotu CSV', async () => {
+        vi.mocked(exportEconomyCsvSnapshot).mockRejectedValue(new Error('db read failed'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/economy/export-csv`, {
+                method: 'GET',
+            });
+
+            const body = await parseJsonResponse(response);
+
+            expect(response.status).toBe(500);
+            expect(body.error).toBe('Nie udało się wyeksportować snapshotu CSV ekonomii.');
         });
     });
 

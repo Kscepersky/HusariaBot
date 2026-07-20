@@ -1376,7 +1376,7 @@ function bindTicketHistorySectionListeners() {
     }
 
     try {
-      const response = await fetch('/api/tickets/history', { method: 'DELETE', headers: { 'x-csrf-token': csrfToken() } })
+      const response = await fetchWithCsrf('/api/tickets/history', { method: 'DELETE' })
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
         showToast(data.error ?? 'Nie udalo sie wyczyscic historii ticketow.', 'error')
@@ -2749,10 +2749,12 @@ function bindEconomySectionListeners() {
   const reloadButton = document.getElementById('economy-settings-reload-btn')
   const saveButton = document.getElementById('economy-settings-save-btn')
   const resetUsersButton = document.getElementById('economy-settings-reset-users-btn')
+  const denominateButton = document.getElementById('economy-settings-denominate-btn')
   const addCoinsButton = document.getElementById('economy-mutation-add-coins-btn')
   const addXpButton = document.getElementById('economy-mutation-add-xp-btn')
   const addLevelsButton = document.getElementById('economy-mutation-add-levels-btn')
   const importCsvButton = document.getElementById('economy-csv-import-btn')
+  const exportCsvButton = document.getElementById('economy-csv-export-btn')
   const addLevelRoleButton = document.getElementById('economy-level-role-add-btn')
   const levelRolesList = document.getElementById('economy-level-roles-list')
 
@@ -2766,6 +2768,10 @@ function bindEconomySectionListeners() {
 
   resetUsersButton?.addEventListener('click', async () => {
     await resetAllEconomyUsers()
+  })
+
+  denominateButton?.addEventListener('click', async () => {
+    await denominateAllEconomyCoins()
   })
 
   addCoinsButton?.addEventListener('click', async () => {
@@ -2782,6 +2788,10 @@ function bindEconomySectionListeners() {
 
   importCsvButton?.addEventListener('click', async () => {
     await importEconomyCsvSnapshot()
+  })
+
+  exportCsvButton?.addEventListener('click', async () => {
+    await exportEconomyCsvSnapshot()
   })
 
   addLevelRoleButton?.addEventListener('click', async () => {
@@ -3582,6 +3592,7 @@ function readEconomyCheckboxValue(inputId) {
 }
 
 function collectEconomySettingsForm() {
+  const startingCoins = Math.floor(toFiniteNumber(readEconomyInputValue('economy-starting-coins'), 'Startowa ilość cebulionów'))
   const dailyMinCoins = Math.floor(toFiniteNumber(readEconomyInputValue('economy-daily-min'), 'Daily: min coins'))
   const dailyMaxCoins = Math.floor(toFiniteNumber(readEconomyInputValue('economy-daily-max'), 'Daily: max coins'))
   const dailyStreakIncrement = toFiniteNumber(readEconomyInputValue('economy-daily-streak-increment'), 'Daily: przyrost streak')
@@ -3605,6 +3616,7 @@ function collectEconomySettingsForm() {
   }
 
   return {
+    startingCoins,
     dailyMinCoins,
     dailyMaxCoins,
     dailyStreakIncrement,
@@ -3642,6 +3654,7 @@ function setEconomySettingsForm(config) {
     }
   }
 
+  setValue('economy-starting-coins', config.startingCoins)
   setValue('economy-daily-min', config.dailyMinCoins)
   setValue('economy-daily-max', config.dailyMaxCoins)
   setValue('economy-daily-streak-increment', config.dailyStreakIncrement)
@@ -4277,7 +4290,7 @@ async function resetAllEconomyUsers() {
     return
   }
 
-  const confirmed = window.confirm('Czy na pewno zresetowac dane ekonomii wszystkich uzytkownikow na tym serwerze? Tej operacji nie da sie cofnac.')
+  const confirmed = window.confirm('Czy na pewno zresetowac dane ekonomii wszystkich uzytkownikow na tym serwerze? Wyzeruje to rowniez startowa ilosc cebulionow dla nowych uzytkownikow. Tej operacji nie da sie cofnac.')
   if (!confirmed) {
     return
   }
@@ -4303,12 +4316,92 @@ async function resetAllEconomyUsers() {
 
     const resetCount = Number(payload.resetCount ?? 0)
     showToast(`✅ Zresetowano dane ekonomii dla ${resetCount} uzytkownikow.`, 'success')
+    await loadEconomySettings({ silent: true })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nieznany blad'
     showToast(`❌ ${message}`, 'error')
   } finally {
     if (resetButton instanceof HTMLButtonElement) {
       resetButton.disabled = false
+    }
+  }
+}
+
+async function denominateAllEconomyCoins() {
+  if (!economySettingsLoadSuccessful) {
+    showToast('❌ Najpierw odswiez ustawienia ekonomii i upewnij sie, ze ladowanie zakonczylo sie sukcesem.', 'error')
+    return
+  }
+
+  const confirmed = window.confirm('Czy na pewno wykonac denominacje 100:1? Coins kazdego uzytkownika na tym serwerze zostana podzielone przez 100 (zostaje 1%). Level, XP, wiadomosci i voice minutes NIE zmienia sie. Tej operacji nie da sie cofnac.')
+  if (!confirmed) {
+    return
+  }
+
+  const denominateButton = document.getElementById('economy-settings-denominate-btn')
+  if (denominateButton instanceof HTMLButtonElement) {
+    denominateButton.disabled = true
+  }
+
+  try {
+    const response = await fetchWithCsrf('/api/economy/denominate-coins', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ divisor: 100 }),
+    })
+
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? 'Nie udalo sie wykonac denominacji coinsow.')
+    }
+
+    const affectedCount = Number(payload.affectedCount ?? 0)
+    showToast(`✅ Denominacja 100:1 zakonczona dla ${affectedCount} uzytkownikow.`, 'success')
+    await loadEconomyLeaderboard({ silent: true })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    showToast(`❌ ${message}`, 'error')
+  } finally {
+    if (denominateButton instanceof HTMLButtonElement) {
+      denominateButton.disabled = false
+    }
+  }
+}
+
+async function exportEconomyCsvSnapshot() {
+  const exportButton = document.getElementById('economy-csv-export-btn')
+  if (exportButton instanceof HTMLButtonElement) {
+    exportButton.disabled = true
+  }
+
+  try {
+    const response = await fetchWithCsrf('/api/economy/export-csv', { method: 'GET' })
+    if (!response.ok) {
+      const payload = await parseApiResponse(response)
+      throw new Error(payload.error ?? 'Nie udalo sie wyeksportowac snapshotu CSV ekonomii.')
+    }
+
+    const csvContent = await response.text()
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' })
+    const downloadUrl = URL.createObjectURL(blob)
+
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.download = `economy-snapshot-${Date.now()}.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(downloadUrl)
+
+    showToast('✅ Snapshot CSV ekonomii zostal wyeksportowany.', 'success')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    showToast(`❌ ${message}`, 'error')
+  } finally {
+    if (exportButton instanceof HTMLButtonElement) {
+      exportButton.disabled = false
     }
   }
 }

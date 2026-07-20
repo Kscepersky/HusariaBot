@@ -53,6 +53,7 @@ export const economyConfigSchema = z.object({
     xpVoiceAllowAfk: z.boolean(),
     levelUpCoinsBase: z.number().int().min(0).max(1_000_000),
     levelUpCoinsPerLevel: z.number().int().min(0).max(1_000_000),
+    startingCoins: z.number().int().min(0).max(1_000_000),
 }).refine((value) => value.dailyMaxCoins >= value.dailyMinCoins, {
     message: 'dailyMaxCoins musi byc wieksze lub rowne dailyMinCoins.',
     path: ['dailyMaxCoins'],
@@ -79,6 +80,10 @@ export const economyUserMutationSchema = z.discriminatedUnion('operation', [
 
 export const economyCsvImportSchema = z.object({
     csvContent: z.string().min(1).max(2_000_000),
+}).strip();
+
+export const economyDenominateCoinsSchema = z.object({
+    divisor: z.number().int().min(2).max(1_000_000).optional(),
 }).strip();
 
 export const economyLevelRoleMappingsSchema = z.object({
