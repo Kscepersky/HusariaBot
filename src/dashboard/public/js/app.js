@@ -208,6 +208,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await ensureCsrfToken().catch(() => undefined)
   initSidebarNav()
   initHamburger()
+  initLanguageSwitcher()
   applyEconomySettingsAccessState()
   await initEmbedSection()
   await initScheduledSection()
@@ -223,8 +224,114 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initSessionActivitySection()
   bindImagePreviewModalListeners()
   await loadG2Matches({ silent: true })
-  switchSection('embed-creator')
+  switchSection(resolveFirstAllowedSection() ?? 'embed-creator')
 })
+
+// ─── Dostep do sekcji i jezyk dashboardu ──────────────────────────────────────
+
+let allowedSections = null
+
+/**
+ * Pobiera role, allowliste sekcji i jezyk z serwera. Ukrywanie zakladek jest
+ * tylko kosmetyka - realna autoryzacja siedzi w requireSectionAccess po stronie API.
+ */
+async function loadDashboardAccess() {
+  try {
+    const response = await fetch('/api/me/access')
+    if (!response.ok) {
+      if (response.status === 403) window.location.href = '/auth/login'
+      return
+    }
+
+    const access = await response.json()
+    allowedSections = Array.isArray(access.allowedSections) ? access.allowedSections : null
+    currentDashboardRole = access.role ?? currentDashboardRole
+
+    applyAllowedSectionsToNav()
+
+    // Recznie zapisany wybor uzytkownika ma pierwszenstwo nad domyslnym dla roli.
+    const stored = window.I18n.readStoredLanguage()
+    window.I18n.setLanguage(stored ?? access.language, { persist: false })
+    syncLanguageSwitcher()
+  } catch (error) {
+    console.error('Nie udalo sie pobrac uprawnien dashboardu:', error)
+  }
+}
+
+function isSectionAllowed(section) {
+  return allowedSections === null || allowedSections.includes(section)
+}
+
+/** Pierwsza zakladka widoczna dla roli - punkt startowy i fallback. */
+function resolveFirstAllowedSection() {
+  const items = document.querySelectorAll('.sidebar-item[data-section]')
+  for (const item of items) {
+    if (isSectionAllowed(item.dataset.section)) return item.dataset.section
+  }
+  return null
+}
+
+function applyAllowedSectionsToNav() {
+  if (allowedSections === null) return
+
+  document.querySelectorAll('.sidebar-item[data-section]').forEach((item) => {
+    if (!isSectionAllowed(item.dataset.section)) {
+      item.style.display = 'none'
+      item.dataset.sectionDenied = 'true'
+    }
+  })
+}
+
+function initLanguageSwitcher() {
+  const switcher = document.getElementById('language-switcher')
+  if (!switcher) return
+
+  switcher.addEventListener('click', (event) => {
+    const button = event.target.closest('.language-option')
+    if (!button) return
+
+    const language = button.dataset.language
+    if (!window.I18n.isSupported(language) || language === window.I18n.getLanguage()) return
+
+    window.I18n.setLanguage(language)
+    syncLanguageSwitcher()
+    void persistLanguagePreference(language)
+  })
+
+  // Kazda zmiana jezyka musi przerysowac aktywna sekcje - listy sa budowane w JS.
+  window.I18n.onLanguageChange(() => {
+    syncLanguageSwitcher()
+    refreshActiveSectionAfterLanguageChange()
+  })
+
+  syncLanguageSwitcher()
+}
+
+function syncLanguageSwitcher() {
+  const current = window.I18n.getLanguage()
+  document.querySelectorAll('#language-switcher .language-option').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.language === current))
+  })
+}
+
+async function persistLanguagePreference(language) {
+  try {
+    await fetchWithCsrf('/api/me/language', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language }),
+    })
+  } catch (error) {
+    // Zmiana w UI juz nastapila - brak zapisu oznacza tylko brak trwalosci miedzy sesjami.
+    console.warn('Nie udalo sie zapisac preferencji jezyka:', error)
+  }
+}
+
+function refreshActiveSectionAfterLanguageChange() {
+  if (currentSection) {
+    switchSection(currentSection)
+  }
+}
 
 async function loadUserInfo() {
   try {
@@ -236,6 +343,8 @@ async function loadUserInfo() {
 
     const { user } = await resp.json()
     currentDashboardRole = user.dashboardRole ?? null
+
+    await loadDashboardAccess()
 
     const settingsTabBtn = document.getElementById('stats-settings-tab-btn')
     if (settingsTabBtn && currentDashboardRole !== 'dev') {
@@ -253,7 +362,7 @@ async function loadUserInfo() {
           ? `<img class="user-avatar" src="${avatarUrl}" alt="avatar">`
           : `<div class="user-avatar-placeholder">👤</div>`}
         <span class="user-name">${escapeHtml(user.globalName || user.username)}</span>
-        <button type="button" class="btn-logout" id="logout-btn">Wyloguj</button>
+        <button type="button" class="btn-logout" id="logout-btn">${escapeHtml(t('common.logout'))}</button>
       </div>`
 
     const logoutButton = document.getElementById('logout-btn')
@@ -277,12 +386,12 @@ async function logoutDashboard() {
 
     if (!response.ok) {
       const payload = await parseApiResponse(response)
-      throw new Error(payload.error ?? 'Nie udało się wylogować.')
+      throw new Error(payload.error ?? t('app.nie_udao_sie_wylogowac'))
     }
 
     window.location.href = '/auth/login'
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -297,12 +406,12 @@ async function ensureCsrfToken(forceRefresh = false) {
       const response = await fetch('/api/csrf-token')
       if (response.status === 401) {
         window.location.href = '/auth/login'
-        throw new Error('Sesja wygasła. Zaloguj się ponownie.')
+        throw new Error(t('app.sesja_wygasa_zaloguj_sie_ponownie'))
       }
 
       const payload = await parseApiResponse(response)
       if (!response.ok || typeof payload.csrfToken !== 'string' || payload.csrfToken.length === 0) {
-        throw new Error(payload.error ?? 'Nie udało się pobrać tokenu bezpieczeństwa.')
+        throw new Error(payload.error ?? t('app.nie_udao_sie_pobrac_tokenu_bezpieczenstwa'))
       }
 
       return payload.csrfToken
@@ -391,11 +500,18 @@ function initSidebarNav() {
 }
 
 function switchSection(section) {
+  if (!isSectionAllowed(section)) {
+    showToast(t('toast.section_denied'), 'error')
+    const fallback = resolveFirstAllowedSection()
+    if (!fallback || fallback === section) return
+    section = fallback
+  }
+
   if (section === 'economy-settings' && economyHasDevAccess !== true) {
     if (economyHasDevAccess === false) {
-      showToast('ℹ️ Ustawienia ekonomii są dostępne tylko dla roli Dev.', 'info')
+      showToast(t('app.i_ustawienia_ekonomii_sa_dostepne_tylko'), 'info')
     } else {
-      showToast('ℹ️ Trwa weryfikacja uprawnień do ustawień ekonomii. Spróbuj ponownie za chwilę.', 'info')
+      showToast(t('app.i_trwa_weryfikacja_uprawnien_do_ustawien'), 'info')
     }
 
     section = 'economy-leaderboard'
@@ -920,7 +1036,7 @@ function bindEmbedSectionListeners() {
     }
 
     if (selectedUploadFile && selectedUploadFile.size > MAX_UPLOAD_BYTES) {
-      showToast('Plik jest za duży. Maksymalny rozmiar to 20 MB.', 'error')
+      showToast(t('app.plik_jest_za_duzy_maksymalny_rozmiar'), 'error')
       uploadInput.value = ''
       selectedUploadFile = null
       clearUploadPreviewUrl()
@@ -936,7 +1052,7 @@ function bindEmbedSectionListeners() {
     const fileNameElement = document.getElementById('upload-file-name')
     fileNameElement.textContent = selectedUploadFile
       ? `Wybrano: ${selectedUploadFile.name}`
-      : 'Nie wybrano pliku.'
+      : t('app.nie_wybrano_pliku')
 
     updatePreview()
     updateSendButton()
@@ -1072,7 +1188,7 @@ function bindEmbedSectionListeners() {
 
     const unixTimestamp = resolveTimestampInsertUnix()
     if (!unixTimestamp) {
-      showToast('Ustaw poprawną datę timestampu.', 'error')
+      showToast(t('app.ustaw_poprawna_date_timestampu'), 'error')
       return
     }
 
@@ -1371,7 +1487,7 @@ function bindTicketHistorySectionListeners() {
   }
 
   clearButton?.addEventListener('click', async () => {
-    if (!confirm('Czy na pewno chcesz wyczyscic cala historie ticketow? Tej operacji nie mozna cofnac.')) {
+    if (!confirm(t('app.czy_na_pewno_chcesz_wyczyscic_cala'))) {
       return
     }
 
@@ -1379,14 +1495,14 @@ function bindTicketHistorySectionListeners() {
       const response = await fetchWithCsrf('/api/tickets/history', { method: 'DELETE' })
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
-        showToast(data.error ?? 'Nie udalo sie wyczyscic historii ticketow.', 'error')
+        showToast(data.error ?? t('app.nie_udalo_sie_wyczyscic_historii_ticketow'), 'error')
         return
       }
 
-      showToast('Historia ticketow zostala wyczyszczona.', 'success')
+      showToast(t('app.historia_ticketow_zostala_wyczyszczona'), 'success')
       void loadTicketHistory({ page: 1, silent: true })
     } catch {
-      showToast('Blad sieci podczas czyszczenia historii ticketow.', 'error')
+      showToast(t('app.blad_sieci_podczas_czyszczenia_historii_ticketow'), 'error')
     }
   })
 
@@ -1519,7 +1635,7 @@ async function loadDashboardLogs(options = {}) {
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie pobrac logow systemowych.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_pobrac_logow_systemowych'))
     }
 
     if (requestId !== dashboardLogsLoadRequestId) {
@@ -1554,7 +1670,7 @@ async function loadDashboardLogs(options = {}) {
     renderDashboardLogs()
 
     if (!silent) {
-      const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac logow systemowych.'
+      const message = error instanceof Error ? error.message : t('app.nie_udalo_sie_pobrac_logow_systemowych_2')
       showToast(`❌ ${message}`, 'error')
     }
   } finally {
@@ -1594,7 +1710,7 @@ function bindSessionActivitySectionListeners() {
   })
 
   killswitchButton?.addEventListener('click', () => {
-    if (!confirm('Na pewno chcesz wylogować WSZYSTKICH użytkowników z dashboardu? Ta operacja jest nieodwracalna.')) return
+    if (!confirm(t('app.na_pewno_chcesz_wylogowac_wszystkich_uzytkownikow'))) return
     void triggerSessionKillswitch()
   })
 }
@@ -1615,20 +1731,20 @@ async function triggerSessionKillswitch() {
 
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}))
-      alert(`Błąd: ${payload.error ?? 'Nie udało się wykonać killswitch.'}`)
+      alert(t('app.ui_blad_prefix') + ': ' + (payload.error ?? t('app.nie_udao_sie_wykonac_killswitch')))
       if (killswitchButton) {
         killswitchButton.disabled = false
-        killswitchButton.textContent = 'Killswitch — wyloguj wszystkich'
+        killswitchButton.textContent = t('app.killswitch_wyloguj_wszystkich')
       }
       return
     }
 
     window.location.href = '/auth/login'
   } catch {
-    alert('Błąd połączenia. Spróbuj ponownie.')
+    alert(t('app.bad_poaczenia_sprobuj_ponownie'))
     if (killswitchButton) {
       killswitchButton.disabled = false
-      killswitchButton.textContent = 'Killswitch — wyloguj wszystkich'
+      killswitchButton.textContent = t('app.killswitch_wyloguj_wszystkich_2')
     }
   }
 }
@@ -1650,7 +1766,7 @@ async function loadSessionActivity(options = {}) {
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie pobrac aktywnosci sesji.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_pobrac_aktywnosci_sesji'))
     }
 
     if (requestId !== sessionActivityLoadRequestId) {
@@ -1675,7 +1791,7 @@ async function loadSessionActivity(options = {}) {
     renderSessionActivity()
 
     if (!silent) {
-      const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac aktywnosci sesji.'
+      const message = error instanceof Error ? error.message : t('app.nie_udalo_sie_pobrac_aktywnosci_sesji_2')
       showToast(`❌ ${message}`, 'error')
     }
   }
@@ -1702,7 +1818,7 @@ function renderSessionActivity() {
   }
 
   if (pageLabel) {
-    pageLabel.textContent = `Strona ${sessionActivityPage}/${sessionActivityTotalPages}`
+    pageLabel.textContent = t('app.strona_p1_p2', { p1: sessionActivityPage, p2: sessionActivityTotalPages })
   }
 
   if (pagination) {
@@ -1737,6 +1853,7 @@ function buildDashboardRoleChipHtml(role) {
     admin:             { label: 'Admin',              color: '#dc143c' },
     moderator:         { label: 'Moderator',          color: '#f0a500' },
     community_manager: { label: 'Community Manager',  color: '#9b59b6' },
+    g2staff:           { label: 'G2 Staff',            color: '#1abc9c' },
   }
   const entry = map[role]
   if (!entry) return ''
@@ -1828,7 +1945,7 @@ async function loadTicketHistory(options = {}) {
     const response = await fetch(`/api/tickets/history?${params.toString()}`)
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie pobrac historii ticketow.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_pobrac_historii_ticketow'))
     }
 
     if (requestId !== ticketHistoryLoadRequestId) {
@@ -1859,7 +1976,7 @@ async function loadTicketHistory(options = {}) {
     renderTicketHistory()
 
     if (!silent) {
-      const message = error instanceof Error ? error.message : 'Nie udalo sie pobrac historii ticketow.'
+      const message = error instanceof Error ? error.message : t('app.nie_udalo_sie_pobrac_historii_ticketow_2')
       showToast(`❌ ${message}`, 'error')
     }
   }
@@ -1871,7 +1988,7 @@ async function loadScheduledPosts() {
     const json = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(json.error ?? 'Nie udało się pobrać listy zaplanowanych postów.')
+      throw new Error(json.error ?? t('app.nie_udao_sie_pobrac_listy_zaplanowanych'))
     }
 
     scheduledPosts = Array.isArray(json.posts) ? json.posts : []
@@ -1879,7 +1996,7 @@ async function loadScheduledPosts() {
   } catch (error) {
     scheduledPosts = []
     renderScheduledPosts()
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_2')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -1890,7 +2007,7 @@ async function loadSentPosts() {
     const json = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(json.error ?? 'Nie udało się pobrać listy wysłanych postów.')
+      throw new Error(json.error ?? t('app.nie_udao_sie_pobrac_listy_wysanych'))
     }
 
     sentPosts = Array.isArray(json.posts) ? json.posts : []
@@ -1905,7 +2022,7 @@ async function loadSentPosts() {
   } catch (error) {
     sentPosts = []
     renderSentPosts()
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_3')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -1916,7 +2033,7 @@ async function loadDashboardEvents() {
     const json = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(json.error ?? 'Nie udało się pobrać listy wydarzeń Discord.')
+      throw new Error(json.error ?? t('app.nie_udao_sie_pobrac_listy_wydarzen'))
     }
 
     dashboardEvents = Array.isArray(json.events) ? json.events : []
@@ -1924,7 +2041,7 @@ async function loadDashboardEvents() {
   } catch (error) {
     dashboardEvents = []
     renderDashboardEvents()
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_4')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -1946,7 +2063,7 @@ function renderTicketHistory() {
   }
 
   if (pageLabel) {
-    pageLabel.textContent = `Strona ${ticketHistoryPage}/${ticketHistoryTotalPages}`
+    pageLabel.textContent = t('app.strona_p1_p2_2', { p1: ticketHistoryPage, p2: ticketHistoryTotalPages })
   }
 
   if (pagination) {
@@ -1963,8 +2080,8 @@ function renderTicketHistory() {
 
   if (ticketHistoryEntries.length === 0) {
     const emptyMessage = ticketHistorySearch
-      ? `Brak historii pasujacej do zapytania: "${escapeHtml(ticketHistorySearch)}".`
-      : 'Brak zamknietych ticketow zapisanych po wdrozeniu historii.'
+      ? t('app.brak_historii_pasujacej_do_zapytania_p1', { p1: escapeHtml(ticketHistorySearch) })
+      : t('app.brak_zamknietych_ticketow_zapisanych_po_wdrozeniu')
     list.innerHTML = `<div class="scheduled-empty">${emptyMessage}</div>`
     return
   }
@@ -1986,7 +2103,7 @@ function renderTicketHistory() {
           <span class="scheduled-chip">Zamknal: ${escapeHtml(String(entry.closedByTag ?? ''))}</span>
           <span class="scheduled-chip">Kiedy: ${escapeHtml(formatTimestampInWarsaw(Number(entry.closedAt ?? 0)))}</span>
         </div>
-        <div class="scheduled-preview">${renderMarkdown(String(entry.closeReason ?? 'Brak powodu.')) || '<span style="opacity:.45">Brak powodu.</span>'}</div>
+        <div class="scheduled-preview">${renderMarkdown(String(entry.closeReason ?? t('app.brak_powodu'))) || '<span style="opacity:.45">Brak powodu.</span>'}</div>
         <div class="scheduled-actions">
           <a class="btn-secondary" href="${transcriptLink}" target="_blank" rel="noopener noreferrer">Otworz transkrypt</a>
         </div>
@@ -2011,7 +2128,7 @@ function renderDashboardLogs() {
   }
 
   if (pageLabel) {
-    pageLabel.textContent = `Strona ${dashboardLogsPage}/${dashboardLogsTotalPages}`
+    pageLabel.textContent = t('app.strona_p1_p2_3', { p1: dashboardLogsPage, p2: dashboardLogsTotalPages })
   }
 
   if (pagination) {
@@ -2028,8 +2145,8 @@ function renderDashboardLogs() {
 
   if (dashboardLogEntries.length === 0) {
     const emptyMessage = dashboardLogsSearch
-      ? `Brak logow pasujacych do zapytania: "${escapeHtml(dashboardLogsSearch)}".`
-      : 'Brak logow systemowych dla wybranych filtrow.'
+      ? t('app.brak_logow_pasujacych_do_zapytania_p1', { p1: escapeHtml(dashboardLogsSearch) })
+      : t('app.brak_logow_systemowych_dla_wybranych_filtrow')
     list.innerHTML = `<div class="scheduled-empty">${emptyMessage}</div>`
     return
   }
@@ -2039,7 +2156,7 @@ function renderDashboardLogs() {
     const levelLabel = escapeHtml(level.toUpperCase())
     const action = escapeHtml(String(entry.action ?? 'UNKNOWN'))
     const scope = escapeHtml(String(entry.scope ?? 'system'))
-    const message = escapeHtml(String(entry.message ?? 'Brak tresci'))
+    const message = escapeHtml(String(entry.message ?? t('app.brak_tresci')))
     const timestamp = formatTimestampInWarsaw(Number(entry.timestampMs ?? Date.now()))
     const contextJson = escapeHtml(JSON.stringify(entry.context ?? {}, null, 2))
     const errorLabel = entry.error?.message
@@ -2083,19 +2200,19 @@ function renderScheduledPosts() {
     return
   }
 
-  counter.textContent = `Oczekujące: ${scheduledPosts.length}`
+  counter.textContent = t('app.ui_oczekujace', { p1: scheduledPosts.length })
 
   if (scheduledPosts.length === 0) {
-    list.innerHTML = '<div class="scheduled-empty">Brak zaplanowanych postów oczekujących na publikację.</div>'
+    list.innerHTML = `<div class="scheduled-empty">${t('app.ui_brak_zaplanowanych')}</div>`
     return
   }
 
   list.innerHTML = scheduledPosts.map((post) => {
-    const modeLabel = post?.payload?.mode === 'message' ? 'Wiadomość' : 'Embedded'
-    const channelName = channels.find((channel) => channel.id === post?.payload?.channelId)?.name ?? 'nieznany-kanał'
+    const modeLabel = post?.payload?.mode === 'message' ? t('app.ui_tryb_wiadomosc') : 'Embedded'
+    const channelName = channels.find((channel) => channel.id === post?.payload?.channelId)?.name ?? t('app.ui_nieznany_kanal')
     const pingLabel = post?.payload?.mentionRoleEnabled
       ? resolvePingTargetLabel(post?.payload?.mentionRoleId)
-      : 'brak pingu'
+      : t('app.brak_pingu')
     const previewHtml = buildDiscordMockupHtml(post)
     const authorHtml = buildAuthorHtml(post.publisherName, post.publisherUserId, post.publisherAvatar)
 
@@ -2106,15 +2223,15 @@ function renderScheduledPosts() {
           <span class="scheduled-chip">${escapeHtml(modeLabel)}</span>
         </div>
         <div class="scheduled-card-meta">
-          <span class="scheduled-chip">Kanał: #${escapeHtml(channelName)}</span>
+          <span class="scheduled-chip">${t('app.ui_kanal_prefix')}: #${escapeHtml(channelName)}</span>
           <span class="scheduled-chip">Ping: ${escapeHtml(pingLabel)}</span>
           <span class="scheduled-chip">Czas: ${escapeHtml(formatTimestampInWarsaw(post.scheduledFor))}</span>
           ${authorHtml}
         </div>
         <div class="scheduled-preview">${previewHtml}</div>
         <div class="scheduled-actions">
-          <button type="button" class="btn-secondary" data-action="edit" data-post-id="${escapeHtml(post.id)}">Edytuj</button>
-          <button type="button" class="btn-secondary" data-action="delete" data-post-id="${escapeHtml(post.id)}">Usuń</button>
+          <button type="button" class="btn-secondary" data-action="edit" data-post-id="${escapeHtml(post.id)}">${t('app.ui_edytuj')}</button>
+          <button type="button" class="btn-secondary" data-action="delete" data-post-id="${escapeHtml(post.id)}">${t('app.ui_usun')}</button>
         </div>
       </article>`
   }).join('')
@@ -2127,29 +2244,29 @@ function renderSentPosts() {
     return
   }
 
-  counter.textContent = `Wysłane: ${sentPosts.length}`
+  counter.textContent = t('app.ui_wyslane_licznik', { p1: sentPosts.length })
 
   if (sentPosts.length === 0) {
-    list.innerHTML = '<div class="scheduled-empty">Brak wysłanych postów (historia zaczyna się po wdrożeniu refaktoru).</div>'
+    list.innerHTML = `<div class="scheduled-empty">${t('app.ui_brak_wyslanych')}</div>`
     return
   }
 
   list.innerHTML = sentPosts.map((post) => {
-    const modeLabel = post?.payload?.mode === 'message' ? 'Wiadomość' : 'Embedded'
-    const channelName = channels.find((channel) => channel.id === post?.payload?.channelId)?.name ?? 'nieznany-kanał'
+    const modeLabel = post?.payload?.mode === 'message' ? t('app.ui_tryb_wiadomosc') : 'Embedded'
+    const channelName = channels.find((channel) => channel.id === post?.payload?.channelId)?.name ?? t('app.ui_nieznany_kanal')
     const sentAtLabel = post.sentAt ? formatTimestampInWarsaw(post.sentAt) : formatTimestampInWarsaw(post.updatedAt)
     const eventStatus = post.eventStatus ?? 'not_requested'
     const eventLabelMap = {
-      not_requested: 'Event: brak',
+      not_requested: t('app.event_brak'),
       pending: 'Event: oczekuje',
       created: 'Event: utworzono',
-      failed: 'Event: błąd',
+      failed: t('app.event_bad'),
     }
 
     const previewHtml = buildDiscordMockupHtml(post)
     const authorHtml = buildAuthorHtml(post.publisherName, post.publisherUserId, post.publisherAvatar)
     const editorHtml = post.editedBy
-      ? buildAuthorHtml(post.editedBy, post.editedByUserId, null, 'edytował')
+      ? buildAuthorHtml(post.editedBy, post.editedByUserId, null, t('app.ui_edytowal'))
       : ''
 
     return `
@@ -2159,19 +2276,19 @@ function renderSentPosts() {
           <span class="scheduled-chip">${escapeHtml(modeLabel)}</span>
         </div>
         <div class="scheduled-card-meta">
-          <span class="scheduled-chip">Kanał: #${escapeHtml(channelName)}</span>
-          <span class="scheduled-chip">Wysłano: ${escapeHtml(sentAtLabel)}</span>
-          <span class="scheduled-chip">${escapeHtml(eventLabelMap[eventStatus] ?? 'Event: brak')}</span>
+          <span class="scheduled-chip">${t('app.ui_kanal_prefix')}: #${escapeHtml(channelName)}</span>
+          <span class="scheduled-chip">${t('app.ui_wyslano')}: ${escapeHtml(sentAtLabel)}</span>
+          <span class="scheduled-chip">${escapeHtml(eventLabelMap[eventStatus] ?? t('app.event_brak_2'))}</span>
           ${authorHtml}
           ${editorHtml}
         </div>
         <div class="scheduled-preview">${previewHtml}</div>
         <div class="scheduled-actions">
-          <button type="button" class="btn-secondary" data-action="edit" data-post-id="${escapeHtml(post.id)}">Edytuj</button>
+          <button type="button" class="btn-secondary" data-action="edit" data-post-id="${escapeHtml(post.id)}">${t('app.ui_edytuj')}</button>
           ${eventStatus === 'failed'
-            ? `<button type="button" class="btn-secondary" data-action="retry-event" data-post-id="${escapeHtml(post.id)}">Ponów event</button>`
+            ? `<button type="button" class="btn-secondary" data-action="retry-event" data-post-id="${escapeHtml(post.id)}">${t('app.ui_ponow_event')}</button>`
             : ''}
-          <button type="button" class="btn-secondary" data-action="delete" data-post-id="${escapeHtml(post.id)}">Usuń</button>
+          <button type="button" class="btn-secondary" data-action="delete" data-post-id="${escapeHtml(post.id)}">${t('app.ui_usun')}</button>
         </div>
       </article>`
   }).join('')
@@ -2188,7 +2305,7 @@ function renderDashboardEvents() {
   counter.textContent = `Wydarzenia: ${dashboardEvents.length}`
 
   if (dashboardEvents.length === 0) {
-    list.innerHTML = '<div class="scheduled-empty">Brak wydarzeń Discord.</div>'
+    list.innerHTML = `<div class="scheduled-empty">${t('app.ui_brak_wydarzen')}</div>`
     return
   }
 
@@ -2201,10 +2318,10 @@ function renderDashboardEvents() {
     const endIso = String(event.scheduledEndTimeIso ?? '')
     const startLabel = Number.isFinite(Date.parse(startIso))
       ? formatTimestampInWarsaw(Date.parse(startIso))
-      : 'Nie ustawiono'
+      : t('app.nie_ustawiono')
     const endLabel = Number.isFinite(Date.parse(endIso))
       ? formatTimestampInWarsaw(Date.parse(endIso))
-      : 'Nie ustawiono'
+      : t('app.nie_ustawiono_2')
 
     return `
       <article class="scheduled-card">
@@ -2219,8 +2336,8 @@ function renderDashboardEvents() {
         </div>
         <div class="scheduled-preview">${renderMarkdown(description) || '<span style="opacity:.45">Brak opisu.</span>'}</div>
         <div class="scheduled-actions">
-          <button type="button" class="btn-secondary" data-action="edit" data-event-id="${escapeHtml(eventId)}">Edytuj</button>
-          <button type="button" class="btn-secondary" data-action="delete" data-event-id="${escapeHtml(eventId)}">Usuń</button>
+          <button type="button" class="btn-secondary" data-action="edit" data-event-id="${escapeHtml(eventId)}">${t('app.ui_edytuj')}</button>
+          <button type="button" class="btn-secondary" data-action="delete" data-event-id="${escapeHtml(eventId)}">${t('app.ui_usun')}</button>
         </div>
       </article>`
   }).join('')
@@ -2286,14 +2403,14 @@ function resetDashboardEventForm() {
   if (locationInput) locationInput.value = 'Online'
   if (startInput) startInput.value = ''
   if (endInput) endInput.value = ''
-  if (saveButton) saveButton.textContent = 'Utwórz wydarzenie'
+  if (saveButton) saveButton.textContent = t('app.utworz_wydarzenie')
   if (cancelButton) cancelButton.style.display = 'none'
 }
 
 function openDashboardEventForEdit(eventId) {
   const selectedEvent = dashboardEvents.find((event) => String(event.id) === String(eventId))
   if (!selectedEvent) {
-    showToast('❌ Nie znaleziono wydarzenia do edycji.', 'error')
+    showToast(t('app.nie_znaleziono_wydarzenia_do_edycji'), 'error')
     return
   }
 
@@ -2326,22 +2443,22 @@ async function saveDashboardEvent() {
 
     const json = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(json.error ?? 'Nie udało się zapisać wydarzenia Discord.')
+      throw new Error(json.error ?? t('app.nie_udao_sie_zapisac_wydarzenia_discord'))
     }
 
     await loadDashboardEvents()
     resetDashboardEventForm()
     showToast(isEditing
-      ? '✅ Wydarzenie Discord zostało zaktualizowane.'
-      : '✅ Wydarzenie Discord zostało utworzone.', 'success')
+      ? t('app.wydarzenie_discord_zostao_zaktualizowane')
+      : t('app.wydarzenie_discord_zostao_utworzone'), 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_5')
     showToast(`❌ ${message}`, 'error')
   }
 }
 
 async function deleteDashboardEvent(eventId) {
-  const shouldDelete = window.confirm('Czy na pewno chcesz usunąć to wydarzenie Discord?')
+  const shouldDelete = window.confirm(t('app.czy_na_pewno_chcesz_usunac_to'))
   if (!shouldDelete) {
     return
   }
@@ -2353,7 +2470,7 @@ async function deleteDashboardEvent(eventId) {
     const json = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(json.error ?? 'Nie udało się usunąć wydarzenia Discord.')
+      throw new Error(json.error ?? t('app.nie_udao_sie_usunac_wydarzenia_discord'))
     }
 
     if (editingEventId === eventId) {
@@ -2361,9 +2478,9 @@ async function deleteDashboardEvent(eventId) {
     }
 
     await loadDashboardEvents()
-    showToast('🗑️ Wydarzenie Discord zostało usunięte.', 'success')
+    showToast(t('app.wydarzenie_discord_zostao_usuniete'), 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_6')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -2374,12 +2491,12 @@ async function openScheduledPostForEdit(postId) {
     const json = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(json.error ?? 'Nie udało się pobrać zaplanowanego posta.')
+      throw new Error(json.error ?? t('app.nie_udao_sie_pobrac_zaplanowanego_posta'))
     }
 
     const post = json.post
     if (!post || !post.payload) {
-      throw new Error('Nieprawidłowe dane zaplanowanego posta.')
+      throw new Error(t('app.nieprawidowe_dane_zaplanowanego_posta'))
     }
 
     const mentionText = (post.payload.content ?? '') + ' ' + (post.payload.title ?? '')
@@ -2387,9 +2504,9 @@ async function openScheduledPostForEdit(postId) {
 
     applyScheduledPostToCreator(post)
     switchSection('embed-creator')
-    showToast('✏️ Załadowano post do edycji w kreatorze.', 'info')
+    showToast(t('app.zaadowano_post_do_edycji_w_kreatorze'), 'info')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_7')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -2400,12 +2517,12 @@ async function openSentPostForEdit(postId) {
     const json = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(json.error ?? 'Nie udało się pobrać wysłanego posta.')
+      throw new Error(json.error ?? t('app.nie_udao_sie_pobrac_wysanego_posta'))
     }
 
     const post = json.post
     if (!post || !post.payload) {
-      throw new Error('Nieprawidłowe dane wysłanego posta.')
+      throw new Error(t('app.nieprawidowe_dane_wysanego_posta'))
     }
 
     const mentionText = (post.payload.content ?? '') + ' ' + (post.payload.title ?? '')
@@ -2413,9 +2530,9 @@ async function openSentPostForEdit(postId) {
 
     applySentPostToCreator(post)
     switchSection('embed-creator')
-    showToast('✏️ Załadowano wysłany post do edycji.', 'info')
+    showToast(t('app.zaadowano_wysany_post_do_edycji'), 'info')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_8')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -2515,7 +2632,7 @@ function applyPostPayloadToCreator(payload) {
   } else {
     const fileNameElement = document.getElementById('upload-file-name')
     if (fileNameElement) {
-      fileNameElement.textContent = 'Nie wybrano pliku.'
+      fileNameElement.textContent = t('app.nie_wybrano_pliku_2')
     }
   }
 
@@ -2583,7 +2700,7 @@ function applyPostPayloadToCreator(payload) {
 }
 
 async function deleteScheduledPost(postId) {
-  const shouldDelete = window.confirm('Czy na pewno chcesz usunąć zaplanowany post?')
+  const shouldDelete = window.confirm(t('app.czy_na_pewno_chcesz_usunac_zaplanowany'))
   if (!shouldDelete) {
     return
   }
@@ -2595,7 +2712,7 @@ async function deleteScheduledPost(postId) {
     const json = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(json.error ?? 'Nie udało się usunąć zaplanowanego posta.')
+      throw new Error(json.error ?? t('app.nie_udao_sie_usunac_zaplanowanego_posta'))
     }
 
     if (editingScheduledPostId === postId) {
@@ -2603,9 +2720,9 @@ async function deleteScheduledPost(postId) {
     }
 
     await loadScheduledPosts()
-    showToast('🗑️ Zaplanowany post został usunięty.', 'success')
+    showToast(t('app.zaplanowany_post_zosta_usuniety'), 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_9')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -2621,19 +2738,19 @@ async function retrySentPostEvent(postId) {
 
     const json = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(json.error ?? 'Nie udało się ponowić tworzenia wydarzenia Discord.')
+      throw new Error(json.error ?? t('app.nie_udao_sie_ponowic_tworzenia_wydarzenia'))
     }
 
     await loadSentPosts()
-    showToast('✅ Wydarzenie Discord zostało utworzone.', 'success')
+    showToast(t('app.wydarzenie_discord_zostao_utworzone_2'), 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_10')
     showToast(`❌ ${message}`, 'error')
   }
 }
 
 async function deleteSentPost(postId) {
-  const shouldDelete = window.confirm('Czy na pewno chcesz usunąć wysłany post? Wiadomość zostanie również usunięta z Discorda.')
+  const shouldDelete = window.confirm(t('app.czy_na_pewno_chcesz_usunac_wysany'))
   if (!shouldDelete) {
     return
   }
@@ -2645,7 +2762,7 @@ async function deleteSentPost(postId) {
 
     const json = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(json.error ?? 'Nie udało się usunąć wysłanego posta.')
+      throw new Error(json.error ?? t('app.nie_udao_sie_usunac_wysanego_posta'))
     }
 
     if (editingSentPostId === postId) {
@@ -2655,12 +2772,12 @@ async function deleteSentPost(postId) {
     await loadSentPosts()
 
     if (Array.isArray(json.warnings) && json.warnings.length > 0) {
-      showToast('Post usunięty z historii, ale nie wszystkie wiadomości Discord zostały usunięte. Sprawdź logi.', 'warn')
+      showToast(t('app.post_usuniety_z_historii_ale_nie'), 'warn')
     } else {
-      showToast('Post i powiązane wiadomości Discord zostały usunięte.', 'success')
+      showToast(t('app.post_i_powiazane_wiadomosci_discord_zostay'), 'success')
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_11')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -3135,7 +3252,7 @@ async function searchTimeoutMembers(rawQuery, mode) {
       renderTimeoutMemberResults('filter', [], query)
     }
 
-    showToast('Nie udalo sie wyszukac uzytkownikow.', 'error')
+    showToast(t('app.nie_udalo_sie_wyszukac_uzytkownikow'), 'error')
   }
 }
 
@@ -3160,7 +3277,7 @@ function renderTimeoutList() {
   list.innerHTML = `${errorBlock}${timeoutEntries.map((timeoutEntry) => {
     const timeoutId = Number(timeoutEntry.id)
     const userId = String(timeoutEntry.userId ?? '')
-    const reason = String(timeoutEntry.reason ?? 'Brak powodu')
+    const reason = String(timeoutEntry.reason ?? t('app.brak_powodu_2'))
     const createdAt = Number(timeoutEntry.createdAt)
     const expiresAt = Number(timeoutEntry.expiresAt)
     const createdByUserId = String(timeoutEntry.createdByUserId ?? 'unknown')
@@ -3203,7 +3320,7 @@ async function loadTimeoutList({ silent = false } = {}) {
     const response = await fetch(`/api/timeouts?${params.toString()}`)
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie pobrac timeoutow.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_pobrac_timeoutow'))
     }
 
     timeoutEntries = Array.isArray(payload.timeouts) ? payload.timeouts : []
@@ -3211,7 +3328,7 @@ async function loadTimeoutList({ silent = false } = {}) {
     renderTimeoutList()
   } catch (error) {
     timeoutEntries = []
-    timeoutLoadError = error instanceof Error ? error.message : 'Nieznany blad'
+    timeoutLoadError = error instanceof Error ? error.message : t('app.nieznany_blad')
     renderTimeoutList()
 
     if (!silent) {
@@ -3237,30 +3354,30 @@ async function createTimeoutFromDashboard() {
 
   const targetUserId = selectedUserInput.value.trim() || timeoutSelectedUserId
   if (!/^\d{17,20}$/.test(targetUserId)) {
-    showToast('❌ Wybierz poprawnego uzytkownika z listy wyszukiwania.', 'error')
+    showToast(t('app.wybierz_poprawnego_uzytkownika_z_listy_wyszukiwania'), 'error')
     return
   }
 
   const durationAmount = Number.parseInt(durationAmountInput.value.trim(), 10)
   if (!Number.isInteger(durationAmount) || durationAmount <= 0) {
-    showToast('❌ Podaj dodatnia liczbe calkowita czasu timeoutu.', 'error')
+    showToast(t('app.podaj_dodatnia_liczbe_calkowita_czasu_timeoutu'), 'error')
     return
   }
 
   const durationUnit = durationUnitSelect.value.trim()
   if (!TIMEOUT_DURATION_UNITS.has(durationUnit)) {
-    showToast('❌ Wybierz poprawna jednostke czasu timeoutu.', 'error')
+    showToast(t('app.wybierz_poprawna_jednostke_czasu_timeoutu'), 'error')
     return
   }
 
   const reason = reasonInput.value.trim()
   if (reason.length === 0) {
-    showToast('❌ Powod timeoutu nie moze byc pusty.', 'error')
+    showToast(t('app.powod_timeoutu_nie_moze_byc_pusty'), 'error')
     return
   }
 
   if (reason.length > 500) {
-    showToast('❌ Powod timeoutu nie moze byc dluzszy niz 500 znakow.', 'error')
+    showToast(t('app.powod_timeoutu_nie_moze_byc_dluzszy'), 'error')
     return
   }
 
@@ -3284,7 +3401,7 @@ async function createTimeoutFromDashboard() {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie nalozyc timeoutu.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_nalozyc_timeoutu'))
     }
 
     timeoutSelectedUserId = targetUserId
@@ -3292,7 +3409,7 @@ async function createTimeoutFromDashboard() {
     showToast(`✅ Nalozono timeout na ${resolveTimeoutDisplayName(targetUserId)}.`, 'success')
     await loadTimeoutList({ silent: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    const message = error instanceof Error ? error.message : t('app.nieznany_blad_2')
     showToast(`❌ ${message}`, 'error')
   } finally {
     if (createButton instanceof HTMLButtonElement) {
@@ -3302,7 +3419,7 @@ async function createTimeoutFromDashboard() {
 }
 
 async function removeTimeoutFromDashboard(timeoutId) {
-  const confirmed = window.confirm('Czy na pewno chcesz usunac ten timeout?')
+  const confirmed = window.confirm(t('app.czy_na_pewno_chcesz_usunac_ten'))
   if (!confirmed) {
     return
   }
@@ -3318,13 +3435,13 @@ async function removeTimeoutFromDashboard(timeoutId) {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie usunac timeoutu.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_usunac_timeoutu'))
     }
 
-    showToast('✅ Timeout zostal usuniety.', 'success')
+    showToast(t('app.timeout_zostal_usuniety'), 'success')
     await loadTimeoutList({ silent: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    const message = error instanceof Error ? error.message : t('app.nieznany_blad_3')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -3346,7 +3463,7 @@ function renderEconomyLeaderboard() {
   }
 
   countLabel.textContent = `Uzytkownicy: ${economyLeaderboardTotalRows}`
-  pageLabel.textContent = `Strona ${economyLeaderboardPage}/${economyLeaderboardTotalPages}`
+  pageLabel.textContent = t('app.strona_p1_p2_4', { p1: economyLeaderboardPage, p2: economyLeaderboardTotalPages })
 
   if (prevButton instanceof HTMLButtonElement) {
     prevButton.disabled = economyLeaderboardPage <= 1
@@ -3443,7 +3560,7 @@ async function loadEconomyLeaderboard({
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie pobrac leaderboardu ekonomii.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_pobrac_leaderboardu_ekonomii'))
     }
 
     if (requestId !== economyLeaderboardLoadRequestId) {
@@ -3477,7 +3594,7 @@ async function loadEconomyLeaderboard({
     economyLeaderboardTotalPages = previousState.totalPages
     economyLeaderboardTotalRows = previousState.totalRows
     economyLeaderboardEntries = previousState.entries
-    economyLeaderboardLoadError = error instanceof Error ? error.message : 'Nieznany blad'
+    economyLeaderboardLoadError = error instanceof Error ? error.message : t('app.nieznany_blad_4')
     renderEconomyLeaderboard()
 
     if (!silent) {
@@ -3493,7 +3610,7 @@ function setEconomySettingsLastLoadedLabel() {
   }
 
   if (!economySettingsLastLoadedAt) {
-    label.textContent = 'Brak danych.'
+    label.textContent = t('app.brak_danych')
     return
   }
 
@@ -3567,7 +3684,7 @@ function scheduleEconomyAccessRetry() {
 function toFiniteNumber(value, fieldName) {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) {
-    throw new Error(`Pole "${fieldName}" musi byc poprawna liczba.`)
+    throw new Error(t('app.pole_p1_musi_byc_poprawna_liczba', { p1: fieldName }))
   }
 
   return numeric
@@ -3592,7 +3709,7 @@ function readEconomyCheckboxValue(inputId) {
 }
 
 function collectEconomySettingsForm() {
-  const startingCoins = Math.floor(toFiniteNumber(readEconomyInputValue('economy-starting-coins'), 'Startowa ilość cebulionów'))
+  const startingCoins = Math.floor(toFiniteNumber(readEconomyInputValue('economy-starting-coins'), t('app.startowa_ilosc_cebulionow')))
   const dailyMinCoins = Math.floor(toFiniteNumber(readEconomyInputValue('economy-daily-min'), 'Daily: min coins'))
   const dailyMaxCoins = Math.floor(toFiniteNumber(readEconomyInputValue('economy-daily-max'), 'Daily: max coins'))
   const dailyStreakIncrement = toFiniteNumber(readEconomyInputValue('economy-daily-streak-increment'), 'Daily: przyrost streak')
@@ -3608,11 +3725,11 @@ function collectEconomySettingsForm() {
   const xpVoicePerMinute = Math.floor(toFiniteNumber(readEconomyInputValue('economy-xp-voice-per-minute'), 'XP voice: za minute'))
 
   if (dailyMaxCoins < dailyMinCoins) {
-    throw new Error('Daily: max coins nie moze byc mniejsze niz min coins.')
+    throw new Error(t('app.daily_max_coins_nie_moze_byc'))
   }
 
   if (dailyMessages.length === 0) {
-    throw new Error('Podaj co najmniej jedna wiadomosc daily.')
+    throw new Error(t('app.podaj_co_najmniej_jedna_wiadomosc_daily'))
   }
 
   return {
@@ -3843,12 +3960,12 @@ function resolveEconomyMutationAmount(operation) {
 function resolveEconomyMutationRequestBody(operation) {
   const targetUserId = readEconomyInputValue('economy-mutation-user-id').trim()
   if (!/^\d{17,20}$/.test(targetUserId)) {
-    throw new Error('Podaj poprawne ID użytkownika Discord (17-20 cyfr).')
+    throw new Error(t('app.podaj_poprawne_id_uzytkownika_discord_17'))
   }
 
   const amount = resolveEconomyMutationAmount(operation)
   if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error('Kwota mutacji musi być większa od zera.')
+    throw new Error(t('app.kwota_mutacji_musi_byc_wieksza_od'))
   }
 
   if (operation === 'add_levels' && amount > 1000) {
@@ -3893,12 +4010,12 @@ async function applyEconomyUserMutation(operation) {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udało się wykonać ręcznej mutacji ekonomii.')
+      throw new Error(payload.error ?? t('app.nie_udao_sie_wykonac_recznej_mutacji'))
     }
 
     const mutation = payload.mutation
     if (!mutation || typeof mutation !== 'object') {
-      throw new Error('Brak danych mutacji ekonomii w odpowiedzi serwera.')
+      throw new Error(t('app.brak_danych_mutacji_ekonomii_w_odpowiedzi'))
     }
 
     const appliedAmount = Number.isFinite(Number(mutation.amount))
@@ -3906,11 +4023,11 @@ async function applyEconomyUserMutation(operation) {
       : requestBody.amount
 
     showToast(
-      `✅ Dodano ${appliedAmount} ${actionLabel} użytkownikowi ${requestBody.targetUserId}. Aktualnie: ${mutation.currentCoins} coins, ${mutation.currentXp} XP, level ${mutation.currentLevel}.`,
+      t('app.dodano_p1_p2_uzytkownikowi_p3_aktualnie', { p1: appliedAmount, p2: actionLabel, p3: requestBody.targetUserId, p4: mutation.currentCoins, p5: mutation.currentXp, p6: mutation.currentLevel }),
       'success',
     )
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_12')
     showToast(`❌ ${message}`, 'error')
   } finally {
     if (button instanceof HTMLButtonElement) {
@@ -3943,7 +4060,7 @@ function renderEconomyLevelRoleOptions() {
 
   const previousValue = select.value
   select.innerHTML = [
-    '<option value="">Wybierz rolę</option>',
+    `<option value="">${t('app.ui_wybierz_role')}</option>`,
     ...roleOptions.map((role) => `<option value="${escapeHtml(role.id)}">${escapeHtml(role.name)}</option>`),
   ].join('')
 
@@ -3991,7 +4108,7 @@ async function loadEconomyLevelRoleMappings({ silent } = { silent: false }) {
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie pobrac mapowan rol levelowych.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_pobrac_mapowan_rol'))
     }
 
     const mappings = Array.isArray(payload.mappings) ? payload.mappings : []
@@ -4010,7 +4127,7 @@ async function loadEconomyLevelRoleMappings({ silent } = { silent: false }) {
     economyLevelRoleMappings = []
 
     if (!silent) {
-      const message = error instanceof Error ? error.message : 'Nieznany blad'
+      const message = error instanceof Error ? error.message : t('app.nieznany_blad_5')
       showToast(`❌ ${message}`, 'error')
     }
 
@@ -4021,7 +4138,7 @@ async function loadEconomyLevelRoleMappings({ silent } = { silent: false }) {
 
 async function saveEconomyLevelRoleMappings(nextMappings) {
   if (!economyLevelRoleMappingsLoaded) {
-    throw new Error('Najpierw odswiez mapowania rol levelowych i upewnij sie, ze zostaly poprawnie zaladowane.')
+    throw new Error(t('app.najpierw_odswiez_mapowania_rol_levelowych_i'))
   }
 
   const response = await fetchWithCsrf('/api/economy/level-roles', {
@@ -4034,7 +4151,7 @@ async function saveEconomyLevelRoleMappings(nextMappings) {
 
   const payload = await parseApiResponse(response)
   if (!response.ok) {
-    throw new Error(payload.error ?? 'Nie udalo sie zapisac mapowan rol levelowych.')
+    throw new Error(payload.error ?? t('app.nie_udalo_sie_zapisac_mapowan_rol'))
   }
 
   const mappings = Array.isArray(payload.mappings) ? payload.mappings : []
@@ -4051,7 +4168,7 @@ async function saveEconomyLevelRoleMappings(nextMappings) {
 
 async function addEconomyLevelRoleMapping() {
   if (!economyLevelRoleMappingsLoaded) {
-    showToast('❌ Najpierw odswiez mapowania rol levelowych.', 'error')
+    showToast(t('app.najpierw_odswiez_mapowania_rol_levelowych'), 'error')
     return
   }
 
@@ -4066,7 +4183,7 @@ async function addEconomyLevelRoleMapping() {
 
   const roleId = roleSelect.value.trim()
   if (!/^\d{17,20}$/.test(roleId)) {
-    showToast('❌ Wybierz poprawna role.', 'error')
+    showToast(t('app.wybierz_poprawna_role'), 'error')
     return
   }
 
@@ -4093,7 +4210,7 @@ async function addEconomyLevelRoleMapping() {
     await saveEconomyLevelRoleMappings(nextMappings)
     showToast('✅ Zapisano mapowanie roli levelowej.', 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    const message = error instanceof Error ? error.message : t('app.nieznany_blad_6')
     showToast(`❌ ${message}`, 'error')
   } finally {
     if (addButton instanceof HTMLButtonElement) {
@@ -4104,7 +4221,7 @@ async function addEconomyLevelRoleMapping() {
 
 async function removeEconomyLevelRoleMapping(roleId) {
   if (!economyLevelRoleMappingsLoaded) {
-    showToast('❌ Najpierw odswiez mapowania rol levelowych.', 'error')
+    showToast(t('app.najpierw_odswiez_mapowania_rol_levelowych_2'), 'error')
     return
   }
 
@@ -4114,7 +4231,7 @@ async function removeEconomyLevelRoleMapping(roleId) {
     await saveEconomyLevelRoleMappings(nextMappings)
     showToast('✅ Usunieto mapowanie roli levelowej.', 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    const message = error instanceof Error ? error.message : t('app.nieznany_blad_7')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -4130,7 +4247,7 @@ async function importEconomyCsvSnapshot() {
 
   const selectedFile = fileInput.files?.[0]
   if (!selectedFile) {
-    showToast('❌ Wybierz plik CSV do importu.', 'error')
+    showToast(t('app.wybierz_plik_csv_do_importu'), 'error')
     return
   }
 
@@ -4140,12 +4257,12 @@ async function importEconomyCsvSnapshot() {
 
   try {
     if (selectedFile.size > MAX_ECONOMY_CSV_IMPORT_BYTES) {
-      throw new Error('Plik CSV jest za duzy. Maksymalny rozmiar to 2 MB.')
+      throw new Error(t('app.plik_csv_jest_za_duzy_maksymalny'))
     }
 
     const csvContent = await selectedFile.text()
     if (csvContent.trim().length === 0) {
-      throw new Error('Wybrany plik CSV jest pusty.')
+      throw new Error(t('app.wybrany_plik_csv_jest_pusty'))
     }
 
     const response = await fetchWithCsrf('/api/economy/import-csv', {
@@ -4158,7 +4275,7 @@ async function importEconomyCsvSnapshot() {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie zaimportowac CSV ekonomii.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_zaimportowac_csv_ekonomii'))
     }
 
     const result = payload.result ?? {}
@@ -4177,7 +4294,7 @@ async function importEconomyCsvSnapshot() {
     fileInput.value = ''
     await loadEconomyLeaderboard({ silent: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    const message = error instanceof Error ? error.message : t('app.nieznany_blad_8')
     showToast(`❌ ${message}`, 'error')
   } finally {
     if (importButton instanceof HTMLButtonElement) {
@@ -4203,7 +4320,7 @@ async function loadEconomySettings({ silent } = { silent: false }) {
         applyEconomySettingsAccessState()
       }
 
-      throw new Error(payload.error ?? 'Nie udalo sie pobrac ustawien ekonomii.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_pobrac_ustawien_ekonomii'))
     }
 
     if (requestId !== economySettingsLoadRequestId) {
@@ -4230,7 +4347,7 @@ async function loadEconomySettings({ silent } = { silent: false }) {
     economySettingsLoadSuccessful = false
 
     if (!silent) {
-      const message = error instanceof Error ? error.message : 'Nieznany blad'
+      const message = error instanceof Error ? error.message : t('app.nieznany_blad_9')
       showToast(`❌ ${message}`, 'error')
     }
 
@@ -4242,7 +4359,7 @@ async function loadEconomySettings({ silent } = { silent: false }) {
 
 async function saveEconomySettings() {
   if (!economySettingsLoadSuccessful) {
-    showToast('❌ Najpierw odswiez ustawienia ekonomii i upewnij sie, ze ladowanie zakonczylo sie sukcesem.', 'error')
+    showToast(t('app.najpierw_odswiez_ustawienia_ekonomii_i_upewnij'), 'error')
     return
   }
 
@@ -4263,11 +4380,11 @@ async function saveEconomySettings() {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie zapisac ustawien ekonomii.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_zapisac_ustawien_ekonomii'))
     }
 
     if (!payload.config || typeof payload.config !== 'object') {
-      throw new Error('Brak konfiguracji ekonomii w odpowiedzi serwera.')
+      throw new Error(t('app.brak_konfiguracji_ekonomii_w_odpowiedzi_serwera'))
     }
 
     setEconomySettingsForm(payload.config)
@@ -4275,7 +4392,7 @@ async function saveEconomySettings() {
     setEconomySettingsLastLoadedLabel()
     showToast('✅ Ustawienia ekonomii zostaly zapisane.', 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    const message = error instanceof Error ? error.message : t('app.nieznany_blad_10')
     showToast(`❌ ${message}`, 'error')
   } finally {
     if (saveButton instanceof HTMLButtonElement) {
@@ -4286,11 +4403,11 @@ async function saveEconomySettings() {
 
 async function resetAllEconomyUsers() {
   if (!economySettingsLoadSuccessful) {
-    showToast('❌ Najpierw odswiez ustawienia ekonomii i upewnij sie, ze ladowanie zakonczylo sie sukcesem.', 'error')
+    showToast(t('app.najpierw_odswiez_ustawienia_ekonomii_i_upewnij_2'), 'error')
     return
   }
 
-  const confirmed = window.confirm('Czy na pewno zresetowac dane ekonomii wszystkich uzytkownikow na tym serwerze? Wyzeruje to rowniez startowa ilosc cebulionow dla nowych uzytkownikow. Tej operacji nie da sie cofnac.')
+  const confirmed = window.confirm(t('app.czy_na_pewno_zresetowac_dane_ekonomii'))
   if (!confirmed) {
     return
   }
@@ -4311,14 +4428,14 @@ async function resetAllEconomyUsers() {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie zresetowac danych ekonomii.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_zresetowac_danych_ekonomii'))
     }
 
     const resetCount = Number(payload.resetCount ?? 0)
-    showToast(`✅ Zresetowano dane ekonomii dla ${resetCount} uzytkownikow.`, 'success')
+    showToast(t('app.zresetowano_dane_ekonomii_dla_p1_uzytkownikow', { p1: resetCount }), 'success')
     await loadEconomySettings({ silent: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    const message = error instanceof Error ? error.message : t('app.nieznany_blad_11')
     showToast(`❌ ${message}`, 'error')
   } finally {
     if (resetButton instanceof HTMLButtonElement) {
@@ -4329,11 +4446,11 @@ async function resetAllEconomyUsers() {
 
 async function denominateAllEconomyCoins() {
   if (!economySettingsLoadSuccessful) {
-    showToast('❌ Najpierw odswiez ustawienia ekonomii i upewnij sie, ze ladowanie zakonczylo sie sukcesem.', 'error')
+    showToast(t('app.najpierw_odswiez_ustawienia_ekonomii_i_upewnij_3'), 'error')
     return
   }
 
-  const confirmed = window.confirm('Czy na pewno wykonac denominacje 100:1? Coins kazdego uzytkownika na tym serwerze zostana podzielone przez 100 (zostaje 1%). Level, XP, wiadomosci i voice minutes NIE zmienia sie. Tej operacji nie da sie cofnac.')
+  const confirmed = window.confirm(t('app.czy_na_pewno_wykonac_denominacje_100'))
   if (!confirmed) {
     return
   }
@@ -4354,14 +4471,14 @@ async function denominateAllEconomyCoins() {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie wykonac denominacji coinsow.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_wykonac_denominacji_coinsow'))
     }
 
     const affectedCount = Number(payload.affectedCount ?? 0)
-    showToast(`✅ Denominacja 100:1 zakonczona dla ${affectedCount} uzytkownikow.`, 'success')
+    showToast(t('app.denominacja_100_1_zakonczona_dla_p1', { p1: affectedCount }), 'success')
     await loadEconomyLeaderboard({ silent: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    const message = error instanceof Error ? error.message : t('app.nieznany_blad_12')
     showToast(`❌ ${message}`, 'error')
   } finally {
     if (denominateButton instanceof HTMLButtonElement) {
@@ -4380,7 +4497,7 @@ async function exportEconomyCsvSnapshot() {
     const response = await fetchWithCsrf('/api/economy/export-csv', { method: 'GET' })
     if (!response.ok) {
       const payload = await parseApiResponse(response)
-      throw new Error(payload.error ?? 'Nie udalo sie wyeksportowac snapshotu CSV ekonomii.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_wyeksportowac_snapshotu_csv'))
     }
 
     const csvContent = await response.text()
@@ -4395,9 +4512,9 @@ async function exportEconomyCsvSnapshot() {
     link.remove()
     URL.revokeObjectURL(downloadUrl)
 
-    showToast('✅ Snapshot CSV ekonomii zostal wyeksportowany.', 'success')
+    showToast(t('app.snapshot_csv_ekonomii_zostal_wyeksportowany'), 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany blad'
+    const message = error instanceof Error ? error.message : t('app.nieznany_blad_13')
     showToast(`❌ ${message}`, 'error')
   } finally {
     if (exportButton instanceof HTMLButtonElement) {
@@ -4419,7 +4536,7 @@ async function loadG2Matches({ silent } = { silent: false }) {
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udało się pobrać bazy meczów G2.')
+      throw new Error(payload.error ?? t('app.nie_udao_sie_pobrac_bazy_meczow'))
     }
 
     if (requestId !== g2LoadRequestId) {
@@ -4456,7 +4573,7 @@ async function loadG2Matches({ silent } = { silent: false }) {
     renderMatchHelperOptions()
 
     if (!silent) {
-      const message = error instanceof Error ? error.message : 'Nieznany błąd'
+      const message = error instanceof Error ? error.message : t('app.nieznany_bad_13')
       showToast(`❌ ${message}`, 'error')
     }
   }
@@ -4469,7 +4586,7 @@ async function refreshG2Matches() {
   }
 
   if (g2RefreshInProgress) {
-    showToast('Trwa odświeżanie meczów. Poczekaj chwilę.', 'info')
+    showToast(t('app.trwa_odswiezanie_meczow_poczekaj_chwile'), 'info')
     return
   }
 
@@ -4485,13 +4602,13 @@ async function refreshG2Matches() {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udało się odświeżyć meczów z PandaScore.')
+      throw new Error(payload.error ?? t('app.nie_udao_sie_odswiezyc_meczow_z'))
     }
 
-    showToast(`✅ Odświeżono bazę meczów (${payload.count ?? 0}).`, 'success')
+    showToast(t('app.odswiezono_baze_meczow_p1', { p1: payload.count ?? 0 }), 'success')
     await loadG2Matches({ silent: true })
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_14')
     showToast(`❌ ${message}`, 'error')
   } finally {
     button.disabled = false
@@ -4546,7 +4663,7 @@ function renderG2Filters() {
   ].join('')
 
   g2TeamFilter.innerHTML = [
-    '<option value="">Wszystkie drużyny G2</option>',
+    `<option value="">${t('app.ui_wszystkie_druzyny')}</option>`,
     ...g2FilterOptions.g2Teams.map((teamName) => `<option value="${escapeHtml(teamName)}">${escapeHtml(teamName)}</option>`),
   ].join('')
 
@@ -4577,7 +4694,7 @@ function renderG2MatchesList() {
   countLabel.textContent = `Mecze: ${g2Matches.length}`
 
   if (g2Matches.length === 0) {
-    list.innerHTML = '<div class="scheduled-empty">Brak meczów spełniających aktualne filtry. Odśwież bazę lub zmień filtry.</div>'
+    list.innerHTML = `<div class="scheduled-empty">${t('app.ui_brak_meczow')}</div>`
     return
   }
 
@@ -4610,7 +4727,7 @@ function updateG2Meta() {
   }
 
   if (!g2SyncMeta || !g2SyncMeta.lastSyncAt) {
-    metaLabel.textContent = 'Brak synchronizacji.'
+    metaLabel.textContent = t('app.brak_synchronizacji')
     return
   }
 
@@ -4619,11 +4736,11 @@ function updateG2Meta() {
 
   let metaText = `Ostatnia synchronizacja: ${formatted} | Rekordy: ${g2SyncMeta.lastSyncCount ?? 0}`
   if (g2SyncMeta.lastError) {
-    metaText += ` | Ostatni błąd: ${g2SyncMeta.lastError}`
+    metaText += t('app.ui_ostatni_blad', { p1: g2SyncMeta.lastError })
   }
 
   if (g2RefreshInProgress) {
-    metaText += ' | Trwa odświeżanie...'
+    metaText += t('app.trwa_odswiezanie')
   }
 
   if (g2RefreshCooldownMs > 0) {
@@ -4732,13 +4849,13 @@ function renderMatchHelperChips(match) {
 
   const enabled = document.getElementById('match-helper-enabled')?.checked ?? false
   if (!enabled) {
-    chipsContainer.innerHTML = '<p class="popover-empty">Włącz opcję „Dodaj mecz”, aby zobaczyć podpowiedzi.</p>'
+    chipsContainer.innerHTML = `<p class="popover-empty">${t('app.ui_wlacz_dodaj_mecz')}</p>`
     return
   }
 
   const tokens = buildMatchHelperTokens(match)
   if (!tokens.length) {
-    chipsContainer.innerHTML = '<p class="popover-empty">Wybierz mecz, aby zobaczyć klikalne podpowiedzi.</p>'
+    chipsContainer.innerHTML = `<p class="popover-empty">${t('app.ui_wybierz_mecz_podpowiedzi')}</p>`
     return
   }
 
@@ -4796,7 +4913,7 @@ async function loadChannels() {
     channels = Array.isArray(json.channels) ? json.channels : []
   } catch {
     channels = []
-    showToast('Nie udało się pobrać kanałów.', 'error')
+    showToast(t('app.nie_udao_sie_pobrac_kanaow'), 'error')
   }
 }
 
@@ -4809,7 +4926,7 @@ async function loadRoles() {
     roles = Array.isArray(json.roles) ? json.roles : []
   } catch {
     roles = []
-    showToast('Nie udało się pobrać ról.', 'error')
+    showToast(t('app.nie_udao_sie_pobrac_rol'), 'error')
   }
 }
 
@@ -4828,7 +4945,7 @@ async function fetchImagePageData({ page, pageSize, search, sortBy }) {
   const response = await fetch(`/api/images?${params.toString()}`)
   const payload = await parseApiResponse(response)
   if (!response.ok) {
-    throw new Error(payload.error ?? 'Nie udało się pobrać obrazów z /img.')
+    throw new Error(payload.error ?? t('app.nie_udao_sie_pobrac_obrazow_z'))
   }
 
   const entries = Array.isArray(payload.entries) ? payload.entries : []
@@ -4900,7 +5017,7 @@ async function loadImages(options = {}) {
     renderImageLibrary()
 
     if (!silent) {
-      const message = error instanceof Error ? error.message : 'Nie udało się pobrać obrazów z /img.'
+      const message = error instanceof Error ? error.message : t('app.nie_udao_sie_pobrac_obrazow_z_2')
       showToast(`❌ ${message}`, 'error')
     }
   }
@@ -4942,7 +5059,7 @@ async function loadImageLibraryPage(options = {}) {
     renderImageLibraryPage()
 
     if (!silent) {
-      const message = error instanceof Error ? error.message : 'Nie udało się pobrać biblioteki grafik.'
+      const message = error instanceof Error ? error.message : t('app.nie_udao_sie_pobrac_biblioteki_grafik')
       showToast(`❌ ${message}`, 'error')
     }
   }
@@ -4971,7 +5088,7 @@ async function loadEmojis() {
     emojis = Array.isArray(json.emojis) ? json.emojis : []
   } catch {
     emojis = []
-    showToast('Nie udało się pobrać emotek.', 'error')
+    showToast(t('app.nie_udao_sie_pobrac_emotek'), 'error')
   }
 }
 
@@ -4985,7 +5102,7 @@ function renderEmojiList(filterText) {
     : emojis
 
   if (!filteredEmojis.length) {
-    list.innerHTML = '<p class="popover-empty">Brak pasujących emotek.</p>'
+    list.innerHTML = `<p class="popover-empty">${t('app.ui_brak_emotek')}</p>`
     return
   }
 
@@ -5015,8 +5132,8 @@ function renderMentionChannelResults(results, queryText = '') {
   const normalizedQuery = String(queryText ?? '').trim()
   if (!results.length) {
     container.innerHTML = normalizedQuery.length < 2
-      ? '<p class="popover-empty">Wpisz min. 2 znaki, aby wyszukać kanał.</p>'
-      : '<p class="popover-empty">Brak kanałów pasujących do zapytania.</p>'
+      ? `<p class="popover-empty">${t('app.ui_min2_kanal')}</p>`
+      : `<p class="popover-empty">${t('app.ui_brak_kanalow_zapytanie')}</p>`
     return
   }
 
@@ -5032,8 +5149,8 @@ function renderMentionRoleResults(results, queryText = '') {
   const normalizedQuery = String(queryText ?? '').trim()
   if (!results.length) {
     container.innerHTML = normalizedQuery.length < 2
-      ? '<p class="popover-empty">Wpisz min. 2 znaki, aby wyszukać rolę.</p>'
-      : '<p class="popover-empty">Brak ról pasujących do zapytania.</p>'
+      ? `<p class="popover-empty">${t('app.ui_min2_rola')}</p>`
+      : `<p class="popover-empty">${t('app.ui_brak_rol_zapytanie')}</p>`
     return
   }
 
@@ -5071,7 +5188,7 @@ async function searchMentionChannels(rawQuery) {
 
     mentionChannelResults = []
     renderMentionChannelResults([], query)
-    showToast('Nie udało się wyszukać kanałów.', 'error')
+    showToast(t('app.nie_udao_sie_wyszukac_kanaow'), 'error')
   }
 }
 
@@ -5104,7 +5221,7 @@ async function searchMentionRoles(rawQuery) {
 
     mentionRoleResults = []
     renderMentionRoleResults([], query)
-    showToast('Nie udało się wyszukać ról.', 'error')
+    showToast(t('app.nie_udao_sie_wyszukac_rol'), 'error')
   }
 }
 
@@ -5115,13 +5232,13 @@ function renderMentionUserResults(results, queryText = '') {
   const normalizedQuery = String(queryText ?? '').trim()
   if (!results.length) {
     container.innerHTML = normalizedQuery.length < 2
-      ? '<p class="popover-empty">Wpisz min. 2 znaki, aby wyszukać użytkownika.</p>'
-      : '<p class="popover-empty">Brak użytkowników pasujących do zapytania.</p>'
+      ? `<p class="popover-empty">${t('app.ui_min2_user')}</p>`
+      : `<p class="popover-empty">${t('app.ui_brak_userow_zapytanie')}</p>`
     return
   }
 
   container.innerHTML = results.map((member) => {
-    const displayName = member.nick || member.globalName || member.username || 'użytkownik'
+    const displayName = member.nick || member.globalName || member.username || t('app.ui_uzytkownik')
     return `
       <button type="button" class="mention-user-item" data-token="&lt;@${member.id}&gt;" title="@${escapeHtml(displayName)}">
         <span class="mention-user-name">${escapeHtml(displayName)}</span>
@@ -5154,7 +5271,7 @@ async function searchMentionUsers(rawQuery) {
 
     mentionUserResults.forEach((member) => {
       if (!member?.id) return
-      const displayName = member.nick || member.globalName || member.username || 'użytkownik'
+      const displayName = member.nick || member.globalName || member.username || t('app.ui_uzytkownik')
       knownUsers.set(member.id, displayName)
     })
 
@@ -5166,7 +5283,7 @@ async function searchMentionUsers(rawQuery) {
 
     mentionUserResults = []
     renderMentionUserResults([], query)
-    showToast('Nie udało się wyszukać użytkowników.', 'error')
+    showToast(t('app.nie_udao_sie_wyszukac_uzytkownikow'), 'error')
   }
 }
 
@@ -5176,7 +5293,7 @@ function renderChannelSelector() {
 
   const previous = select.value
   select.innerHTML = [
-    '<option value="">— wybierz kanał —</option>',
+    `<option value="">${t('app.ui_wybierz_kanal')}</option>`,
     ...channels.map((channel) => `<option value="${channel.id}">#${escapeHtml(channel.name)}</option>`),
   ].join('')
 
@@ -5190,7 +5307,7 @@ function renderPingRoleSelector() {
 
   const previous = select.value
   const options = [
-    '<option value="">Wybierz ping (@everyone, @here lub rolę)</option>',
+    `<option value="">${t('app.ui_wybierz_ping')}</option>`,
     '<option value="everyone">@everyone</option>',
     '<option value="here">@here</option>',
     ...roles.map((role) => `<option value="${role.id}">@${escapeHtml(role.name)}</option>`),
@@ -5247,7 +5364,7 @@ function renderImageLibrary() {
   }
 
   if (pageLabel) {
-    pageLabel.textContent = `Strona ${creatorImagePage}/${creatorImageTotalPages}`
+    pageLabel.textContent = t('app.strona_p1_p2_5', { p1: creatorImagePage, p2: creatorImageTotalPages })
   }
 
   if (paginationContainer) {
@@ -5264,8 +5381,8 @@ function renderImageLibrary() {
 
   if (creatorImageEntries.length === 0) {
     const emptyMessage = creatorImageSearch
-      ? `Brak grafik pasujacych do wyszukiwania: "${escapeHtml(creatorImageSearch)}".`
-      : 'Brak obrazow w folderze /img.'
+      ? t('app.brak_grafik_pasujacych_do_wyszukiwania_p1', { p1: escapeHtml(creatorImageSearch) })
+      : t('app.brak_obrazow_w_folderze_img')
     grid.innerHTML = `<p class="img-empty">${emptyMessage}</p>`
     return
   }
@@ -5303,7 +5420,7 @@ function renderImageLibrary() {
 
       const fileNameElement = document.getElementById('upload-file-name')
       if (fileNameElement) {
-        fileNameElement.textContent = 'Nie wybrano pliku.'
+        fileNameElement.textContent = t('app.nie_wybrano_pliku_3')
       }
 
       renderImageLibrary()
@@ -5326,7 +5443,7 @@ function renderImageLibraryPage() {
   }
 
   if (pageLabel) {
-    pageLabel.textContent = `Strona ${libraryImagePage}/${libraryImageTotalPages}`
+    pageLabel.textContent = t('app.strona_p1_p2_6', { p1: libraryImagePage, p2: libraryImageTotalPages })
   }
 
   if (countLabel) {
@@ -5347,8 +5464,8 @@ function renderImageLibraryPage() {
 
   if (libraryImageEntries.length === 0) {
     const emptyMessage = libraryImageSearch
-      ? `Brak grafik pasujacych do wyszukiwania: "${escapeHtml(libraryImageSearch)}".`
-      : 'Biblioteka grafik jest pusta.'
+      ? t('app.brak_grafik_pasujacych_do_wyszukiwania_p1_2', { p1: escapeHtml(libraryImageSearch) })
+      : t('app.biblioteka_grafik_jest_pusta')
     listContainer.innerHTML = `<div class="scheduled-empty">${emptyMessage}</div>`
     return
   }
@@ -5388,7 +5505,7 @@ async function uploadImageToLibrary() {
     : null
 
   if (!selectedFile) {
-    showToast('Wybierz plik, ktory chcesz dodac do biblioteki.', 'error')
+    showToast(t('app.wybierz_plik_ktory_chcesz_dodac_do'), 'error')
     return
   }
 
@@ -5398,7 +5515,7 @@ async function uploadImageToLibrary() {
   }
 
   if (selectedFile.size > MAX_UPLOAD_BYTES) {
-    showToast('Plik jest za duzy. Maksymalny rozmiar to 20 MB.', 'error')
+    showToast(t('app.plik_jest_za_duzy_maksymalny_rozmiar_2'), 'error')
     return
   }
 
@@ -5422,7 +5539,7 @@ async function uploadImageToLibrary() {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie dodac obrazu do biblioteki.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_dodac_obrazu_do'))
     }
 
     if (uploadFileInput instanceof HTMLInputElement) {
@@ -5434,9 +5551,9 @@ async function uploadImageToLibrary() {
     }
 
     await syncImageLibraryWithCreator({ silent: true })
-    showToast('✅ Grafika zostala dodana do biblioteki.', 'success')
+    showToast(t('app.grafika_zostala_dodana_do_biblioteki'), 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nie udalo sie dodac obrazu do biblioteki.'
+    const message = error instanceof Error ? error.message : t('app.nie_udalo_sie_dodac_obrazu_do_2')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -5454,7 +5571,7 @@ async function renameImageInLibrary(filename) {
 
   const nextFilename = prompted.trim()
   if (!nextFilename) {
-    showToast('Nowa nazwa pliku nie moze byc pusta.', 'error')
+    showToast(t('app.nowa_nazwa_pliku_nie_moze_byc'), 'error')
     return
   }
 
@@ -5470,7 +5587,7 @@ async function renameImageInLibrary(filename) {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie zmienic nazwy obrazu.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_zmienic_nazwy_obrazu'))
     }
 
     const renamedTo = String(payload.entry?.name ?? '').trim()
@@ -5479,9 +5596,9 @@ async function renameImageInLibrary(filename) {
     }
 
     await syncImageLibraryWithCreator({ silent: true })
-    showToast('✅ Nazwa grafiki zostala zaktualizowana.', 'success')
+    showToast(t('app.nazwa_grafiki_zostala_zaktualizowana'), 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nie udalo sie zmienic nazwy obrazu.'
+    const message = error instanceof Error ? error.message : t('app.nie_udalo_sie_zmienic_nazwy_obrazu_2')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -5492,7 +5609,7 @@ async function deleteImageFromLibrary(filename) {
     return
   }
 
-  const shouldDelete = window.confirm(`Czy na pewno usunac obraz "${trimmedFilename}" z biblioteki?`)
+  const shouldDelete = window.confirm(t('app.czy_na_pewno_usunac_obraz_p1', { p1: trimmedFilename }))
   if (!shouldDelete) {
     return
   }
@@ -5504,7 +5621,7 @@ async function deleteImageFromLibrary(filename) {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie usunac obrazu.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_usunac_obrazu'))
     }
 
     if (selectedImageName === trimmedFilename) {
@@ -5512,9 +5629,9 @@ async function deleteImageFromLibrary(filename) {
     }
 
     await syncImageLibraryWithCreator({ silent: true })
-    showToast('🗑️ Grafika zostala usunieta z biblioteki.', 'success')
+    showToast(t('app.grafika_zostala_usunieta_z_biblioteki'), 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nie udalo sie usunac obrazu.'
+    const message = error instanceof Error ? error.message : t('app.nie_udalo_sie_usunac_obrazu_2')
     showToast(`❌ ${message}`, 'error')
   }
 }
@@ -5569,7 +5686,7 @@ function updateImagePanels() {
 
     const fileNameElement = document.getElementById('upload-file-name')
     if (fileNameElement) {
-      fileNameElement.textContent = 'Nie wybrano pliku.'
+      fileNameElement.textContent = t('app.nie_wybrano_pliku_4')
     }
   }
 }
@@ -5608,11 +5725,11 @@ function updatePreview() {
   } else {
     embedContainer.style.display = 'none'
     messageContainer.style.display = ''
-    messageContainer.innerHTML = renderMarkdown(data.content) || '<span style="opacity:.45">Wpisz treść publikacji.</span>'
+    messageContainer.innerHTML = renderMarkdown(data.content) || `<span style="opacity:.45">${t('app.ui_wpisz_tresc')}</span>`
   }
 
   if (data.mentionRoleEnabled && data.mentionRoleId) {
-    pingPreviewLine.textContent = `Ping przed publikacją: ${resolvePingTargetLabel(data.mentionRoleId)}`
+    pingPreviewLine.textContent = t('app.ui_ping_przed_label', { p1: resolvePingTargetLabel(data.mentionRoleId) })
     pingPreviewLine.style.display = 'inline-flex'
   } else {
     pingPreviewLine.style.display = 'none'
@@ -5645,10 +5762,10 @@ function updatePreview() {
     if (data.imageMode === 'none') {
       imagePlaceholder.style.display = 'none'
     } else if (data.imageMode === 'library') {
-      imagePlaceholder.textContent = '🖼️ Wybierz grafikę z biblioteki, aby zobaczyć podgląd.'
+      imagePlaceholder.textContent = t('app.wybierz_grafike_z_biblioteki_aby_zobaczyc')
       imagePlaceholder.style.display = ''
     } else {
-      imagePlaceholder.textContent = '🖼️ Wgraj plik, aby zobaczyć podgląd.'
+      imagePlaceholder.textContent = t('app.wgraj_plik_aby_zobaczyc_podglad')
       imagePlaceholder.style.display = ''
     }
   }
@@ -5677,7 +5794,7 @@ function renderPreviewEmbedText(title, content) {
 
   const bodyHtml = content?.trim()
     ? renderMarkdown(content)
-    : '<span style="opacity:.45">Wpisz treść publikacji.</span>'
+    : `<span style="opacity:.45">${t('app.ui_wpisz_tresc')}</span>`
 
   return `${titleHtml}${bodyHtml}`
 }
@@ -5698,7 +5815,7 @@ function buildDiscordMockupHtml(post) {
   const pingEnabled = Boolean(payload.mentionRoleEnabled)
   const pingLabel = pingEnabled ? resolvePingTargetLabel(payload.mentionRoleId ?? '') : ''
   const pingHtml = pingEnabled && pingLabel
-    ? `<div class="preview-ping-line" style="display:inline-flex">Ping przed publikacją: ${escapeHtml(pingLabel)}</div>`
+    ? `<div class="preview-ping-line" style="display:inline-flex">${t('app.ui_ping_przed')}: ${escapeHtml(pingLabel)}</div>`
     : ''
 
   let contentHtml = ''
@@ -5711,7 +5828,7 @@ function buildDiscordMockupHtml(post) {
       </div>`
   } else {
     const rendered = renderMarkdown(payload.content ?? '')
-    contentHtml = `<div class="discord-plain-message">${rendered || '<span style="opacity:.45">Brak treści.</span>'}</div>`
+    contentHtml = `<div class="discord-plain-message">${rendered || `<span style="opacity:.45">${t('app.ui_brak_tresci')}</span>`}</div>`
   }
 
   let imageHtml = ''
@@ -5847,12 +5964,12 @@ function updateSendButton() {
   button.disabled = !(hasChannel && hasContent && pingReady && imageReady && matchReady && eventReady)
 
   if (editingSentPostId) {
-    buttonText.textContent = 'Zapisz zmiany wysłanego posta'
+    buttonText.textContent = t('app.zapisz_zmiany_wysanego_posta')
     return
   }
 
   if (data.scheduleAtLocal) {
-    buttonText.textContent = editingScheduledPostId ? 'Zapisz zaplanowany post' : 'Zaplanuj publikację'
+    buttonText.textContent = editingScheduledPostId ? 'Zapisz zaplanowany post' : t('app.zaplanuj_publikacje')
     return
   }
 
@@ -5873,11 +5990,11 @@ async function publishMessage() {
     const hasScheduleDate = Boolean(payload.scheduleAtLocal?.trim())
 
     if (editingSentPostId && hasScheduleDate) {
-      throw new Error('Wysłany post nie może zostać ponownie zaplanowany. Usuń datę publikacji.')
+      throw new Error(t('app.wysany_post_nie_moze_zostac_ponownie'))
     }
 
     if (editingScheduledPostId && !hasScheduleDate) {
-      throw new Error('Edytowany post zaplanowany musi mieć ustawioną datę publikacji.')
+      throw new Error(t('app.edytowany_post_zaplanowany_musi_miec_ustawiona'))
     }
 
     const requestUrl = editingSentPostId
@@ -5897,7 +6014,7 @@ async function publishMessage() {
 
     const json = await parseApiResponse(resp)
     if (!resp.ok) {
-      throw new Error(json.error ?? 'Nieznany błąd')
+      throw new Error(json.error ?? t('app.nieznany_bad_15'))
     }
 
     if (Array.isArray(json.warnings) && json.warnings.length > 0) {
@@ -5910,7 +6027,7 @@ async function publishMessage() {
       editingSentPostId = null
       await loadSentPosts()
       switchSection('sent-posts')
-      showToast('✅ Wysłany post został zaktualizowany.', 'success')
+      showToast(t('app.wysany_post_zosta_zaktualizowany'), 'success')
       return
     }
 
@@ -5927,8 +6044,8 @@ async function publishMessage() {
 
       showToast(
         wasEditing
-          ? '✅ Zaplanowany post został zaktualizowany.'
-          : '✅ Post został dodany do schedulera.',
+          ? t('app.zaplanowany_post_zosta_zaktualizowany')
+          : t('app.post_zosta_dodany_do_schedulera'),
         'success',
       )
 
@@ -5941,9 +6058,9 @@ async function publishMessage() {
     }
 
     await loadSentPosts()
-    showToast('✅ Publikacja wysłana pomyślnie!', 'success')
+    showToast(t('app.publikacja_wysana_pomyslnie'), 'success')
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Nieznany błąd'
+    const message = error instanceof Error ? error.message : t('app.nieznany_bad_16')
     showToast(`❌ ${message}`, 'error')
   } finally {
     button.classList.remove('loading')
@@ -5969,7 +6086,7 @@ async function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result ?? ''))
-    reader.onerror = () => reject(new Error('Nie udało się odczytać pliku.'))
+    reader.onerror = () => reject(new Error(t('app.nie_udao_sie_odczytac_pliku')))
     reader.readAsDataURL(file)
   })
 }
@@ -6141,8 +6258,8 @@ function updateEventPreview(data) {
 
   previewCard.style.display = ''
 
-  const title = String(draft.title ?? '').trim() || 'Brak tytułu wydarzenia'
-  const description = String(draft.description ?? '').trim() || 'Brak opisu wydarzenia.'
+  const title = String(draft.title ?? '').trim() || t('app.brak_tytuu_wydarzenia')
+  const description = String(draft.description ?? '').trim() || t('app.brak_opisu_wydarzenia')
   const location = String(draft.location ?? '').trim() || 'Online'
 
   const startUnix = Number.isFinite(Date.parse(String(draft.startAtLocal ?? '')))
@@ -6152,8 +6269,8 @@ function updateEventPreview(data) {
     ? Math.floor(Date.parse(String(draft.endAtLocal ?? '')) / 1000)
     : null
 
-  const startLabel = startUnix ? `<t:${startUnix}:F>` : 'Nie ustawiono'
-  const endLabel = endUnix ? `<t:${endUnix}:F>` : 'Nie ustawiono'
+  const startLabel = startUnix ? `<t:${startUnix}:F>` : t('app.nie_ustawiono_3')
+  const endLabel = endUnix ? `<t:${endUnix}:F>` : t('app.nie_ustawiono_4')
 
   const previewText = [
     `# ${title}`,
@@ -6210,7 +6327,7 @@ function renderDiscordMentions(text) {
   const roleMap = new Map(roles.map((role) => [role.id, role.name]))
 
   let html = text.replace(/(?:&lt;|<)#(\d{17,20})(?:&gt;|>)/g, (_match, id) => {
-    const name = channelMap.get(id) ?? 'kanał'
+    const name = channelMap.get(id) ?? t('app.ui_kanal')
     return `<span class="md-mention">#${escapeHtml(name)}</span>`
   })
 
@@ -6220,7 +6337,7 @@ function renderDiscordMentions(text) {
   })
 
   html = html.replace(/(?:&lt;|<)@!?(\d{17,20})(?:&gt;|>)/g, (_match, id) => {
-    const name = knownUsers.get(id) ?? 'użytkownik'
+    const name = knownUsers.get(id) ?? t('app.ui_uzytkownik')
     return `<span class="md-mention">@${escapeHtml(name)}</span>`
   })
 
@@ -6264,7 +6381,7 @@ function formatRelativeCountdown(targetTimestamp) {
   const diffMinutes = Math.round(diffMs / 60000)
 
   if (Math.abs(diffMinutes) < 1) {
-    return 'za chwilę'
+    return t('app.za_chwile')
   }
 
   if (diffMinutes > 0) {
@@ -6350,7 +6467,7 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;')
 }
 
-function buildAuthorHtml(name, userId, avatarHash, prefix = 'dodał', resolvedAvatarUrl = null, role = null) {
+function buildAuthorHtml(name, userId, avatarHash, prefix = t('app.ui_dodal'), resolvedAvatarUrl = null, role = null) {
   if (!name) return ''
   const avatarUrl = resolvedAvatarUrl
     || (userId && avatarHash
@@ -6424,7 +6541,7 @@ function initTabDateControls(tab) {
       const startVal = document.getElementById(`${tab}-start-date`)?.value ?? ''
       const endVal = document.getElementById(`${tab}-end-date`)?.value ?? ''
       if (!startVal || !endVal || startVal > endVal) {
-        showToast('❌ Nieprawidłowy zakres dat.', 'error')
+        showToast(t('app.nieprawidowy_zakres_dat'), 'error')
         return
       }
       statsTabDates[tab].startDate = startVal
@@ -6529,7 +6646,7 @@ async function loadUsersSummary() {
     const params = new URLSearchParams({ startDate, endDate })
     const res = await fetch(`/api/stats/members/summary?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     const s = payload.summary ?? {}
     if (kpiCount) kpiCount.textContent = Number.isFinite(Number(s.latestMemberCount)) ? Number(s.latestMemberCount).toLocaleString('pl-PL') : '—'
     if (kpiBalance) {
@@ -6540,7 +6657,7 @@ async function loadUsersSummary() {
       kpiBalance.style.color = balance > 0 ? '#57f287' : balance < 0 ? '#ed4245' : ''
     }
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Błąd'
+    const msg = error instanceof Error ? error.message : t('app.ui_blad')
     if (kpiCount) kpiCount.textContent = '—'
     if (kpiBalance) { kpiBalance.textContent = '—'; kpiBalance.style.color = '' }
     showToast(`❌ ${msg}`, 'error')
@@ -6549,7 +6666,7 @@ async function loadUsersSummary() {
 
 async function handleStatsReset() {
   const confirmed = window.confirm(
-    'Na pewno chcesz zresetować WSZYSTKIE statystyki?\n\nTa operacja jest nieodwracalna — usunie wszystkie dane o wiadomościach, voice i członkach serwera.',
+    t('app.ui_reset_statystyk'),
   )
   if (!confirmed) return
 
@@ -6561,12 +6678,12 @@ async function handleStatsReset() {
   try {
     const response = await fetchWithCsrf('/api/stats/reset', { method: 'POST' })
     const payload = await parseApiResponse(response)
-    if (!response.ok) throw new Error(payload.error ?? 'Nie udało się zresetować.')
-    if (statusEl) statusEl.textContent = '✓ Zresetowano pomyślnie'
-    showToast('✅ Statystyki zostały zresetowane.', 'success')
+    if (!response.ok) throw new Error(payload.error ?? t('app.nie_udao_sie_zresetowac'))
+    if (statusEl) statusEl.textContent = t('app.zresetowano_pomyslnie')
+    showToast(t('app.statystyki_zostay_zresetowane'), 'success')
     setTimeout(() => { if (statusEl) statusEl.textContent = '' }, 4000)
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Nieznany błąd'
+    const msg = error instanceof Error ? error.message : t('app.nieznany_bad_17')
     if (statusEl) statusEl.textContent = `✗ ${msg}`
     showToast(`❌ ${msg}`, 'error')
     setTimeout(() => { if (statusEl) statusEl.textContent = '' }, 5000)
@@ -6581,10 +6698,10 @@ async function loadMembersTimeSeries() {
     const params = new URLSearchParams({ startDate, endDate })
     const res = await fetch(`/api/stats/members/timeseries?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     renderMembersChart(Array.isArray(payload.timeSeries) ? payload.timeSeries : [])
   } catch (error) {
-    showToast(`❌ ${error instanceof Error ? error.message : 'Błąd wykresu członków.'}`, 'error')
+    showToast(`❌ ${error instanceof Error ? error.message : t('app.bad_wykresu_czonkow')}`, 'error')
   }
 }
 
@@ -6599,7 +6716,7 @@ function renderMembersChart(timeSeries) {
       labels: timeSeries.map((p) => p.date),
       datasets: [
         {
-          label: 'Członkowie',
+          label: t('app.ui_czlonkowie'),
           data: timeSeries.map((p) => Number(p.memberCount) || 0),
           backgroundColor: 'rgba(88,101,242,0.2)',
           borderColor: '#5865f2',
@@ -6634,19 +6751,19 @@ function renderMembersChart(timeSeries) {
 async function loadActiveUsers() {
   const list = document.getElementById('users-active-list')
   if (!list) return
-  list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+  list.innerHTML = `<div class="scheduled-empty">${t('app.ui_ladowanie')}</div>`
 
   try {
     const { startDate, endDate } = statsTabDates.users
     const params = new URLSearchParams({ startDate, endDate })
     const res = await fetch(`/api/stats/members/active-users?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     const users = Array.isArray(payload.activeUsers) ? payload.activeUsers : []
     renderTopUsersList(list, users.slice(0, 5), 'messages', 'voiceMinutes')
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Błąd'
-    list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
+    const msg = error instanceof Error ? error.message : t('app.ui_blad')
+    list.innerHTML = `<div class="scheduled-empty scheduled-error">${t('app.ui_blad_prefix')}: ${escapeHtml(msg)}</div>`
   }
 }
 
@@ -6671,14 +6788,14 @@ async function loadMessagesSummary() {
     const params = new URLSearchParams({ startDate, endDate })
     const res = await fetch(`/api/stats/messages/summary?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     const s = payload.summary ?? {}
     if (kpiTotal) kpiTotal.textContent = Number.isFinite(Number(s.messages)) ? Number(s.messages).toLocaleString('pl-PL') : '—'
     if (kpiUnique) kpiUnique.textContent = Number.isFinite(Number(s.uniqueUsers)) ? Number(s.uniqueUsers).toLocaleString('pl-PL') : '—'
   } catch (error) {
     if (kpiTotal) kpiTotal.textContent = '—'
     if (kpiUnique) kpiUnique.textContent = '—'
-    showToast(`❌ ${error instanceof Error ? error.message : 'Błąd podsumowania.'}`, 'error')
+    showToast(`❌ ${error instanceof Error ? error.message : t('app.bad_podsumowania')}`, 'error')
   }
 }
 
@@ -6688,10 +6805,10 @@ async function loadMessagesTimeSeries() {
     const params = new URLSearchParams({ startDate, endDate })
     const res = await fetch(`/api/stats/messages/timeseries?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     renderMessagesChart(Array.isArray(payload.timeSeries) ? payload.timeSeries : [])
   } catch (error) {
-    showToast(`❌ ${error instanceof Error ? error.message : 'Błąd wykresu.'}`, 'error')
+    showToast(`❌ ${error instanceof Error ? error.message : t('app.bad_wykresu')}`, 'error')
   }
 }
 
@@ -6705,7 +6822,7 @@ function renderMessagesChart(timeSeries) {
     data: {
       labels: timeSeries.map((p) => p.date),
       datasets: [{
-        label: 'Wiadomości',
+        label: t('app.ui_wiadomosci'),
         data: timeSeries.map((p) => Number(p.messages) || 0),
         backgroundColor: 'rgba(88,101,242,0.75)',
         borderColor: '#5865f2',
@@ -6723,7 +6840,7 @@ async function loadMessagesTopUsers(reset) {
 
   if (reset) {
     messagesTopUsersOffset = 0
-    list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+    list.innerHTML = `<div class="scheduled-empty">${t('app.ui_ladowanie')}</div>`
   }
 
   const BATCH = 5
@@ -6732,7 +6849,7 @@ async function loadMessagesTopUsers(reset) {
     const params = new URLSearchParams({ startDate, endDate, limit: String(messagesTopUsersOffset + BATCH) })
     const res = await fetch(`/api/stats/messages/top-users?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     const users = Array.isArray(payload.topUsers) ? payload.topUsers : []
 
     if (reset) list.innerHTML = ''
@@ -6742,8 +6859,8 @@ async function loadMessagesTopUsers(reset) {
 
     if (loadMoreBtn) loadMoreBtn.style.display = users.length >= messagesTopUsersOffset + 1 ? '' : 'none'
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Błąd'
-    if (reset) list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
+    const msg = error instanceof Error ? error.message : t('app.ui_blad')
+    if (reset) list.innerHTML = `<div class="scheduled-empty scheduled-error">${t('app.ui_blad_prefix')}: ${escapeHtml(msg)}</div>`
     if (loadMoreBtn) loadMoreBtn.style.display = 'none'
   }
 }
@@ -6751,20 +6868,20 @@ async function loadMessagesTopUsers(reset) {
 async function loadMessagesTopChannels() {
   const list = document.getElementById('messages-top-channels-list')
   if (!list) return
-  list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+  list.innerHTML = `<div class="scheduled-empty">${t('app.ui_ladowanie')}</div>`
 
   try {
     const { startDate, endDate } = statsTabDates.messages
     const params = new URLSearchParams({ startDate, endDate, limit: '5' })
     const res = await fetch(`/api/stats/messages/top-channels?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     const channels = Array.isArray(payload.topChannels) ? payload.topChannels : []
     renderTopChannelsList(list, channels, 'messages', 'wiad.')
     renderDoughnutChart('messages-channels-doughnut', 'messages', channels, 'messages')
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Błąd'
-    list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
+    const msg = error instanceof Error ? error.message : t('app.ui_blad')
+    list.innerHTML = `<div class="scheduled-empty scheduled-error">${t('app.ui_blad_prefix')}: ${escapeHtml(msg)}</div>`
   }
 }
 
@@ -6790,7 +6907,7 @@ async function loadVoiceSummary() {
     const params = new URLSearchParams({ startDate, endDate })
     const res = await fetch(`/api/stats/voice/summary?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     const s = payload.summary ?? {}
     const minutes = Number.isFinite(Number(s.voiceMinutes)) ? Number(s.voiceMinutes) : 0
     if (kpiMinutes) kpiMinutes.textContent = minutes.toLocaleString('pl-PL')
@@ -6800,7 +6917,7 @@ async function loadVoiceSummary() {
     if (kpiMinutes) kpiMinutes.textContent = '—'
     if (kpiHours) kpiHours.textContent = '—'
     if (kpiUnique) kpiUnique.textContent = '—'
-    showToast(`❌ ${error instanceof Error ? error.message : 'Błąd podsumowania voice.'}`, 'error')
+    showToast(`❌ ${error instanceof Error ? error.message : t('app.bad_podsumowania_voice')}`, 'error')
   }
 }
 
@@ -6810,10 +6927,10 @@ async function loadVoiceTimeSeries() {
     const params = new URLSearchParams({ startDate, endDate })
     const res = await fetch(`/api/stats/voice/timeseries?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     renderVoiceChart(Array.isArray(payload.timeSeries) ? payload.timeSeries : [])
   } catch (error) {
-    showToast(`❌ ${error instanceof Error ? error.message : 'Błąd wykresu voice.'}`, 'error')
+    showToast(`❌ ${error instanceof Error ? error.message : t('app.bad_wykresu_voice')}`, 'error')
   }
 }
 
@@ -6845,7 +6962,7 @@ async function loadVoiceTopUsers(reset) {
 
   if (reset) {
     voiceTopUsersOffset = 0
-    list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+    list.innerHTML = `<div class="scheduled-empty">${t('app.ui_ladowanie')}</div>`
   }
 
   const BATCH = 5
@@ -6854,7 +6971,7 @@ async function loadVoiceTopUsers(reset) {
     const params = new URLSearchParams({ startDate, endDate, limit: String(voiceTopUsersOffset + BATCH) })
     const res = await fetch(`/api/stats/voice/top-users?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     const users = Array.isArray(payload.topUsers) ? payload.topUsers : []
 
     if (reset) list.innerHTML = ''
@@ -6864,8 +6981,8 @@ async function loadVoiceTopUsers(reset) {
 
     if (loadMoreBtn) loadMoreBtn.style.display = users.length >= voiceTopUsersOffset + 1 ? '' : 'none'
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Błąd'
-    if (reset) list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
+    const msg = error instanceof Error ? error.message : t('app.ui_blad')
+    if (reset) list.innerHTML = `<div class="scheduled-empty scheduled-error">${t('app.ui_blad_prefix')}: ${escapeHtml(msg)}</div>`
     if (loadMoreBtn) loadMoreBtn.style.display = 'none'
   }
 }
@@ -6873,20 +6990,20 @@ async function loadVoiceTopUsers(reset) {
 async function loadVoiceTopChannels() {
   const list = document.getElementById('voice-top-channels-list')
   if (!list) return
-  list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+  list.innerHTML = `<div class="scheduled-empty">${t('app.ui_ladowanie')}</div>`
 
   try {
     const { startDate, endDate } = statsTabDates.voice
     const params = new URLSearchParams({ startDate, endDate, limit: '5' })
     const res = await fetch(`/api/stats/voice/top-channels?${params}`)
     const payload = await parseApiResponse(res)
-    if (!res.ok) throw new Error(payload.error ?? 'Błąd.')
+    if (!res.ok) throw new Error(payload.error ?? t('app.ui_blad_kropka'))
     const channels = Array.isArray(payload.topChannels) ? payload.topChannels : []
     renderTopChannelsList(list, channels, 'voiceMinutes', 'min')
     renderDoughnutChart('voice-channels-doughnut', 'voice', channels, 'voiceMinutes')
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Błąd'
-    list.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd: ${escapeHtml(msg)}</div>`
+    const msg = error instanceof Error ? error.message : t('app.ui_blad')
+    list.innerHTML = `<div class="scheduled-empty scheduled-error">${t('app.ui_blad_prefix')}: ${escapeHtml(msg)}</div>`
   }
 }
 
@@ -6905,7 +7022,7 @@ function renderTopUsersList(listEl, users, primaryKey, secondaryKey, startIndex)
     const pos = baseIndex + i + 1
     const displayName = typeof user.displayName === 'string' && user.displayName.trim().length > 0
       ? user.displayName.trim()
-      : `Użytkownik ${user.userId}`
+      : t('app.ui_uzytkownik_id', { p1: user.userId })
     const avatarUrl = typeof user.avatarUrl === 'string' && user.avatarUrl.trim().length > 0 ? user.avatarUrl.trim() : null
     const fallback = escapeHtml(displayName.slice(0, 1).toUpperCase() || '?')
 
@@ -7035,14 +7152,14 @@ async function loadStatsExcludedChannels() {
 
     renderStatsChannelChecklist(container)
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Nieznany blad'
-    container.innerHTML = `<div class="scheduled-empty scheduled-error">Błąd ładowania kanałów: ${escapeHtml(msg)}</div>`
+    const msg = error instanceof Error ? error.message : t('app.nieznany_blad_14')
+    container.innerHTML = `<div class="scheduled-empty scheduled-error">${t('app.ui_blad_ladowania_kanalow')}: ${escapeHtml(msg)}</div>`
   }
 }
 
 function renderStatsChannelChecklist(container) {
   if (statsAllChannels.length === 0) {
-    container.innerHTML = '<div class="scheduled-empty">Brak kanałów tekstowych na serwerze.</div>'
+    container.innerHTML = `<div class="scheduled-empty">${t('app.ui_brak_kanalow_tekstowych')}</div>`
     return
   }
 
@@ -7072,7 +7189,7 @@ async function saveStatsExcludedChannels() {
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
-      throw new Error(payload.error ?? 'Nie udalo sie zapisac ustawien.')
+      throw new Error(payload.error ?? t('app.nie_udalo_sie_zapisac_ustawien'))
     }
 
     statsExcludedChannelIds = selectedIds
@@ -7083,9 +7200,9 @@ async function saveStatsExcludedChannels() {
     }
     showToast('✅ Ustawienia statystyk zapisane.', 'success')
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Nieznany blad'
+    const msg = error instanceof Error ? error.message : t('app.nieznany_blad_15')
     if (statusEl) {
-      statusEl.textContent = '✗ Błąd'
+      statusEl.textContent = t('app.bad')
       statusEl.className = 'stats-save-status stats-save-error'
       setTimeout(() => { statusEl.textContent = ''; statusEl.className = 'stats-save-status' }, 3000)
     }
@@ -7205,7 +7322,7 @@ async function loadShopItems({ page = shopItemsPage, silent = false } = {}) {
   const requestId = ++shopItemsLoadRequestId
   if (!silent) {
     const list = document.getElementById('shop-items-list')
-    if (list) list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+    if (list) list.innerHTML = `<div class="scheduled-empty">${t('app.ui_ladowanie')}</div>`
   }
 
   try {
@@ -7219,7 +7336,7 @@ async function loadShopItems({ page = shopItemsPage, silent = false } = {}) {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      showToast(payload.error ?? 'Nie udało się pobrać przedmiotów.', 'error')
+      showToast(payload.error ?? t('app.nie_udao_sie_pobrac_przedmiotow'), 'error')
       return
     }
 
@@ -7231,7 +7348,7 @@ async function loadShopItems({ page = shopItemsPage, silent = false } = {}) {
     renderShopItems()
   } catch {
     if (requestId !== shopItemsLoadRequestId) return
-    showToast('Błąd sieci podczas pobierania przedmiotów.', 'error')
+    showToast(t('app.bad_sieci_podczas_pobierania_przedmiotow'), 'error')
   }
 }
 
@@ -7252,7 +7369,7 @@ function renderShopItems() {
   if (nextBtn instanceof HTMLButtonElement) nextBtn.disabled = shopItemsPage >= shopItemsTotalPages
 
   if (shopItems.length === 0) {
-    list.innerHTML = '<div class="scheduled-empty">Brak przedmiotów w sklepie.</div>'
+    list.innerHTML = `<div class="scheduled-empty">${t('app.ui_brak_przedmiotow')}</div>`
     return
   }
 
@@ -7262,8 +7379,8 @@ function renderShopItems() {
       : '<span class="scheduled-chip" style="background:#72767d;color:#fff;">Nieaktywny</span>'
     const stockValue = item.stock === 0 ? 'Nieograniczona' : String(item.stock)
     const stockColor = !item.isActive ? '#72767d' : item.stock === 0 ? '#43b581' : item.stock < 5 ? '#faa61a' : '#43b581'
-    const stockChip = `<span class="scheduled-chip" style="border-color:${stockColor}40;color:${stockColor};">Ilość: ${escapeHtml(stockValue)}</span>`
-    const maxPerUserText = item.maxPerUser === 0 ? 'Brak limitu' : `Max ${item.maxPerUser}/user`
+    const stockChip = `<span class="scheduled-chip" style="border-color:${stockColor}40;color:${stockColor};">${t('app.ui_ilosc')}: ${escapeHtml(stockValue)}</span>`
+    const maxPerUserText = item.maxPerUser === 0 ? t('app.brak_limitu') : `Max ${item.maxPerUser}/user`
     return `
       <article class="scheduled-card" data-item-id="${item.id}">
         <div class="scheduled-card-header">
@@ -7274,7 +7391,7 @@ function renderShopItems() {
           <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
             ${statusChip}
             <button class="btn-secondary" style="padding:2px 10px;font-size:12px;" data-action="edit-item" data-item-id="${item.id}">✏️ Edytuj</button>
-            <button class="btn-danger" style="padding:2px 10px;font-size:12px;" data-action="delete-item" data-item-id="${item.id}" data-item-name="${escapeHtml(item.name)}">🗑 Usuń</button>
+            <button class="btn-danger" style="padding:2px 10px;font-size:12px;" data-action="delete-item" data-item-id="${item.id}" data-item-name="${escapeHtml(item.name)}">${t('app.ui_usun_ikona')}</button>
           </div>
         </div>
         <div class="scheduled-card-meta">
@@ -7344,19 +7461,19 @@ async function submitShopItemForm() {
   const isActive = Boolean(isActiveEl?.checked)
 
   if (!name || name.length < 1) {
-    if (statusEl) statusEl.textContent = '⚠ Podaj nazwę przedmiotu.'
+    if (statusEl) statusEl.textContent = t('app.podaj_nazwe_przedmiotu')
     return
   }
   if (!Number.isFinite(price) || price < 1) {
-    if (statusEl) statusEl.textContent = '⚠ Podaj prawidłową cenę (min. 1).'
+    if (statusEl) statusEl.textContent = t('app.podaj_prawidowa_cene_min_1')
     return
   }
   if (!Number.isFinite(stock) || stock < 0) {
-    if (statusEl) statusEl.textContent = '⚠ Podaj prawidłową ilość (min. 0).'
+    if (statusEl) statusEl.textContent = t('app.podaj_prawidowa_ilosc_min_0')
     return
   }
   if (!Number.isFinite(maxPerUser) || maxPerUser < 0) {
-    if (statusEl) statusEl.textContent = '⚠ Podaj prawidłowy limit na użytkownika (min. 0).'
+    if (statusEl) statusEl.textContent = t('app.podaj_prawidowy_limit_na_uzytkownika_min')
     return
   }
 
@@ -7374,8 +7491,8 @@ async function submitShopItemForm() {
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
-      if (statusEl) statusEl.textContent = `⚠ ${payload.error ?? 'Błąd serwera.'}`
-      showToast(payload.error ?? 'Nie udało się zapisać przedmiotu.', 'error')
+      if (statusEl) statusEl.textContent = `⚠ ${payload.error ?? t('app.bad_serwera')}`
+      showToast(payload.error ?? t('app.nie_udao_sie_zapisac_przedmiotu'), 'error')
       return
     }
 
@@ -7383,34 +7500,34 @@ async function submitShopItemForm() {
     closeShopItemForm()
     void loadShopItems({ page: isEditing ? shopItemsPage : 1, silent: true })
   } catch {
-    if (statusEl) statusEl.textContent = '⚠ Błąd sieci.'
-    showToast('Błąd sieci podczas zapisywania przedmiotu.', 'error')
+    if (statusEl) statusEl.textContent = t('app.bad_sieci')
+    showToast(t('app.bad_sieci_podczas_zapisywania_przedmiotu'), 'error')
   } finally {
     if (submitBtn instanceof HTMLButtonElement) submitBtn.disabled = false
   }
 }
 
 async function deleteShopItem(itemId, itemName) {
-  if (!confirm(`Czy na pewno chcesz usunąć przedmiot "${itemName}"? Tej operacji nie można cofnąć.`)) return
+  if (!confirm(t('app.ui_usun_przedmiot', { p1: itemName }))) return
 
   try {
     const response = await fetchWithCsrf(`/api/shop/items/${itemId}`, { method: 'DELETE' })
     const payload = await parseApiResponse(response)
 
     if (response.status === 409) {
-      showToast('Nie można usunąć — przedmiot ma aktywne zamówienia.', 'error')
+      showToast(t('app.nie_mozna_usunac_przedmiot_ma_aktywne'), 'error')
       return
     }
 
     if (!response.ok) {
-      showToast(payload.error ?? 'Nie udało się usunąć przedmiotu.', 'error')
+      showToast(payload.error ?? t('app.nie_udao_sie_usunac_przedmiotu'), 'error')
       return
     }
 
-    showToast('✅ Przedmiot usunięty.', 'success')
+    showToast(t('app.przedmiot_usuniety'), 'success')
     void loadShopItems({ silent: true })
   } catch {
-    showToast('Błąd sieci podczas usuwania przedmiotu.', 'error')
+    showToast(t('app.bad_sieci_podczas_usuwania_przedmiotu'), 'error')
   }
 }
 
@@ -7418,7 +7535,7 @@ async function loadShopOrders({ page = shopOrdersPage, silent = false } = {}) {
   const requestId = ++shopOrdersLoadRequestId
   if (!silent) {
     const list = document.getElementById('shop-orders-list')
-    if (list) list.innerHTML = '<div class="scheduled-empty">Ładowanie...</div>'
+    if (list) list.innerHTML = `<div class="scheduled-empty">${t('app.ui_ladowanie')}</div>`
   }
 
   try {
@@ -7430,7 +7547,7 @@ async function loadShopOrders({ page = shopOrdersPage, silent = false } = {}) {
 
     const payload = await parseApiResponse(response)
     if (!response.ok) {
-      showToast(payload.error ?? 'Nie udało się pobrać zamówień.', 'error')
+      showToast(payload.error ?? t('app.nie_udao_sie_pobrac_zamowien'), 'error')
       return
     }
 
@@ -7456,7 +7573,7 @@ async function loadShopOrders({ page = shopOrdersPage, silent = false } = {}) {
     renderShopOrders()
   } catch {
     if (requestId !== shopOrdersLoadRequestId) return
-    showToast('Błąd sieci podczas pobierania zamówień.', 'error')
+    showToast(t('app.bad_sieci_podczas_pobierania_zamowien'), 'error')
   }
 }
 
@@ -7470,14 +7587,14 @@ function renderShopOrders() {
 
   if (!list) return
 
-  if (countLabel) countLabel.textContent = `Zamówienia: ${shopOrdersTotalItems}`
+  if (countLabel) countLabel.textContent = t('app.ui_zamowienia_licznik', { p1: shopOrdersTotalItems })
   if (pageLabel) pageLabel.textContent = `Strona ${shopOrdersPage}/${shopOrdersTotalPages}`
   if (pagination) pagination.hidden = shopOrdersTotalPages <= 1
   if (prevBtn instanceof HTMLButtonElement) prevBtn.disabled = shopOrdersPage <= 1
   if (nextBtn instanceof HTMLButtonElement) nextBtn.disabled = shopOrdersPage >= shopOrdersTotalPages
 
   if (shopOrders.length === 0) {
-    list.innerHTML = '<div class="scheduled-empty">Brak zamówień dla wybranych filtrów.</div>'
+    list.innerHTML = `<div class="scheduled-empty">${t('app.ui_brak_zamowien')}</div>`
     return
   }
 
@@ -7488,10 +7605,10 @@ function renderShopOrders() {
 
     const cancelForm = isExpanded && order.status === 'pending'
       ? `<div style="margin-top:10px;">
-          <label style="display:block;font-size:12px;color:var(--text-secondary);margin-bottom:4px;">Powód anulowania (wymagany):</label>
+          <label style="display:block;font-size:12px;color:var(--text-secondary);margin-bottom:4px;">${t('app.ui_powod_anulowania')}</label>
           <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;">
-            <input type="text" class="form-input" id="shop-cancel-reason-${order.id}" maxlength="500" placeholder="Podaj powód anulowania..." style="flex:1;min-width:180px;">
-            <button class="btn-danger" data-action="cancel-order" data-order-id="${order.id}">🚫 Anuluj zamówienie</button>
+            <input type="text" class="form-input" id="shop-cancel-reason-${order.id}" maxlength="500" placeholder="${t('app.ui_placeholder_powod')}" style="flex:1;min-width:180px;">
+            <button class="btn-danger" data-action="cancel-order" data-order-id="${order.id}">${t('app.ui_anuluj_zamowienie')}</button>
           </div>
          </div>`
       : ''
@@ -7504,7 +7621,7 @@ function renderShopOrders() {
       ${avatarHtml}
       <div>
         <div style="font-weight:600;font-size:13px;color:var(--text-primary);">${escapeHtml(profile?.displayName ?? String(order.userId))}</div>
-        <div style="font-size:11px;color:var(--text-muted);cursor:pointer;" title="Kliknij aby skopiować UserID" data-action="copy-userid" data-userid="${escapeHtml(String(order.userId))}">${escapeHtml(String(order.userId))}</div>
+        <div style="font-size:11px;color:var(--text-muted);cursor:pointer;" title="${t('app.ui_kliknij_kopiuj_userid')}" data-action="copy-userid" data-userid="${escapeHtml(String(order.userId))}">${escapeHtml(String(order.userId))}</div>
       </div>
     </div>`
 
@@ -7512,10 +7629,10 @@ function renderShopOrders() {
       <article class="scheduled-card" id="shop-order-card-${order.id}">
         <div class="scheduled-card-header">
           <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-            <span class="scheduled-card-title">Zamówienie #${order.id}</span>
+            <span class="scheduled-card-title">${t('app.ui_zamowienie')} #${order.id}</span>
             ${statusChip}
           </div>
-          <button class="btn-secondary" style="padding:2px 10px;font-size:12px;flex-shrink:0;" data-action="toggle-order" data-order-id="${order.id}">${isExpanded ? 'Zwiń ▲' : 'Rozwiń ▼'}</button>
+          <button class="btn-secondary" style="padding:2px 10px;font-size:12px;flex-shrink:0;" data-action="toggle-order" data-order-id="${order.id}">${isExpanded ? t('app.zwin') : t('app.rozwin')}</button>
         </div>
         <div class="scheduled-card-meta" style="align-items:center;">
           ${userHtml}
@@ -7523,7 +7640,7 @@ function renderShopOrders() {
           <span class="scheduled-chip">📅 ${escapeHtml(dateStr)}</span>
         </div>
         ${isExpanded && order.status === 'pending' ? `<div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn-primary" data-action="complete-order" data-order-id="${order.id}">✅ Zrealizuj zamówienie</button>
+          <button class="btn-primary" data-action="complete-order" data-order-id="${order.id}">${t('app.ui_zrealizuj_zamowienie')}</button>
         </div>` : ''}
         ${cancelForm}
       </article>`
@@ -7531,7 +7648,7 @@ function renderShopOrders() {
 }
 
 function shopOrderStatusChip(status) {
-  if (status === 'pending') return '<span class="scheduled-chip" style="background:#faa61a;color:#000;">Złożone</span>'
+  if (status === 'pending') return `<span class="scheduled-chip" style="background:#faa61a;color:#000;">${t('app.ui_zlozone')}</span>`
   if (status === 'completed') return '<span class="scheduled-chip" style="background:#43b581;color:#fff;">Zrealizowane</span>'
   if (status === 'cancelled') return '<span class="scheduled-chip" style="background:#ed4245;color:#fff;">Anulowane</span>'
   return `<span class="scheduled-chip">${escapeHtml(status)}</span>`
@@ -7543,28 +7660,28 @@ function toggleShopOrderExpand(orderId) {
 }
 
 async function completeShopOrder(orderId) {
-  if (!confirm(`Czy na pewno chcesz zrealizować zamówienie #${orderId}?`)) return
+  if (!confirm(t('app.ui_potwierdz_realizacje', { p1: orderId }))) return
 
   try {
     const response = await fetchWithCsrf(`/api/shop/orders/${orderId}/complete`, { method: 'POST' })
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
-      showToast(payload.error ?? 'Nie udało się zrealizować zamówienia.', 'error')
+      showToast(payload.error ?? t('app.nie_udao_sie_zrealizowac_zamowienia'), 'error')
       return
     }
 
-    showToast(`✅ Zamówienie #${orderId} zrealizowane.`, 'success')
+    showToast(t('app.ui_zamowienie_zrealizowane', { p1: orderId }), 'success')
     shopExpandedOrderId = null
     void loadShopOrders({ silent: true })
   } catch {
-    showToast('Błąd sieci podczas realizacji zamówienia.', 'error')
+    showToast(t('app.bad_sieci_podczas_realizacji_zamowienia'), 'error')
   }
 }
 
 async function clearAllShopOrders() {
-  if (!confirm('Czy na pewno chcesz usunąć CAŁĄ historię zamówień? Tej operacji nie można cofnąć.')) return
-  if (!confirm('Ostatnie ostrzeżenie: wszystkie zamówienia zostaną trwale usunięte. Kontynuować?')) return
+  if (!confirm(t('app.czy_na_pewno_chcesz_usunac_caa'))) return
+  if (!confirm(t('app.ostatnie_ostrzezenie_wszystkie_zamowienia_zostana_trwale'))) return
 
   try {
     const response = await fetchWithCsrf('/api/shop/orders/all', {
@@ -7575,15 +7692,15 @@ async function clearAllShopOrders() {
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
-      showToast(payload.error ?? 'Nie udało się usunąć historii zamówień.', 'error')
+      showToast(payload.error ?? t('app.nie_udao_sie_usunac_historii_zamowien'), 'error')
       return
     }
 
-    showToast(`Usunięto ${payload.data?.deletedCount ?? 0} zamówień.`, 'success')
+    showToast(t('app.ui_usunieto_zamowien', { p1: payload.data?.deletedCount ?? 0 }), 'success')
     shopOrdersPage = 1
     void loadShopOrders({ silent: false })
   } catch {
-    showToast('Błąd sieci podczas usuwania historii zamówień.', 'error')
+    showToast(t('app.bad_sieci_podczas_usuwania_historii_zamowien'), 'error')
   }
 }
 
@@ -7591,12 +7708,12 @@ async function confirmCancelOrder(orderId) {
   const reasonEl = document.getElementById(`shop-cancel-reason-${orderId}`)
   const reason = String(reasonEl?.value ?? '').trim()
   if (!reason) {
-    showToast('Podaj powód anulowania.', 'error')
+    showToast(t('app.podaj_powod_anulowania'), 'error')
     reasonEl?.focus()
     return
   }
 
-  if (!confirm(`Czy na pewno chcesz anulować zamówienie #${orderId}? Użytkownik otrzyma zwrot cebulionów.`)) return
+  if (!confirm(t('app.ui_potwierdz_anulowanie', { p1: orderId }))) return
 
   try {
     const response = await fetchWithCsrf(`/api/shop/orders/${orderId}/cancel`, {
@@ -7607,15 +7724,15 @@ async function confirmCancelOrder(orderId) {
     const payload = await parseApiResponse(response)
 
     if (!response.ok) {
-      showToast(payload.error ?? 'Nie udało się anulować zamówienia.', 'error')
+      showToast(payload.error ?? t('app.nie_udao_sie_anulowac_zamowienia'), 'error')
       return
     }
 
     const refunded = payload.data?.refunded ?? false
-    showToast(`✅ Zamówienie #${orderId} anulowane.${refunded ? ' Coins zwrócone.' : ''}`, 'success')
+    showToast(t('app.ui_zamowienie_anulowane', { p1: orderId }) + (refunded ? t('app.coins_zwrocone') : ''), 'success')
     shopExpandedOrderId = null
     void loadShopOrders({ silent: true })
   } catch {
-    showToast('Błąd sieci podczas anulowania zamówienia.', 'error')
+    showToast(t('app.bad_sieci_podczas_anulowania_zamowienia'), 'error')
   }
 }

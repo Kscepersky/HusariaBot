@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/require-auth.js';
+import { requireSectionAccess } from '../middleware/require-section-access.js';
 import { fetchUpcomingG2Matches } from '../g2-matches/pandascore-client.js';
 import {
     getG2MatchesSyncMeta,
@@ -21,6 +22,7 @@ let refreshInProgress = false;
 export const g2MatchesRouter = Router();
 
 g2MatchesRouter.use(requireAuth);
+g2MatchesRouter.use(requireSectionAccess('g2-matches'));
 
 function normalizeQueryString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';

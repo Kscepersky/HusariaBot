@@ -2,6 +2,7 @@ import { config } from 'dotenv';
 import { readdirSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { join, extname } from 'path';
+import type { DashboardRole } from './dashboard-sections.js';
 config();
 
 const DISCORD_API = 'https://discord.com/api/v10';
@@ -920,6 +921,11 @@ function resolveDashboardDevRoleId(): string | null {
     return roleId && roleId.length > 0 ? roleId : null;
 }
 
+function resolveDashboardG2StaffRoleId(): string | null {
+    const roleId = process.env.G2STAFF_ROLE_ID?.trim();
+    return roleId && roleId.length > 0 ? roleId : null;
+}
+
 export function hasSupportRole(member: DiscordGuildMember): boolean {
     const supportRoleIds = resolveDashboardSupportRoleIds();
     return supportRoleIds.some((roleId) => member.roles.includes(roleId));
@@ -930,20 +936,29 @@ export function hasDevRole(member: DiscordGuildMember): boolean {
     return Boolean(devRoleId && member.roles.includes(devRoleId));
 }
 
-export function hasRequiredRole(member: DiscordGuildMember): boolean {
-    return hasSupportRole(member) || hasDevRole(member);
+export function hasG2StaffRole(member: DiscordGuildMember): boolean {
+    const g2StaffRoleId = resolveDashboardG2StaffRoleId();
+    return Boolean(g2StaffRoleId && member.roles.includes(g2StaffRoleId));
 }
 
-export function resolveDashboardRole(member: DiscordGuildMember): string {
-    const devRoleId = process.env.DEV_ROLE_ID?.trim();
+export function hasRequiredRole(member: DiscordGuildMember): boolean {
+    return hasSupportRole(member) || hasDevRole(member) || hasG2StaffRole(member);
+}
+
+export function resolveDashboardRole(member: DiscordGuildMember): DashboardRole {
+    const devRoleId = resolveDashboardDevRoleId();
     const adminRoleId = process.env.ADMIN_ROLE_ID?.trim();
     const moderatorRoleId = process.env.MODERATOR_ROLE_ID?.trim();
     const cmRoleId = process.env.COMMUNITY_MANAGER_ROLE_ID?.trim();
+    const g2StaffRoleId = resolveDashboardG2StaffRoleId();
 
+    // Kolejnosc = priorytet. g2staff jest najwezszy, wiec sprawdzany na koncu -
+    // ktos z g2staff ORAZ moderatorem zachowuje szersze uprawnienia moderatora.
     if (devRoleId && member.roles.includes(devRoleId)) return 'dev';
     if (adminRoleId && member.roles.includes(adminRoleId)) return 'admin';
     if (moderatorRoleId && member.roles.includes(moderatorRoleId)) return 'moderator';
     if (cmRoleId && member.roles.includes(cmRoleId)) return 'community_manager';
+    if (g2StaffRoleId && member.roles.includes(g2StaffRoleId)) return 'g2staff';
     return 'member';
 }
 

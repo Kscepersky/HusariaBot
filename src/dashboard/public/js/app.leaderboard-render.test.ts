@@ -2,6 +2,24 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
+/**
+ * app.js zaklada, ze runtime i18n zostal zaladowany wczesniej i wystawil
+ * globalne t(). W przegladarce robia to znaczniki <script> w dashboard.html.
+ */
+function loadI18nRuntimeIntoGlobals(): void {
+    const i18nDir = join(process.cwd(), 'src/dashboard/public/js/i18n')
+    const sandbox = globalThis as Record<string, unknown>
+
+    if (!sandbox.localStorage) {
+        sandbox.localStorage = { getItem: () => null, setItem: () => {} }
+    }
+
+    for (const file of ['pl.js', 'en.js', 'runtime.js']) {
+        // eslint-disable-next-line no-new-func
+        new Function('window', readFileSync(join(i18nDir, file), 'utf8'))(sandbox)
+    }
+}
+
 class FakeButtonElement {
   disabled = false
 }
@@ -92,6 +110,9 @@ describe('dashboard economy leaderboard render', () => {
       }) as typeof fetch
 
       const appJsSource = readFileSync(join(process.cwd(), 'src/dashboard/public/js/app.js'), 'utf8')
+
+      // app.js oczekuje globalnego t() z runtime i18n - w przegladarce laduje sie wczesniej.
+      loadI18nRuntimeIntoGlobals()
 
       const exposeApi = `${appJsSource}\n;globalThis.__dashboardTestApi = { loadEconomyLeaderboard };`
       // eslint-disable-next-line no-new-func

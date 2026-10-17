@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HusariaBot Dashboard</title>
+  <title data-i18n="dashboard.husariabot_dashboard">HusariaBot Dashboard</title>
   <link rel="stylesheet" href="/public/css/style.css">
    <link rel="icon" type="image/x-icon" href="/img/DNA.png">
 </head>
@@ -11,15 +11,21 @@
 
 <nav class="navbar">
   <div class="navbar-brand">
-    <button class="hamburger" id="hamburger-btn" aria-label="Menu" aria-expanded="false">
+    <button class="hamburger" id="hamburger-btn" aria-label="Menu" data-i18n-aria-label="dashboard.menu" aria-expanded="false">
       <span></span><span></span><span></span>
     </button>
     <img src="/img/DNA.png" class="navbar-logo" alt="HusariaBot">
     <span class="navbar-title">HusariaBot</span>
     <span class="navbar-subtitle">Dashboard</span>
   </div>
-  <div class="navbar-user" id="navbar-user">
-    <div class="user-skeleton"></div>
+  <div class="navbar-right">
+    <div class="language-switcher" id="language-switcher" role="group" aria-label="Language">
+      <button type="button" class="language-option" data-language="pl" aria-pressed="false">PL</button>
+      <button type="button" class="language-option" data-language="en" aria-pressed="false">EN</button>
+    </div>
+    <div class="navbar-user" id="navbar-user">
+      <div class="user-skeleton"></div>
+    </div>
   </div>
 </nav>
 
@@ -28,59 +34,59 @@
     <nav class="sidebar-nav">
       <a href="#" class="sidebar-item active" data-section="embed-creator">
         <span class="sidebar-icon">🎨</span>
-        <span>Kreator publikacji</span>
+        <span data-i18n="dashboard.kreator_publikacji">Kreator publikacji</span>
       </a>
       <a href="#" class="sidebar-item" data-section="scheduled-posts">
         <span class="sidebar-icon">🗓️</span>
-        <span>Zaplanowane posty</span>
+        <span data-i18n="dashboard.zaplanowane_posty">Zaplanowane posty</span>
       </a>
       <a href="#" class="sidebar-item" data-section="sent-posts">
         <span class="sidebar-icon">📬</span>
-        <span>Wysłane posty</span>
+        <span data-i18n="dashboard.wysane_posty">Wysłane posty</span>
       </a>
       <a href="#" class="sidebar-item" data-section="events">
         <span class="sidebar-icon">🎟️</span>
-        <span>Wydarzenia</span>
+        <span data-i18n="dashboard.wydarzenia">Wydarzenia</span>
       </a>
       <a href="#" class="sidebar-item" data-section="g2-matches">
         <span class="sidebar-icon">🏟️</span>
-        <span>Baza meczów G2</span>
+        <span data-i18n="dashboard.baza_meczow_g2">Baza meczów G2</span>
       </a>
       <a href="#" class="sidebar-item" id="economy-settings-nav-item" data-section="economy-settings" style="display:none;">
         <span class="sidebar-icon">🧅</span>
-        <span>Ustawienia ekonomii</span>
+        <span data-i18n="dashboard.ustawienia_ekonomii">Ustawienia ekonomii</span>
       </a>
       <a href="#" class="sidebar-item" data-section="economy-leaderboard">
         <span class="sidebar-icon">🏆</span>
-        <span>Leaderboard ekonomii</span>
+        <span data-i18n="dashboard.leaderboard_ekonomii">Leaderboard ekonomii</span>
       </a>
       <a href="#" class="sidebar-item" data-section="shop">
         <span class="sidebar-icon">🛒</span>
-        <span>Sklep</span>
+        <span data-i18n="dashboard.sklep">Sklep</span>
       </a>
       <a href="#" class="sidebar-item" data-section="timeouts-system">
         <span class="sidebar-icon">🔇</span>
-        <span>System timeoutow</span>
+        <span data-i18n="dashboard.system_timeoutow">System timeoutow</span>
       </a>
       <a href="#" class="sidebar-item" data-section="ticket-history">
         <span class="sidebar-icon">📒</span>
-        <span>Historia Ticketow</span>
+        <span data-i18n="dashboard.historia_ticketow">Historia Ticketow</span>
       </a>
       <a href="#" class="sidebar-item" data-section="image-library">
         <span class="sidebar-icon">🖼️</span>
-        <span>Biblioteka Grafik</span>
+        <span data-i18n="dashboard.biblioteka_grafik">Biblioteka Grafik</span>
       </a>
       <a href="#" class="sidebar-item" data-section="server-stats">
         <span class="sidebar-icon">📊</span>
-        <span>Statystyki Serwera</span>
+        <span data-i18n="dashboard.statystyki_serwera">Statystyki Serwera</span>
       </a>
       <a href="#" class="sidebar-item" id="system-logs-nav-item" data-section="system-logs" style="display:none;">
         <span class="sidebar-icon">🧾</span>
-        <span>Logi systemowe</span>
+        <span data-i18n="dashboard.logi_systemowe">Logi systemowe</span>
       </a>
       <a href="#" class="sidebar-item" id="session-activity-nav-item" data-section="session-activity" style="display:none;">
         <span class="sidebar-icon">👥</span>
-        <span>Aktywność sesji</span>
+        <span data-i18n="dashboard.aktywnosc_sesji">Aktywność sesji</span>
       </a>
     </nav>
   </aside>
@@ -89,51 +95,51 @@
   <section class="content">
     <div id="section-embed-creator" class="section-panel active">
       <div class="section-header">
-        <h2>🎨 Kreator publikacji</h2>
-        <p>Twórz publikacje w trybie Embedded lub Wiadomość. Możesz pingnąć rolę oraz opcjonalnie dodać grafikę pod postem.</p>
+        <h2 data-i18n="embedCreator.kreator_publikacji">🎨 Kreator publikacji</h2>
+        <p data-i18n="embedCreator.tworz_publikacje_w_trybie_embedded">Twórz publikacje w trybie Embedded lub Wiadomość. Możesz pingnąć rolę oraz opcjonalnie dodać grafikę pod postem.</p>
       </div>
 
       <div class="creator-grid">
         <div class="creator-form-card" id="creator-form-card">
           <div class="form-group">
-            <label class="form-label">Tryb publikacji</label>
+            <label class="form-label" data-i18n="embedCreator.tryb_publikacji">Tryb publikacji</label>
             <div class="mode-tabs" id="mode-tabs">
               <button type="button" class="mode-tab active" data-mode="embedded">Embedded</button>
-              <button type="button" class="mode-tab" data-mode="message">Wiadomość</button>
+              <button type="button" class="mode-tab" data-mode="message" data-i18n="embedCreator.wiadomosc">Wiadomość</button>
             </div>
           </div>
 
           <details class="form-group form-disclosure editor-suite" open>
-            <summary class="disclosure-summary">Narzędzia edytora</summary>
+            <summary class="disclosure-summary" data-i18n="embedCreator.narzedzia_edytora">Narzędzia edytora</summary>
             <div class="disclosure-content">
               <div class="format-toolbar" id="format-toolbar">
-                <button type="button" class="toolbar-btn" data-wrap="**" title="Pogrubienie">B</button>
-                <button type="button" class="toolbar-btn" data-wrap="*" title="Kursywa">I</button>
-                <button type="button" class="toolbar-btn" data-wrap="__" title="Podkreślenie">U</button>
-                <button type="button" class="toolbar-btn" data-wrap="~~" title="Przekreślenie">S</button>
-                <button type="button" class="toolbar-btn" data-prefix="# " title="Nagłówek H1">H1</button>
-                <button type="button" class="toolbar-btn" data-prefix="## " title="Nagłówek H2">H2</button>
-                <button type="button" class="toolbar-btn" data-prefix="### " title="Nagłówek H3">H3</button>
+                <button type="button" class="toolbar-btn" data-wrap="**" title="Pogrubienie" data-i18n-title="embedCreator.pogrubienie">B</button>
+                <button type="button" class="toolbar-btn" data-wrap="*" title="Kursywa" data-i18n-title="embedCreator.kursywa">I</button>
+                <button type="button" class="toolbar-btn" data-wrap="__" title="Podkreślenie" data-i18n-title="embedCreator.podkreslenie">U</button>
+                <button type="button" class="toolbar-btn" data-wrap="~~" title="Przekreślenie" data-i18n-title="embedCreator.przekreslenie">S</button>
+                <button type="button" class="toolbar-btn" data-prefix="# " title="Nagłówek H1" data-i18n-title="embedCreator.nagowek_h1">H1</button>
+                <button type="button" class="toolbar-btn" data-prefix="## " title="Nagłówek H2" data-i18n-title="embedCreator.nagowek_h2">H2</button>
+                <button type="button" class="toolbar-btn" data-prefix="### " title="Nagłówek H3" data-i18n-title="embedCreator.nagowek_h3">H3</button>
                 <button type="button" class="toolbar-btn" data-prefix="> " title="Cytat">❝</button>
-                <button type="button" class="toolbar-btn" data-wrap="`" title="Kod inline">&lt;/&gt;</button>
+                <button type="button" class="toolbar-btn" data-wrap="`" title="Kod inline" data-i18n-title="embedCreator.kod_inline">&lt;/&gt;</button>
               </div>
 
               <div class="editor-popovers">
                 <div class="editor-popover" id="emoji-popover" hidden>
                   <div class="popover-header">
-                    <span>Wstaw emotkę</span>
-                    <input type="text" id="emoji-search-input" class="popover-search" placeholder="Szukaj emotki...">
+                    <span data-i18n="embedCreator.wstaw_emotke">Wstaw emotkę</span>
+                    <input type="text" id="emoji-search-input" class="popover-search" placeholder="Szukaj emotki..." data-i18n-placeholder="embedCreator.szukaj_emotki">
                   </div>
                   <div class="emoji-list" id="emoji-list"></div>
                 </div>
 
                 <div class="editor-popover" id="mention-popover" hidden>
                   <div class="popover-header">
-                    <span>Wstaw wzmiankę</span>
+                    <span data-i18n="embedCreator.wstaw_wzmianke">Wstaw wzmiankę</span>
                   </div>
 
                   <div class="mention-section">
-                    <span class="mention-label">Szybkie skróty</span>
+                    <span class="mention-label" data-i18n="embedCreator.szybkie_skroty">Szybkie skróty</span>
                     <div class="mention-list mention-list-inline" id="mention-quick-list">
                       <button type="button" class="mention-chip mention-broadcast" data-token="@everyone">@everyone</button>
                       <button type="button" class="mention-chip mention-broadcast" data-token="@here">@here</button>
@@ -141,20 +147,20 @@
                   </div>
 
                   <div class="mention-section">
-                    <span class="mention-label">Kanały</span>
-                    <input type="text" id="mention-channel-search" class="popover-search" placeholder="Szukaj kanału...">
+                    <span class="mention-label" data-i18n="embedCreator.kanay">Kanały</span>
+                    <input type="text" id="mention-channel-search" class="popover-search" placeholder="Szukaj kanału..." data-i18n-placeholder="embedCreator.szukaj_kanau">
                     <div class="mention-list" id="mention-channel-results"></div>
                   </div>
 
                   <div class="mention-section">
-                    <span class="mention-label">Role</span>
-                    <input type="text" id="mention-role-search" class="popover-search" placeholder="Szukaj roli...">
+                    <span class="mention-label" data-i18n="embedCreator.role">Role</span>
+                    <input type="text" id="mention-role-search" class="popover-search" placeholder="Szukaj roli..." data-i18n-placeholder="embedCreator.szukaj_roli">
                     <div class="mention-list" id="mention-role-results"></div>
                   </div>
 
                   <div class="mention-section">
-                    <span class="mention-label">Użytkownicy</span>
-                    <input type="text" id="mention-user-search" class="popover-search" placeholder="Szukaj użytkownika...">
+                    <span class="mention-label" data-i18n="embedCreator.uzytkownicy">Użytkownicy</span>
+                    <input type="text" id="mention-user-search" class="popover-search" placeholder="Szukaj użytkownika..." data-i18n-placeholder="embedCreator.szukaj_uzytkownika">
                     <div class="mention-user-results" id="mention-user-results"></div>
                   </div>
                 </div>
@@ -162,12 +168,12 @@
 
               <div class="timestamp-tools">
                 <div class="timestamp-tools-header">
-                  <span>Wstaw timestamp</span>
+                  <span data-i18n="embedCreator.wstaw_timestamp">Wstaw timestamp</span>
                 </div>
                 <div class="timestamp-inputs">
-                  <input id="timestamp-datetime" type="datetime-local" class="form-input" aria-label="Data timestampu">
+                  <input id="timestamp-datetime" type="datetime-local" class="form-input" aria-label="Data timestampu" data-i18n-aria-label="embedCreator.data_timestampu">
                   <button type="button" class="btn-secondary timestamp-preset" data-offset-minutes="60">+1h</button>
-                  <button type="button" class="btn-secondary timestamp-preset" data-offset-minutes="1440">Jutro</button>
+                  <button type="button" class="btn-secondary timestamp-preset" data-offset-minutes="1440" data-i18n="embedCreator.jutro">Jutro</button>
                   <button type="button" class="btn-secondary timestamp-preset" data-offset-minutes="10080">+7 dni</button>
                 </div>
                 <div class="mention-list mention-list-inline" id="timestamp-format-list">
@@ -184,125 +190,125 @@
           </details>
 
           <div class="form-group" id="title-group">
-            <label class="form-label" for="title">Tytuł (opcjonalnie)</label>
-            <input id="title" name="title" type="text" class="form-input" placeholder="np. Ważna informacja">
+            <label class="form-label" for="title" data-i18n="embedCreator.tytu_opcjonalnie">Tytuł (opcjonalnie)</label>
+            <input id="title" name="title" type="text" class="form-input" placeholder="np. Ważna informacja" data-i18n-placeholder="embedCreator.np_wazna_informacja">
           </div>
 
           <div class="form-group" id="color-group">
-            <label class="form-label">Kolor embeda</label>
+            <label class="form-label" data-i18n="embedCreator.kolor_embeda">Kolor embeda</label>
             <div class="color-swatches" id="color-swatches">
-              <div class="color-swatch active" data-color="czerwony" title="Czerwony"></div>
-              <div class="color-swatch" data-color="biały" title="Biały"></div>
-              <div class="color-swatch" data-color="szary" title="Szary"></div>
-              <div class="color-swatch" data-color="złoty" title="Złoty"></div>
+              <div class="color-swatch active" data-color="czerwony" title="Czerwony" data-i18n-title="embedCreator.czerwony"></div>
+              <div class="color-swatch" data-color="biały" title="Biały" data-i18n-title="embedCreator.biay"></div>
+              <div class="color-swatch" data-color="szary" title="Szary" data-i18n-title="embedCreator.szary"></div>
+              <div class="color-swatch" data-color="złoty" title="Złoty" data-i18n-title="embedCreator.zoty"></div>
             </div>
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="content-textarea">Treść</label>
-            <textarea id="content-textarea" name="content" class="form-textarea" rows="5" placeholder="Wpisz treść publikacji..."></textarea>
+            <label class="form-label" for="content-textarea" data-i18n="embedCreator.tresc">Treść</label>
+            <textarea id="content-textarea" name="content" class="form-textarea" rows="5" placeholder="Wpisz treść publikacji..." data-i18n-placeholder="embedCreator.wpisz_tresc_publikacji"></textarea>
           </div>
 
           <details class="form-group form-disclosure" id="ping-role-group">
-            <summary class="disclosure-summary">Ping roli przy publikacji</summary>
+            <summary class="disclosure-summary" data-i18n="embedCreator.ping_roli_przy_publikacji">Ping roli przy publikacji</summary>
             <div class="disclosure-content">
               <label class="form-checkbox">
                 <input type="checkbox" id="ping-role-enabled">
-                <span>Wyślij osobną wiadomość z wybranym pingiem przed publikacją.</span>
+                <span data-i18n="embedCreator.wyslij_osobna_wiadomosc_z_wybranym">Wyślij osobną wiadomość z wybranym pingiem przed publikacją.</span>
               </label>
               <select id="ping-role-select" class="form-select" disabled>
-                <option value="">Wybierz ping (@everyone, @here lub rolę)</option>
+                <option value="" data-i18n="embedCreator.wybierz_ping_everyone_here_lub">Wybierz ping (@everyone, @here lub rolę)</option>
               </select>
             </div>
           </details>
 
           <details class="form-group form-disclosure" id="image-group">
-            <summary class="disclosure-summary">Wstaw grafikę (opcjonalnie)</summary>
+            <summary class="disclosure-summary" data-i18n="embedCreator.wstaw_grafike_opcjonalnie">Wstaw grafikę (opcjonalnie)</summary>
             <div class="disclosure-content">
-              <p class="form-help">Obsługiwane formaty: JPEG, PNG, GIF, WebP, SVG.</p>
+              <p class="form-help" data-i18n="embedCreator.obsugiwane_formaty_jpeg_png_gif">Obsługiwane formaty: JPEG, PNG, GIF, WebP, SVG.</p>
               <select id="image-mode-select" class="form-select">
-                <option value="none">Nie dodawaj grafiki</option>
-                <option value="library">Wybierz z biblioteki /img</option>
-                <option value="upload">Wgraj plik z komputera</option>
+                <option value="none" data-i18n="embedCreator.nie_dodawaj_grafiki">Nie dodawaj grafiki</option>
+                <option value="library" data-i18n="embedCreator.wybierz_z_biblioteki_img">Wybierz z biblioteki /img</option>
+                <option value="upload" data-i18n="embedCreator.wgraj_plik_z_komputera">Wgraj plik z komputera</option>
               </select>
 
               <div id="image-library-panel" class="image-option-panel" hidden>
                 <div class="image-panel-toolbar">
-                  <input id="image-library-search" type="text" class="form-input" placeholder="Szukaj po nazwie pliku...">
+                  <input id="image-library-search" type="text" class="form-input" placeholder="Szukaj po nazwie pliku..." data-i18n-placeholder="embedCreator.szukaj_po_nazwie_pliku">
                 </div>
                 <div class="image-grid" id="image-grid"></div>
                 <div class="image-pagination" id="image-library-pagination" hidden>
                   <button id="image-library-prev-btn" class="btn-secondary" type="button">⬅</button>
-                  <span class="preview-note" id="image-library-page-label">Strona 1/1</span>
+                  <span class="preview-note" id="image-library-page-label" data-i18n="embedCreator.strona_1_1">Strona 1/1</span>
                   <button id="image-library-next-btn" class="btn-secondary" type="button">➡</button>
                 </div>
               </div>
 
               <div id="image-upload-panel" class="image-option-panel" hidden>
                 <input type="file" id="image-upload-input" class="form-input" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml">
-                <p class="upload-file-name" id="upload-file-name">Nie wybrano pliku.</p>
+                <p class="upload-file-name" id="upload-file-name" data-i18n="embedCreator.nie_wybrano_pliku">Nie wybrano pliku.</p>
               </div>
             </div>
           </details>
 
           <details class="form-group form-disclosure" id="match-helper-group">
-            <summary class="disclosure-summary">Dodaj mecz</summary>
+            <summary class="disclosure-summary" data-i18n="embedCreator.dodaj_mecz">Dodaj mecz</summary>
             <div class="disclosure-content">
               <label class="form-checkbox">
                 <input type="checkbox" id="match-helper-enabled">
-                <span>Dodaj informacje o meczu jako podpowiedzi do kliknięcia.</span>
+                <span data-i18n="embedCreator.dodaj_informacje_o_meczu_jako">Dodaj informacje o meczu jako podpowiedzi do kliknięcia.</span>
               </label>
-              <input id="match-helper-search" type="text" class="form-input" placeholder="Szukaj meczu (przyszłe mecze)..." disabled>
+              <input id="match-helper-search" type="text" class="form-input" placeholder="Szukaj meczu (przyszłe mecze)..." data-i18n-placeholder="embedCreator.szukaj_meczu_przysze_mecze" disabled>
               <select id="match-helper-select" class="form-select" disabled>
-                <option value="">Wybierz mecz...</option>
+                <option value="" data-i18n="embedCreator.wybierz_mecz">Wybierz mecz...</option>
               </select>
               <div id="match-helper-chips" class="mention-list" aria-live="polite"></div>
             </div>
           </details>
 
           <details class="form-group form-disclosure" id="discord-event-group">
-            <summary class="disclosure-summary">Stwórz Wydarzenie na Discord</summary>
+            <summary class="disclosure-summary" data-i18n="embedCreator.stworz_wydarzenie_na_discord">Stwórz Wydarzenie na Discord</summary>
             <div class="disclosure-content">
               <label class="form-checkbox">
                 <input type="checkbox" id="event-enabled">
-                <span>Utwórz wydarzenie podczas publikacji posta.</span>
+                <span data-i18n="embedCreator.utworz_wydarzenie_podczas_publikacji_posta">Utwórz wydarzenie podczas publikacji posta.</span>
               </label>
               <div id="event-fields" class="event-fields" hidden>
-                <input id="event-title" type="text" class="form-input" placeholder="Tytuł wydarzenia">
-                <textarea id="event-description" class="form-textarea" rows="3" placeholder="Opis wydarzenia"></textarea>
-                <input id="event-location" type="text" class="form-input" placeholder="Miejsce wydarzenia (np. Online)">
-                <label class="form-label" for="event-start-at">Start (Europe/Warsaw)</label>
+                <input id="event-title" type="text" class="form-input" placeholder="Tytuł wydarzenia" data-i18n-placeholder="embedCreator.tytu_wydarzenia">
+                <textarea id="event-description" class="form-textarea" rows="3" placeholder="Opis wydarzenia" data-i18n-placeholder="embedCreator.opis_wydarzenia"></textarea>
+                <input id="event-location" type="text" class="form-input" placeholder="Miejsce wydarzenia (np. Online)" data-i18n-placeholder="embedCreator.miejsce_wydarzenia_np_online">
+                <label class="form-label" for="event-start-at" data-i18n="embedCreator.start_europe_warsaw">Start (Europe/Warsaw)</label>
                 <input id="event-start-at" type="datetime-local" class="form-input">
-                <label class="form-label" for="event-end-at">Koniec (Europe/Warsaw)</label>
+                <label class="form-label" for="event-end-at" data-i18n="embedCreator.koniec_europe_warsaw">Koniec (Europe/Warsaw)</label>
                 <input id="event-end-at" type="datetime-local" class="form-input">
               </div>
             </div>
           </details>
 
           <div class="form-group">
-            <label class="form-label" for="channel-select">Kanał docelowy</label>
+            <label class="form-label" for="channel-select" data-i18n="embedCreator.kana_docelowy">Kanał docelowy</label>
             <div class="select-wrapper">
               <select id="channel-select" class="form-select">
-                <option value="">Ładowanie kanałów...</option>
+                <option value="" data-i18n="embedCreator.adowanie_kanaow">Ładowanie kanałów...</option>
               </select>
             </div>
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="schedule-at">Publikacja zaplanowana (Europe/Warsaw)</label>
+            <label class="form-label" for="schedule-at" data-i18n="embedCreator.publikacja_zaplanowana_europe_warsaw">Publikacja zaplanowana (Europe/Warsaw)</label>
             <input id="schedule-at" type="datetime-local" class="form-input">
-            <p class="form-help">Puste pole = publikacja natychmiast. Ustawiona data = post zaplanowany.</p>
+            <p class="form-help" data-i18n="embedCreator.puste_pole_publikacja_natychmiast_ustawiona">Puste pole = publikacja natychmiast. Ustawiona data = post zaplanowany.</p>
           </div>
 
           <button id="send-btn" class="btn-primary" disabled>
             <span class="btn-icon">📤</span>
-            <span id="send-btn-text">Opublikuj</span>
+            <span id="send-btn-text" data-i18n="embedCreator.opublikuj">Opublikuj</span>
           </button>
         </div>
         <div class="creator-preview-card" id="creator-preview-card">
           <div class="preview-header">
-            <span>Podgląd</span>
-            <span class="preview-note">wygląd przybliżony</span>
+            <span data-i18n="embedCreator.podglad">Podgląd</span>
+            <span class="preview-note" data-i18n="embedCreator.wyglad_przyblizony">wygląd przybliżony</span>
           </div>
           <div class="discord-mockup">
             <div class="discord-message">
@@ -313,7 +319,7 @@
                 <div class="discord-embed" id="embed-preview-container">
                   <div class="embed-color-bar" id="embed-color-bar"></div>
                   <div class="embed-body">
-                    <div class="embed-description" id="preview-description">Wpisz treść publikacji.</div>
+                    <div class="embed-description" id="preview-description" data-i18n="embedCreator.wpisz_tresc_publikacji_2">Wpisz treść publikacji.</div>
                   </div>
                 </div>
                 <div class="discord-plain-message" id="message-preview-container" style="display:none"></div>
@@ -321,7 +327,7 @@
                   <img class="preview-image" id="preview-image" src="" alt="Podgląd grafiki">
                   <div class="preview-image-caption" id="preview-image-caption"></div>
                 </div>
-                <div class="preview-image-placeholder" id="preview-image-placeholder" style="display:none">🖼️ Wybierz grafikę, aby zobaczyć podgląd.</div>
+                <div class="preview-image-placeholder" id="preview-image-placeholder" style="display:none" data-i18n="embedCreator.wybierz_grafike_aby_zobaczyc_podglad">🖼️ Wybierz grafikę, aby zobaczyć podgląd.</div>
               </div>
             </div>
           </div>
@@ -329,7 +335,7 @@
             <div class="discord-message">
               <div class="discord-avatar"><img src="/img/hussars_logo_80x80.png" alt="HusariaBot"></div>
               <div class="discord-msg-content">
-                <span class="discord-bot-name">Podgląd wydarzenia Discord</span>
+                <span class="discord-bot-name" data-i18n="embedCreator.podglad_wydarzenia_discord">Podgląd wydarzenia Discord</span>
                 <div class="discord-plain-message" id="event-preview-content"></div>
               </div>
             </div>
@@ -340,14 +346,14 @@
 
     <div id="section-scheduled-posts" class="section-panel">
       <div class="section-header">
-        <h2>🗓️ Zaplanowane posty</h2>
-        <p>Zarządzaj publikacjami oczekującymi. Możesz je edytować, usuwać i sprawdzić podgląd przed publikacją.</p>
+        <h2 data-i18n="scheduledPosts.zaplanowane_posty">🗓️ Zaplanowane posty</h2>
+        <p data-i18n="scheduledPosts.zarzadzaj_publikacjami_oczekujacymi_mozesz_je">Zarządzaj publikacjami oczekującymi. Możesz je edytować, usuwać i sprawdzić podgląd przed publikacją.</p>
       </div>
 
       <div class="creator-form-card">
         <div class="scheduled-toolbar">
-          <button id="scheduled-refresh-btn" class="btn-secondary" type="button">Odśwież listę</button>
-          <span class="preview-note" id="scheduled-count-label">Ładowanie...</span>
+          <button id="scheduled-refresh-btn" class="btn-secondary" type="button" data-i18n="scheduledPosts.odswiez_liste">Odśwież listę</button>
+          <span class="preview-note" id="scheduled-count-label" data-i18n="scheduledPosts.adowanie">Ładowanie...</span>
         </div>
         <div id="scheduled-list" class="scheduled-list"></div>
       </div>
@@ -355,14 +361,14 @@
 
     <div id="section-sent-posts" class="section-panel">
       <div class="section-header">
-        <h2>📬 Wysłane posty</h2>
-        <p>Edytuj opublikowane posty, ponawiaj tworzenie wydarzeń i zarządzaj historią po wdrożeniu refaktoru.</p>
+        <h2 data-i18n="sentPosts.wysane_posty">📬 Wysłane posty</h2>
+        <p data-i18n="sentPosts.edytuj_opublikowane_posty_ponawiaj_tworzenie">Edytuj opublikowane posty, ponawiaj tworzenie wydarzeń i zarządzaj historią po wdrożeniu refaktoru.</p>
       </div>
 
       <div class="creator-form-card">
         <div class="scheduled-toolbar">
-          <button id="sent-refresh-btn" class="btn-secondary" type="button">Odśwież listę</button>
-          <span class="preview-note" id="sent-count-label">Ładowanie...</span>
+          <button id="sent-refresh-btn" class="btn-secondary" type="button" data-i18n="sentPosts.odswiez_liste">Odśwież listę</button>
+          <span class="preview-note" id="sent-count-label" data-i18n="sentPosts.adowanie">Ładowanie...</span>
         </div>
         <div id="sent-list" class="scheduled-list"></div>
       </div>
@@ -370,27 +376,27 @@
 
     <div id="section-events" class="section-panel">
       <div class="section-header">
-        <h2>🎟️ Wydarzenia</h2>
-        <p>Twórz szybko nowe wydarzenia Discord oraz edytuj i usuwaj już istniejące. Lista synchronizuje się bezpośrednio z Discordem.</p>
+        <h2 data-i18n="events.wydarzenia">🎟️ Wydarzenia</h2>
+        <p data-i18n="events.tworz_szybko_nowe_wydarzenia_discord">Twórz szybko nowe wydarzenia Discord oraz edytuj i usuwaj już istniejące. Lista synchronizuje się bezpośrednio z Discordem.</p>
       </div>
 
       <div class="creator-form-card">
         <div class="scheduled-toolbar">
-          <button id="events-refresh-btn" class="btn-secondary" type="button">Odśwież wydarzenia</button>
-          <span class="preview-note" id="events-count-label">Ładowanie...</span>
+          <button id="events-refresh-btn" class="btn-secondary" type="button" data-i18n="events.odswiez_wydarzenia">Odśwież wydarzenia</button>
+          <span class="preview-note" id="events-count-label" data-i18n="events.adowanie">Ładowanie...</span>
         </div>
 
         <div class="events-form-grid">
-          <input id="events-title" type="text" class="form-input" placeholder="Tytuł wydarzenia">
-          <input id="events-location" type="text" class="form-input" placeholder="Miejsce (np. Online)">
-          <label class="form-label" for="events-start-at">Start (Europe/Warsaw)</label>
+          <input id="events-title" type="text" class="form-input" placeholder="Tytuł wydarzenia" data-i18n-placeholder="events.tytu_wydarzenia">
+          <input id="events-location" type="text" class="form-input" placeholder="Miejsce (np. Online)" data-i18n-placeholder="events.miejsce_np_online">
+          <label class="form-label" for="events-start-at" data-i18n="events.start_europe_warsaw">Start (Europe/Warsaw)</label>
           <input id="events-start-at" type="datetime-local" class="form-input">
-          <label class="form-label" for="events-end-at">Koniec (Europe/Warsaw)</label>
+          <label class="form-label" for="events-end-at" data-i18n="events.koniec_europe_warsaw">Koniec (Europe/Warsaw)</label>
           <input id="events-end-at" type="datetime-local" class="form-input">
-          <textarea id="events-description" class="form-textarea" rows="4" placeholder="Opis wydarzenia"></textarea>
+          <textarea id="events-description" class="form-textarea" rows="4" placeholder="Opis wydarzenia" data-i18n-placeholder="events.opis_wydarzenia"></textarea>
           <div class="scheduled-actions">
-            <button id="events-save-btn" class="btn-primary" type="button">Utwórz wydarzenie</button>
-            <button id="events-cancel-btn" class="btn-secondary" type="button" style="display:none;">Anuluj edycję</button>
+            <button id="events-save-btn" class="btn-primary" type="button" data-i18n="events.utworz_wydarzenie">Utwórz wydarzenie</button>
+            <button id="events-cancel-btn" class="btn-secondary" type="button" style="display:none;" data-i18n="events.anuluj_edycje">Anuluj edycję</button>
           </div>
         </div>
 
@@ -400,34 +406,34 @@
 
     <div id="section-g2-matches" class="section-panel">
       <div class="section-header">
-        <h2>🏟️ Baza meczów G2 Esports</h2>
-        <p>Ręcznie odświeżaj i przeglądaj nadchodzące mecze G2 z PandaScore (horyzont 90 dni, strefa Europe/Warsaw).</p>
+        <h2 data-i18n="g2Matches.baza_meczow_g2_esports">🏟️ Baza meczów G2 Esports</h2>
+        <p data-i18n="g2Matches.recznie_odswiezaj_i_przegladaj_nadchodzace">Ręcznie odświeżaj i przeglądaj nadchodzące mecze G2 z PandaScore (horyzont 90 dni, strefa Europe/Warsaw).</p>
       </div>
 
       <div class="creator-form-card">
         <div class="scheduled-toolbar">
-          <button id="g2-refresh-btn" class="btn-secondary" type="button">Odśwież mecze z PandaScore</button>
-          <span class="preview-note" id="g2-sync-meta">Brak synchronizacji.</span>
+          <button id="g2-refresh-btn" class="btn-secondary" type="button" data-i18n="g2Matches.odswiez_mecze_z_pandascore">Odśwież mecze z PandaScore</button>
+          <span class="preview-note" id="g2-sync-meta" data-i18n="g2Matches.brak_synchronizacji">Brak synchronizacji.</span>
         </div>
 
         <div class="match-filters">
           <select id="g2-filter-game" class="form-select">
-            <option value="">Wszystkie gry</option>
+            <option value="" data-i18n="g2Matches.wszystkie_gry">Wszystkie gry</option>
           </select>
           <select id="g2-filter-g2-team" class="form-select">
-            <option value="">Wszystkie drużyny G2</option>
+            <option value="" data-i18n="g2Matches.wszystkie_druzyny_g2">Wszystkie drużyny G2</option>
           </select>
           <select id="g2-filter-tournament" class="form-select">
-            <option value="">Wszystkie turnieje</option>
+            <option value="" data-i18n="g2Matches.wszystkie_turnieje">Wszystkie turnieje</option>
           </select>
           <select id="g2-filter-status" class="form-select">
-            <option value="">Wszystkie statusy</option>
+            <option value="" data-i18n="g2Matches.wszystkie_statusy">Wszystkie statusy</option>
           </select>
-          <input id="g2-filter-opponent" type="text" class="form-input" placeholder="Szukaj po rywalu...">
+          <input id="g2-filter-opponent" type="text" class="form-input" placeholder="Szukaj po rywalu..." data-i18n-placeholder="g2Matches.szukaj_po_rywalu">
         </div>
 
         <div class="scheduled-toolbar">
-          <span class="preview-note" id="g2-count-label">Ładowanie...</span>
+          <span class="preview-note" id="g2-count-label" data-i18n="g2Matches.adowanie">Ładowanie...</span>
         </div>
 
         <div id="g2-matches-list" class="scheduled-list"></div>
@@ -436,95 +442,95 @@
 
     <div id="section-economy-settings" class="section-panel">
       <div class="section-header">
-        <h2>🧅 Ustawienia ekonomii</h2>
-        <p>Konfiguruj daily i XP. Komendy użyją zmian od razu, a runtime naliczania odświeża konfigurację cyklicznie.</p>
+        <h2 data-i18n="economySettings.ustawienia_ekonomii">🧅 Ustawienia ekonomii</h2>
+        <p data-i18n="economySettings.konfiguruj_daily_i_xp_komendy">Konfiguruj daily i XP. Komendy użyją zmian od razu, a runtime naliczania odświeża konfigurację cyklicznie.</p>
       </div>
 
-      <div id="economy-dev-only-notice" class="scheduled-empty economy-access-notice" hidden>
+      <div id="economy-dev-only-notice" class="scheduled-empty economy-access-notice" hidden data-i18n="economySettings.ustawienia_i_operacje_ekonomii_sa">
         Ustawienia i operacje ekonomii są dostępne tylko dla roli Dev. Dla ról support dostępny pozostaje leaderboard ekonomii.
       </div>
 
       <div id="economy-dev-controls" class="creator-form-card" style="display:none;">
         <div class="scheduled-toolbar">
-          <button id="economy-settings-reload-btn" class="btn-secondary" type="button">Odśwież ustawienia</button>
-          <span class="preview-note" id="economy-settings-last-loaded">Brak danych.</span>
+          <button id="economy-settings-reload-btn" class="btn-secondary" type="button" data-i18n="economySettings.odswiez_ustawienia">Odśwież ustawienia</button>
+          <span class="preview-note" id="economy-settings-last-loaded" data-i18n="economySettings.brak_danych">Brak danych.</span>
         </div>
 
         <div class="events-form-grid">
-          <label class="form-label" for="economy-starting-coins">Startowa ilość cebulionów (nowi użytkownicy)</label>
+          <label class="form-label" for="economy-starting-coins" data-i18n="economySettings.startowa_ilosc_cebulionow_nowi_uzytkownicy">Startowa ilość cebulionów (nowi użytkownicy)</label>
           <input id="economy-starting-coins" type="number" class="form-input" min="0" step="1">
 
-          <label class="form-label" for="economy-daily-min">Daily: min coins</label>
+          <label class="form-label" for="economy-daily-min" data-i18n="economySettings.daily_min_coins">Daily: min coins</label>
           <input id="economy-daily-min" type="number" class="form-input" min="0" step="1">
 
-          <label class="form-label" for="economy-daily-max">Daily: max coins</label>
+          <label class="form-label" for="economy-daily-max" data-i18n="economySettings.daily_max_coins">Daily: max coins</label>
           <input id="economy-daily-max" type="number" class="form-input" min="0" step="1">
 
-          <label class="form-label" for="economy-daily-streak-increment">Daily: przyrost streak (na dzień)</label>
+          <label class="form-label" for="economy-daily-streak-increment" data-i18n="economySettings.daily_przyrost_streak_na_dzien">Daily: przyrost streak (na dzień)</label>
           <input id="economy-daily-streak-increment" type="number" class="form-input" min="0" step="0.01">
 
-          <label class="form-label" for="economy-daily-streak-max-days">Daily: max dni streak</label>
+          <label class="form-label" for="economy-daily-streak-max-days" data-i18n="economySettings.daily_max_dni_streak">Daily: max dni streak</label>
           <input id="economy-daily-streak-max-days" type="number" class="form-input" min="1" step="1">
 
-          <label class="form-label" for="economy-daily-streak-grace-hours">Daily: grace (godziny)</label>
+          <label class="form-label" for="economy-daily-streak-grace-hours" data-i18n="economySettings.daily_grace_godziny">Daily: grace (godziny)</label>
           <input id="economy-daily-streak-grace-hours" type="number" class="form-input" min="24" step="1">
 
-          <label class="form-label" for="economy-daily-messages">Daily: wiadomości (1 linia = 1 szablon)</label>
+          <label class="form-label" for="economy-daily-messages" data-i18n="economySettings.daily_wiadomosci_1_linia_1">Daily: wiadomości (1 linia = 1 szablon)</label>
           <textarea id="economy-daily-messages" class="form-textarea" rows="4"></textarea>
 
-          <label class="form-label" for="economy-xp-text-per-message">XP text: za wiadomość</label>
+          <label class="form-label" for="economy-xp-text-per-message" data-i18n="economySettings.xp_text_za_wiadomosc">XP text: za wiadomość</label>
           <input id="economy-xp-text-per-message" type="number" class="form-input" min="0" step="1">
 
-          <label class="form-label" for="economy-xp-text-cooldown-seconds">XP text: cooldown (sekundy)</label>
+          <label class="form-label" for="economy-xp-text-cooldown-seconds" data-i18n="economySettings.xp_text_cooldown_sekundy">XP text: cooldown (sekundy)</label>
           <input id="economy-xp-text-cooldown-seconds" type="number" class="form-input" min="0" step="1">
 
-          <label class="form-label" for="economy-xp-voice-per-minute">XP voice: za minutę</label>
+          <label class="form-label" for="economy-xp-voice-per-minute" data-i18n="economySettings.xp_voice_za_minute">XP voice: za minutę</label>
           <input id="economy-xp-voice-per-minute" type="number" class="form-input" min="0" step="1">
 
           <label class="form-checkbox">
             <input id="economy-xp-voice-require-two-users" type="checkbox">
-            <span>XP voice wymaga min. 2 użytkowników na kanale.</span>
+            <span data-i18n="economySettings.xp_voice_wymaga_min_2">XP voice wymaga min. 2 użytkowników na kanale.</span>
           </label>
 
           <label class="form-checkbox">
             <input id="economy-xp-voice-allow-self-mute" type="checkbox">
-            <span>Przyznawaj XP voice dla self-muted.</span>
+            <span data-i18n="economySettings.przyznawaj_xp_voice_dla_self">Przyznawaj XP voice dla self-muted.</span>
           </label>
 
           <label class="form-checkbox">
             <input id="economy-xp-voice-allow-self-deaf" type="checkbox">
-            <span>Przyznawaj XP voice dla self-deaf.</span>
+            <span data-i18n="economySettings.przyznawaj_xp_voice_dla_self_2">Przyznawaj XP voice dla self-deaf.</span>
           </label>
 
           <label class="form-checkbox">
             <input id="economy-xp-voice-allow-afk" type="checkbox">
-            <span>Przyznawaj XP voice na kanale AFK.</span>
+            <span data-i18n="economySettings.przyznawaj_xp_voice_na_kanale">Przyznawaj XP voice na kanale AFK.</span>
           </label>
 
         </div>
 
         <div class="scheduled-actions">
-          <button id="economy-settings-save-btn" class="btn-primary" type="button">Zapisz ustawienia ekonomii</button>
-          <button id="economy-settings-reset-users-btn" class="btn-secondary" type="button">Resetuj wszystkich użytkowników ekonomii</button>
-          <button id="economy-settings-denominate-btn" class="btn-secondary" type="button">Denominacja coinsów 100:1</button>
+          <button id="economy-settings-save-btn" class="btn-primary" type="button" data-i18n="economySettings.zapisz_ustawienia_ekonomii">Zapisz ustawienia ekonomii</button>
+          <button id="economy-settings-reset-users-btn" class="btn-secondary" type="button" data-i18n="economySettings.resetuj_wszystkich_uzytkownikow_ekonomii">Resetuj wszystkich użytkowników ekonomii</button>
+          <button id="economy-settings-denominate-btn" class="btn-secondary" type="button" data-i18n="economySettings.denominacja_coinsow_100_1">Denominacja coinsów 100:1</button>
         </div>
-        <p class="form-help">Denominacja dzieli coinsy każdego użytkownika przez 100 (zostaje 1%). Level, XP, wiadomości i voice minutes NIE zmieniają się.</p>
+        <p class="form-help" data-i18n="economySettings.denominacja_dzieli_coinsy_kazdego_uzytkownika">Denominacja dzieli coinsy każdego użytkownika przez 100 (zostaje 1%). Level, XP, wiadomości i voice minutes NIE zmieniają się.</p>
 
         <hr class="section-divider">
 
         <div class="creator-preview-card economy-reward-preview-card">
           <div class="preview-header">
-            <h3>📈 Symulacja nagród coins</h3>
-            <span class="preview-note">Formula v2 + RANK_TIERS</span>
+            <h3 data-i18n="economySettings.symulacja_nagrod_coins">📈 Symulacja nagród coins</h3>
+            <span class="preview-note" data-i18n="economySettings.formula_v2_rank_tiers">Formula v2 + RANK_TIERS</span>
           </div>
 
           <div class="economy-reward-grid">
             <div class="scheduled-preview economy-reward-block">
-              <h4>Tiery rang</h4>
+              <h4 data-i18n="economySettings.tiery_rang">Tiery rang</h4>
               <table class="economy-tier-table">
                 <thead>
                   <tr>
-                    <th>Poziomy</th>
+                    <th data-i18n="economySettings.poziomy">Poziomy</th>
                     <th>M_r</th>
                     <th>D_r</th>
                   </tr>
@@ -543,40 +549,40 @@
             </div>
 
             <div class="scheduled-preview economy-reward-block">
-              <h4>Kalkulator level-up</h4>
+              <h4 data-i18n="economySettings.kalkulator_level_up">Kalkulator level-up</h4>
               <div class="economy-reward-inline-form">
-                <label class="form-label" for="economy-preview-level">Poziom docelowy</label>
+                <label class="form-label" for="economy-preview-level" data-i18n="economySettings.poziom_docelowy">Poziom docelowy</label>
                 <input id="economy-preview-level" type="number" class="form-input" min="1" step="1" value="10">
               </div>
-              <p class="preview-note" id="economy-preview-level-output">Nagroda: -</p>
+              <p class="preview-note" id="economy-preview-level-output" data-i18n="economySettings.nagroda">Nagroda: -</p>
             </div>
 
             <div class="scheduled-preview economy-reward-block">
-              <h4>Kalkulator drip</h4>
+              <h4 data-i18n="economySettings.kalkulator_drip">Kalkulator drip</h4>
               <div class="economy-reward-inline-form">
-                <label class="form-label" for="economy-preview-drip-level">Poziom przed awardem</label>
+                <label class="form-label" for="economy-preview-drip-level" data-i18n="economySettings.poziom_przed_awardem">Poziom przed awardem</label>
                 <input id="economy-preview-drip-level" type="number" class="form-input" min="1" step="1" value="9">
               </div>
               <div class="economy-reward-inline-form">
-                <label class="form-label" for="economy-preview-drip-xp">XP gained</label>
+                <label class="form-label" for="economy-preview-drip-xp" data-i18n="economySettings.xp_gained">XP gained</label>
                 <input id="economy-preview-drip-xp" type="number" class="form-input" min="0" step="1" value="25">
               </div>
-              <p class="preview-note" id="economy-preview-drip-output">Nagroda drip: -</p>
+              <p class="preview-note" id="economy-preview-drip-output" data-i18n="economySettings.nagroda_drip">Nagroda drip: -</p>
             </div>
 
             <div class="scheduled-preview economy-reward-block">
-              <h4>Zakres level-up</h4>
+              <h4 data-i18n="economySettings.zakres_level_up">Zakres level-up</h4>
               <div class="economy-reward-range-grid">
                 <div>
-                  <label class="form-label" for="economy-preview-range-start">Start (aktualny level)</label>
+                  <label class="form-label" for="economy-preview-range-start" data-i18n="economySettings.start_aktualny_level">Start (aktualny level)</label>
                   <input id="economy-preview-range-start" type="number" class="form-input" min="1" step="1" value="8">
                 </div>
                 <div>
-                  <label class="form-label" for="economy-preview-range-end">Koniec (wbity level)</label>
+                  <label class="form-label" for="economy-preview-range-end" data-i18n="economySettings.koniec_wbity_level">Koniec (wbity level)</label>
                   <input id="economy-preview-range-end" type="number" class="form-input" min="1" step="1" value="12">
                 </div>
               </div>
-              <p class="preview-note" id="economy-preview-range-total">Suma: -</p>
+              <p class="preview-note" id="economy-preview-range-total" data-i18n="economySettings.suma">Suma: -</p>
               <div id="economy-preview-range-breakdown" class="economy-reward-breakdown"></div>
             </div>
           </div>
@@ -585,67 +591,67 @@
         <hr class="section-divider">
 
         <div class="section-header">
-          <h3>🛠️ Ręczna migracja użytkownika</h3>
-          <p>Dla importu z innego bota: wpisz ID użytkownika Discord i dodaj ręcznie coinsy, XP lub levele.</p>
+          <h3 data-i18n="economySettings.reczna_migracja_uzytkownika">🛠️ Ręczna migracja użytkownika</h3>
+          <p data-i18n="economySettings.dla_importu_z_innego_bota">Dla importu z innego bota: wpisz ID użytkownika Discord i dodaj ręcznie coinsy, XP lub levele.</p>
         </div>
 
         <div class="events-form-grid">
-          <label class="form-label" for="economy-mutation-user-id">ID użytkownika Discord</label>
+          <label class="form-label" for="economy-mutation-user-id" data-i18n="economySettings.id_uzytkownika_discord">ID użytkownika Discord</label>
           <input id="economy-mutation-user-id" type="text" class="form-input" placeholder="np. 123456789012345678">
 
-          <label class="form-label" for="economy-mutation-coins-amount">Coins do dodania</label>
+          <label class="form-label" for="economy-mutation-coins-amount" data-i18n="economySettings.coins_do_dodania">Coins do dodania</label>
           <input id="economy-mutation-coins-amount" type="number" class="form-input" min="1" step="1" value="100">
 
-          <label class="form-label" for="economy-mutation-xp-amount">XP do dodania</label>
+          <label class="form-label" for="economy-mutation-xp-amount" data-i18n="economySettings.xp_do_dodania">XP do dodania</label>
           <input id="economy-mutation-xp-amount" type="number" class="form-input" min="1" step="1" value="100">
 
-          <label class="form-label" for="economy-mutation-levels-amount">Levele do dodania</label>
+          <label class="form-label" for="economy-mutation-levels-amount" data-i18n="economySettings.levele_do_dodania">Levele do dodania</label>
           <input id="economy-mutation-levels-amount" type="number" class="form-input" min="1" max="1000" step="1" value="1">
         </div>
 
         <div class="scheduled-actions">
-          <button id="economy-mutation-add-coins-btn" class="btn-secondary" type="button">Dodaj Coins użytkownikowi</button>
-          <button id="economy-mutation-add-xp-btn" class="btn-secondary" type="button">Dodaj XP użytkownikowi</button>
-          <button id="economy-mutation-add-levels-btn" class="btn-secondary" type="button">Dodaj levele użytkownikowi</button>
+          <button id="economy-mutation-add-coins-btn" class="btn-secondary" type="button" data-i18n="economySettings.dodaj_coins_uzytkownikowi">Dodaj Coins użytkownikowi</button>
+          <button id="economy-mutation-add-xp-btn" class="btn-secondary" type="button" data-i18n="economySettings.dodaj_xp_uzytkownikowi">Dodaj XP użytkownikowi</button>
+          <button id="economy-mutation-add-levels-btn" class="btn-secondary" type="button" data-i18n="economySettings.dodaj_levele_uzytkownikowi">Dodaj levele użytkownikowi</button>
         </div>
 
         <hr class="section-divider">
 
         <div class="section-header">
-          <h3>📥 Snapshot CSV (backup / import)</h3>
-          <p>Format bez nagłówka: userId,level,xp,messages,voiceMinutes,coins (kolumna coins opcjonalna — bez niej coins są przeliczane ze wzoru nagród). Jeden błędny wiersz anuluje cały import.</p>
+          <h3 data-i18n="economySettings.snapshot_csv_backup_import">📥 Snapshot CSV (backup / import)</h3>
+          <p data-i18n="economySettings.format_bez_nagowka_userid_level">Format bez nagłówka: userId,level,xp,messages,voiceMinutes,coins (kolumna coins opcjonalna — bez niej coins są przeliczane ze wzoru nagród). Jeden błędny wiersz anuluje cały import.</p>
         </div>
 
         <div class="events-form-grid">
-          <label class="form-label" for="economy-csv-import-file">Plik CSV</label>
+          <label class="form-label" for="economy-csv-import-file" data-i18n="economySettings.plik_csv">Plik CSV</label>
           <input id="economy-csv-import-file" type="file" class="form-input" accept=".csv,text/csv">
-          <p class="form-help">Przykład wiersza: 123456789012345678,12,45,1000,250,3200</p>
+          <p class="form-help" data-i18n="economySettings.przykad_wiersza_123456789012345678_12_45">Przykład wiersza: 123456789012345678,12,45,1000,250,3200</p>
         </div>
 
         <div class="scheduled-actions">
-          <button id="economy-csv-export-btn" class="btn-secondary" type="button">Eksportuj snapshot CSV</button>
-          <button id="economy-csv-import-btn" class="btn-secondary" type="button">Importuj snapshot CSV</button>
+          <button id="economy-csv-export-btn" class="btn-secondary" type="button" data-i18n="economySettings.eksportuj_snapshot_csv">Eksportuj snapshot CSV</button>
+          <button id="economy-csv-import-btn" class="btn-secondary" type="button" data-i18n="economySettings.importuj_snapshot_csv">Importuj snapshot CSV</button>
         </div>
 
         <hr class="section-divider">
 
         <div class="section-header">
-          <h3>🎖️ Role za level</h3>
-          <p>Bot nadaje najwyższą rolę z progiem ≤ aktualny level i usuwa tylko inne role z tej mapy.</p>
+          <h3 data-i18n="economySettings.role_za_level">🎖️ Role za level</h3>
+          <p data-i18n="economySettings.bot_nadaje_najwyzsza_role_z">Bot nadaje najwyższą rolę z progiem ≤ aktualny level i usuwa tylko inne role z tej mapy.</p>
         </div>
 
         <div class="events-form-grid">
-          <label class="form-label" for="economy-level-role-id">Rola</label>
+          <label class="form-label" for="economy-level-role-id" data-i18n="economySettings.rola">Rola</label>
           <select id="economy-level-role-id" class="form-select">
-            <option value="">Wybierz rolę</option>
+            <option value="" data-i18n="economySettings.wybierz_role">Wybierz rolę</option>
           </select>
 
-          <label class="form-label" for="economy-level-role-min-level">Minimalny level</label>
+          <label class="form-label" for="economy-level-role-min-level" data-i18n="economySettings.minimalny_level">Minimalny level</label>
           <input id="economy-level-role-min-level" type="number" class="form-input" min="1" step="1" value="1">
         </div>
 
         <div class="scheduled-actions">
-          <button id="economy-level-role-add-btn" class="btn-secondary" type="button">Dodaj mapowanie roli</button>
+          <button id="economy-level-role-add-btn" class="btn-secondary" type="button" data-i18n="economySettings.dodaj_mapowanie_roli">Dodaj mapowanie roli</button>
         </div>
 
         <div id="economy-level-roles-list" class="scheduled-list"></div>
@@ -654,27 +660,27 @@
 
     <div id="section-economy-leaderboard" class="section-panel">
       <div class="section-header">
-        <h2>🏆 Leaderboard ekonomii</h2>
-        <p>Przeglądaj ranking użytkowników po XP lub cebulionach z paginacją po 10 pozycji.</p>
+        <h2 data-i18n="economyLeaderboard.leaderboard_ekonomii">🏆 Leaderboard ekonomii</h2>
+        <p data-i18n="economyLeaderboard.przegladaj_ranking_uzytkownikow_po_xp">Przeglądaj ranking użytkowników po XP lub cebulionach z paginacją po 10 pozycji.</p>
       </div>
 
       <div class="creator-form-card">
         <div class="scheduled-toolbar">
           <div class="economy-leaderboard-controls">
             <select id="economy-leaderboard-sort" class="form-select">
-              <option value="xp">Sortowanie: XP / Level</option>
-              <option value="coins">Sortowanie: Cebuliony</option>
+              <option value="xp" data-i18n="economyLeaderboard.sortowanie_xp_level">Sortowanie: XP / Level</option>
+              <option value="coins" data-i18n="economyLeaderboard.sortowanie_cebuliony">Sortowanie: Cebuliony</option>
             </select>
-            <button id="economy-leaderboard-refresh-btn" class="btn-secondary" type="button">Odśwież leaderboard</button>
+            <button id="economy-leaderboard-refresh-btn" class="btn-secondary" type="button" data-i18n="economyLeaderboard.odswiez_leaderboard">Odśwież leaderboard</button>
           </div>
-          <span class="preview-note" id="economy-leaderboard-count-label">Ładowanie...</span>
+          <span class="preview-note" id="economy-leaderboard-count-label" data-i18n="economyLeaderboard.adowanie">Ładowanie...</span>
         </div>
 
         <div class="scheduled-toolbar">
           <div class="economy-leaderboard-pagination">
-            <button id="economy-leaderboard-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
-            <span class="preview-note" id="economy-leaderboard-page-label">Strona 1/1</span>
-            <button id="economy-leaderboard-next-btn" class="btn-secondary" type="button">Następna ➡</button>
+            <button id="economy-leaderboard-prev-btn" class="btn-secondary" type="button" data-i18n="economyLeaderboard.poprzednia">⬅ Poprzednia</button>
+            <span class="preview-note" id="economy-leaderboard-page-label" data-i18n="economyLeaderboard.strona_1_1">Strona 1/1</span>
+            <button id="economy-leaderboard-next-btn" class="btn-secondary" type="button" data-i18n="economyLeaderboard.nastepna">Następna ➡</button>
           </div>
         </div>
 
@@ -684,64 +690,64 @@
 
     <div id="section-timeouts-system" class="section-panel">
       <div class="section-header">
-        <h2>🔇 System timeoutow</h2>
-        <p>Nakladaj timeouty przez role Server Mute, sprawdzaj aktywne kary i zdejmuj je recznie.</p>
+        <h2 data-i18n="timeoutsSystem.system_timeoutow">🔇 System timeoutow</h2>
+        <p data-i18n="timeoutsSystem.nakladaj_timeouty_przez_role_server">Nakladaj timeouty przez role Server Mute, sprawdzaj aktywne kary i zdejmuj je recznie.</p>
       </div>
 
       <div class="creator-form-card">
         <div class="section-header">
-          <h3>➕ Naloz timeout</h3>
-          <p>Wyszukaj uzytkownika po nicku, podaj ilosc i wybierz jednostke czasu z listy.</p>
+          <h3 data-i18n="timeoutsSystem.naloz_timeout">➕ Naloz timeout</h3>
+          <p data-i18n="timeoutsSystem.wyszukaj_uzytkownika_po_nicku_podaj">Wyszukaj uzytkownika po nicku, podaj ilosc i wybierz jednostke czasu z listy.</p>
         </div>
 
         <div class="events-form-grid">
-          <label class="form-label" for="timeout-user-search">Szukaj uzytkownika</label>
-          <input id="timeout-user-search" type="text" class="form-input" placeholder="np. nick gracza...">
+          <label class="form-label" for="timeout-user-search" data-i18n="timeoutsSystem.szukaj_uzytkownika">Szukaj uzytkownika</label>
+          <input id="timeout-user-search" type="text" class="form-input" placeholder="np. nick gracza..." data-i18n-placeholder="timeoutsSystem.np_nick_gracza">
           <div id="timeout-user-search-results" class="mention-user-results"></div>
 
-          <label class="form-label" for="timeout-selected-user-id">Wybrany user ID</label>
-          <input id="timeout-selected-user-id" type="text" class="form-input" readonly placeholder="Wybierz użytkownika z listy">
+          <label class="form-label" for="timeout-selected-user-id" data-i18n="timeoutsSystem.wybrany_user_id">Wybrany user ID</label>
+          <input id="timeout-selected-user-id" type="text" class="form-input" readonly placeholder="Wybierz użytkownika z listy" data-i18n-placeholder="timeoutsSystem.wybierz_uzytkownika_z_listy">
 
-          <label class="form-label" for="timeout-duration-amount">Ilosc czasu timeoutu</label>
+          <label class="form-label" for="timeout-duration-amount" data-i18n="timeoutsSystem.ilosc_czasu_timeoutu">Ilosc czasu timeoutu</label>
           <input id="timeout-duration-amount" type="number" min="1" step="1" class="form-input" value="1" placeholder="Np. 30">
 
-          <label class="form-label" for="timeout-duration-unit">Jednostka czasu timeoutu</label>
+          <label class="form-label" for="timeout-duration-unit" data-i18n="timeoutsSystem.jednostka_czasu_timeoutu">Jednostka czasu timeoutu</label>
           <select id="timeout-duration-unit" class="form-select">
-            <option value="s">Sekundy</option>
-            <option value="m" selected>Minuty</option>
-            <option value="h">Godziny</option>
-            <option value="d">Dni</option>
-            <option value="mo">Miesiace</option>
-            <option value="y">Lata</option>
+            <option value="s" data-i18n="timeoutsSystem.sekundy">Sekundy</option>
+            <option value="m" selected data-i18n="timeoutsSystem.minuty">Minuty</option>
+            <option value="h" data-i18n="timeoutsSystem.godziny">Godziny</option>
+            <option value="d" data-i18n="timeoutsSystem.dni">Dni</option>
+            <option value="mo" data-i18n="timeoutsSystem.miesiace">Miesiace</option>
+            <option value="y" data-i18n="timeoutsSystem.lata">Lata</option>
           </select>
 
-          <label class="form-label" for="timeout-reason">Powod</label>
-          <textarea id="timeout-reason" class="form-textarea" rows="3" maxlength="500" placeholder="Opisz powod timeoutu..."></textarea>
+          <label class="form-label" for="timeout-reason" data-i18n="timeoutsSystem.powod">Powod</label>
+          <textarea id="timeout-reason" class="form-textarea" rows="3" maxlength="500" placeholder="Opisz powod timeoutu..." data-i18n-placeholder="timeoutsSystem.opisz_powod_timeoutu"></textarea>
         </div>
 
         <div class="scheduled-actions">
-          <button id="timeout-create-btn" class="btn-secondary" type="button">Naloz timeout</button>
+          <button id="timeout-create-btn" class="btn-secondary" type="button" data-i18n="timeoutsSystem.naloz_timeout_2">Naloz timeout</button>
         </div>
 
         <hr class="section-divider">
 
         <div class="section-header">
-          <h3>📋 Aktywne timeouty</h3>
-          <p>Mozesz filtrowac liste po nicku i szybko usuwac aktywne kary.</p>
+          <h3 data-i18n="timeoutsSystem.aktywne_timeouty">📋 Aktywne timeouty</h3>
+          <p data-i18n="timeoutsSystem.mozesz_filtrowac_liste_po_nicku">Mozesz filtrowac liste po nicku i szybko usuwac aktywne kary.</p>
         </div>
 
         <div class="events-form-grid">
-          <label class="form-label" for="timeout-filter-user-search">Filtruj po uzytkowniku</label>
-          <input id="timeout-filter-user-search" type="text" class="form-input" placeholder="Szukaj po nicku...">
+          <label class="form-label" for="timeout-filter-user-search" data-i18n="timeoutsSystem.filtruj_po_uzytkowniku">Filtruj po uzytkowniku</label>
+          <input id="timeout-filter-user-search" type="text" class="form-input" placeholder="Szukaj po nicku..." data-i18n-placeholder="timeoutsSystem.szukaj_po_nicku">
           <div id="timeout-filter-user-search-results" class="mention-user-results"></div>
 
-          <label class="form-label" for="timeout-filter-user-id">Filtr user ID</label>
-          <input id="timeout-filter-user-id" type="text" class="form-input" readonly placeholder="Brak filtra">
+          <label class="form-label" for="timeout-filter-user-id" data-i18n="timeoutsSystem.filtr_user_id">Filtr user ID</label>
+          <input id="timeout-filter-user-id" type="text" class="form-input" readonly placeholder="Brak filtra" data-i18n-placeholder="timeoutsSystem.brak_filtra">
         </div>
 
         <div class="scheduled-actions">
-          <button id="timeout-list-refresh-btn" class="btn-secondary" type="button">Odswiez liste</button>
-          <button id="timeout-filter-clear-btn" class="btn-secondary" type="button">Wyczysc filtr</button>
+          <button id="timeout-list-refresh-btn" class="btn-secondary" type="button" data-i18n="timeoutsSystem.odswiez_liste">Odswiez liste</button>
+          <button id="timeout-filter-clear-btn" class="btn-secondary" type="button" data-i18n="timeoutsSystem.wyczysc_filtr">Wyczysc filtr</button>
         </div>
 
         <div id="timeout-list" class="scheduled-list"></div>
@@ -750,68 +756,68 @@
 
     <div id="section-image-library" class="section-panel">
       <div class="section-header">
-        <h2>🖼️ Biblioteka Grafik</h2>
-        <p>Wrzucaj, pobieraj, zmieniaj nazwy i usuwaj grafiki z katalogu /img. Kreator synchronizuje się automatycznie.</p>
+        <h2 data-i18n="imageLibrary.biblioteka_grafik">🖼️ Biblioteka Grafik</h2>
+        <p data-i18n="imageLibrary.wrzucaj_pobieraj_zmieniaj_nazwy_i">Wrzucaj, pobieraj, zmieniaj nazwy i usuwaj grafiki z katalogu /img. Kreator synchronizuje się automatycznie.</p>
       </div>
 
       <div class="creator-form-card">
         <div class="scheduled-toolbar image-library-toolbar">
-          <input id="image-library-tab-search" type="text" class="form-input" placeholder="Szukaj po nazwie pliku...">
+          <input id="image-library-tab-search" type="text" class="form-input" placeholder="Szukaj po nazwie pliku..." data-i18n-placeholder="imageLibrary.szukaj_po_nazwie_pliku">
           <select id="image-library-tab-sort" class="form-select">
-            <option value="newest">Sortowanie: najnowsze</option>
-            <option value="name_asc">Sortowanie: nazwa A-Z</option>
+            <option value="newest" data-i18n="imageLibrary.sortowanie_najnowsze">Sortowanie: najnowsze</option>
+            <option value="name_asc" data-i18n="imageLibrary.sortowanie_nazwa_a_z">Sortowanie: nazwa A-Z</option>
           </select>
-          <button id="image-library-tab-refresh-btn" class="btn-secondary" type="button">Odśwież</button>
+          <button id="image-library-tab-refresh-btn" class="btn-secondary" type="button" data-i18n="imageLibrary.odswiez">Odśwież</button>
         </div>
 
         <div class="events-form-grid image-library-upload-grid">
-          <label class="form-label" for="image-library-upload-file">Wybierz plik</label>
+          <label class="form-label" for="image-library-upload-file" data-i18n="imageLibrary.wybierz_plik">Wybierz plik</label>
           <input id="image-library-upload-file" type="file" class="form-input" accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml">
 
-          <label class="form-label" for="image-library-upload-name">Nazwa pliku</label>
-          <input id="image-library-upload-name" type="text" class="form-input" placeholder="np. zapowiedz-meczu.png">
+          <label class="form-label" for="image-library-upload-name" data-i18n="imageLibrary.nazwa_pliku">Nazwa pliku</label>
+          <input id="image-library-upload-name" type="text" class="form-input" placeholder="np. zapowiedz-meczu.png" data-i18n-placeholder="imageLibrary.np_zapowiedz_meczu_png">
         </div>
 
         <div class="scheduled-actions">
-          <button id="image-library-upload-btn" class="btn-primary" type="button">Dodaj grafikę do biblioteki</button>
+          <button id="image-library-upload-btn" class="btn-primary" type="button" data-i18n="imageLibrary.dodaj_grafike_do_biblioteki">Dodaj grafikę do biblioteki</button>
         </div>
 
         <div id="image-library-tab-list" class="scheduled-list"></div>
 
         <div class="scheduled-toolbar">
           <div class="image-pagination" id="image-library-tab-pagination" hidden>
-            <button id="image-library-tab-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
-            <span class="preview-note" id="image-library-tab-page-label">Strona 1/1</span>
-            <button id="image-library-tab-next-btn" class="btn-secondary" type="button">Następna ➡</button>
+            <button id="image-library-tab-prev-btn" class="btn-secondary" type="button" data-i18n="imageLibrary.poprzednia">⬅ Poprzednia</button>
+            <span class="preview-note" id="image-library-tab-page-label" data-i18n="imageLibrary.strona_1_1">Strona 1/1</span>
+            <button id="image-library-tab-next-btn" class="btn-secondary" type="button" data-i18n="imageLibrary.nastepna">Następna ➡</button>
           </div>
-          <span class="preview-note" id="image-library-tab-count-label">Elementy: 0</span>
+          <span class="preview-note" id="image-library-tab-count-label" data-i18n="imageLibrary.elementy_0">Elementy: 0</span>
         </div>
       </div>
     </div>
 
     <div id="section-ticket-history" class="section-panel">
       <div class="section-header">
-        <h2>📒 Historia Ticketow</h2>
-        <p>Lista zamknietych ticketow z informacja kto i kiedy zamknal ticket oraz z jakiego powodu.</p>
+        <h2 data-i18n="ticketHistory.historia_ticketow">📒 Historia Ticketow</h2>
+        <p data-i18n="ticketHistory.lista_zamknietych_ticketow_z_informacja">Lista zamknietych ticketow z informacja kto i kiedy zamknal ticket oraz z jakiego powodu.</p>
       </div>
 
       <div class="creator-form-card">
         <div class="scheduled-toolbar image-library-toolbar">
-          <input id="ticket-history-search" type="text" class="form-input" placeholder="Szukaj po nazwie kanalu, ownerze lub powodzie...">
-          <span class="preview-note" id="ticket-history-count-label">Elementy: 0</span>
-          <button id="ticket-history-refresh-btn" class="btn-secondary" type="button">Odswiez</button>
+          <input id="ticket-history-search" type="text" class="form-input" placeholder="Szukaj po nazwie kanalu, ownerze lub powodzie..." data-i18n-placeholder="ticketHistory.szukaj_po_nazwie_kanalu_ownerze">
+          <span class="preview-note" id="ticket-history-count-label" data-i18n="ticketHistory.elementy_0">Elementy: 0</span>
+          <button id="ticket-history-refresh-btn" class="btn-secondary" type="button" data-i18n="ticketHistory.odswiez">Odswiez</button>
         </div>
         <div class="scheduled-toolbar" id="ticket-history-dev-toolbar" style="display:none;">
-          <button id="ticket-history-clear-btn" class="btn-danger" type="button">Wyczysc historie ticketow</button>
+          <button id="ticket-history-clear-btn" class="btn-danger" type="button" data-i18n="ticketHistory.wyczysc_historie_ticketow">Wyczysc historie ticketow</button>
         </div>
 
         <div id="ticket-history-list" class="scheduled-list"></div>
 
         <div class="scheduled-toolbar">
           <div class="image-pagination" id="ticket-history-pagination" hidden>
-            <button id="ticket-history-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
-            <span class="preview-note" id="ticket-history-page-label">Strona 1/1</span>
-            <button id="ticket-history-next-btn" class="btn-secondary" type="button">Nastepna ➡</button>
+            <button id="ticket-history-prev-btn" class="btn-secondary" type="button" data-i18n="ticketHistory.poprzednia">⬅ Poprzednia</button>
+            <span class="preview-note" id="ticket-history-page-label" data-i18n="ticketHistory.strona_1_1">Strona 1/1</span>
+            <button id="ticket-history-next-btn" class="btn-secondary" type="button" data-i18n="ticketHistory.nastepna">Nastepna ➡</button>
           </div>
         </div>
       </div>
@@ -819,34 +825,34 @@
 
     <div id="section-system-logs" class="section-panel">
       <div class="section-header">
-        <h2>🧾 Logi systemowe</h2>
-        <p>Widok tylko dla roli Dev. Szybki podglad akcji dashboardu i bota bez czytania surowego JSONL.</p>
+        <h2 data-i18n="systemLogs.logi_systemowe">🧾 Logi systemowe</h2>
+        <p data-i18n="systemLogs.widok_tylko_dla_roli_dev">Widok tylko dla roli Dev. Szybki podglad akcji dashboardu i bota bez czytania surowego JSONL.</p>
       </div>
 
       <div class="creator-form-card">
         <div class="scheduled-toolbar image-library-toolbar">
-          <input id="system-logs-search" type="text" class="form-input" placeholder="Szukaj po akcji, tresci, userId, channelId...">
+          <input id="system-logs-search" type="text" class="form-input" placeholder="Szukaj po akcji, tresci, userId, channelId..." data-i18n-placeholder="systemLogs.szukaj_po_akcji_tresci_userid">
           <select id="system-logs-level" class="form-select">
-            <option value="all">Poziom: wszystkie</option>
-            <option value="trace">TRACE</option>
-            <option value="debug">DEBUG</option>
-            <option value="info">INFO</option>
-            <option value="warn">WARN</option>
-            <option value="error">ERROR</option>
-            <option value="fatal">FATAL</option>
+            <option value="all" data-i18n="systemLogs.poziom_wszystkie">Poziom: wszystkie</option>
+            <option value="trace" data-i18n="systemLogs.trace">TRACE</option>
+            <option value="debug" data-i18n="systemLogs.debug">DEBUG</option>
+            <option value="info" data-i18n="systemLogs.info">INFO</option>
+            <option value="warn" data-i18n="systemLogs.warn">WARN</option>
+            <option value="error" data-i18n="systemLogs.error">ERROR</option>
+            <option value="fatal" data-i18n="systemLogs.fatal">FATAL</option>
           </select>
-          <button id="system-logs-refresh-btn" class="btn-secondary" type="button">Odswiez</button>
+          <button id="system-logs-refresh-btn" class="btn-secondary" type="button" data-i18n="systemLogs.odswiez">Odswiez</button>
         </div>
 
         <div id="system-logs-list" class="scheduled-list"></div>
 
         <div class="scheduled-toolbar">
           <div class="image-pagination" id="system-logs-pagination" hidden>
-            <button id="system-logs-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
-            <span class="preview-note" id="system-logs-page-label">Strona 1/1</span>
-            <button id="system-logs-next-btn" class="btn-secondary" type="button">Nastepna ➡</button>
+            <button id="system-logs-prev-btn" class="btn-secondary" type="button" data-i18n="systemLogs.poprzednia">⬅ Poprzednia</button>
+            <span class="preview-note" id="system-logs-page-label" data-i18n="systemLogs.strona_1_1">Strona 1/1</span>
+            <button id="system-logs-next-btn" class="btn-secondary" type="button" data-i18n="systemLogs.nastepna">Nastepna ➡</button>
           </div>
-          <span class="preview-note" id="system-logs-count-label">Wpisy: 0</span>
+          <span class="preview-note" id="system-logs-count-label" data-i18n="systemLogs.wpisy_0">Wpisy: 0</span>
         </div>
       </div>
     </div>
@@ -854,17 +860,17 @@
     <div id="section-server-stats" class="section-panel">
       <div class="section-header stats-main-header">
         <div>
-          <h2>📊 Statystyki Serwera</h2>
-          <p>Przeglądaj aktywność serwera — użytkownicy, wiadomości i voice — dla wybranego zakresu dat.</p>
+          <h2 data-i18n="serverStats.statystyki_serwera">📊 Statystyki Serwera</h2>
+          <p data-i18n="serverStats.przegladaj_aktywnosc_serwera_uzytkownicy_wiadomosci">Przeglądaj aktywność serwera — użytkownicy, wiadomości i voice — dla wybranego zakresu dat.</p>
         </div>
       </div>
 
       <!-- Tab navigation -->
       <div class="stats-tabs-nav">
-        <button class="stats-tab-btn active" data-tab="users">👥 Użytkownicy</button>
-        <button class="stats-tab-btn" data-tab="messages">💬 Wiadomości</button>
-        <button class="stats-tab-btn" data-tab="voice">🎙 Voice</button>
-        <button class="stats-tab-btn" data-tab="settings" id="stats-settings-tab-btn">⚙️ Ustawienia</button>
+        <button class="stats-tab-btn active" data-tab="users" data-i18n="serverStats.uzytkownicy">👥 Użytkownicy</button>
+        <button class="stats-tab-btn" data-tab="messages" data-i18n="serverStats.wiadomosci">💬 Wiadomości</button>
+        <button class="stats-tab-btn" data-tab="voice" data-i18n="serverStats.voice">🎙 Voice</button>
+        <button class="stats-tab-btn" data-tab="settings" id="stats-settings-tab-btn" data-i18n="serverStats.ustawienia">⚙️ Ustawienia</button>
       </div>
 
       <!-- ───────── TAB: Użytkownicy ───────── -->
@@ -873,18 +879,18 @@
           <div class="stats-tab-toolbar">
             <div class="stats-date-range-bar">
               <div class="stats-date-range-presets">
-                <button class="stats-preset-btn active" data-tab="users" data-preset="today">Dzisiaj</button>
-                <button class="stats-preset-btn" data-tab="users" data-preset="7d">7 dni</button>
-                <button class="stats-preset-btn" data-tab="users" data-preset="month">Miesiąc</button>
+                <button class="stats-preset-btn active" data-tab="users" data-preset="today" data-i18n="serverStats.dzisiaj">Dzisiaj</button>
+                <button class="stats-preset-btn" data-tab="users" data-preset="7d" data-i18n="serverStats.7_dni">7 dni</button>
+                <button class="stats-preset-btn" data-tab="users" data-preset="month" data-i18n="serverStats.miesiac">Miesiąc</button>
               </div>
               <div class="stats-date-range-inputs">
                 <label class="stats-date-label">Od <input type="date" class="stats-date-input" id="users-start-date"></label>
                 <span class="stats-date-separator">—</span>
                 <label class="stats-date-label">Do <input type="date" class="stats-date-input" id="users-end-date"></label>
-                <button class="btn-primary stats-apply-btn" data-tab="users">Zastosuj</button>
+                <button class="btn-primary stats-apply-btn" data-tab="users" data-i18n="serverStats.zastosuj">Zastosuj</button>
               </div>
             </div>
-            <button class="btn-secondary stats-csv-btn" id="users-csv-btn" title="Eksportuj CSV">⬇ CSV</button>
+            <button class="btn-secondary stats-csv-btn" id="users-csv-btn" title="Eksportuj CSV" data-i18n-title="serverStats.eksportuj_csv" data-i18n="serverStats.csv">⬇ CSV</button>
           </div>
         </div>
 
@@ -892,11 +898,11 @@
           <div class="server-stats-cards" id="users-kpi-cards">
             <div class="server-stats-card">
               <div class="server-stats-card-value" id="users-kpi-count">—</div>
-              <div class="server-stats-card-label">Członków na serwerze</div>
+              <div class="server-stats-card-label" data-i18n="serverStats.czonkow_na_serwerze">Członków na serwerze</div>
             </div>
             <div class="server-stats-card">
               <div class="server-stats-card-value" id="users-kpi-balance">—</div>
-              <div class="server-stats-card-label">Bilans (okres)</div>
+              <div class="server-stats-card-label" data-i18n="serverStats.bilans_okres">Bilans (okres)</div>
             </div>
           </div>
         </div>
@@ -905,7 +911,7 @@
           <div class="stats-two-col">
             <div class="stats-col" style="flex: 1.5;">
               <div class="section-header">
-                <h3>📈 Liczba członków serwera</h3>
+                <h3 data-i18n="serverStats.liczba_czonkow_serwera">📈 Liczba członków serwera</h3>
               </div>
               <div class="server-stats-chart-wrapper">
                 <canvas id="users-members-chart"></canvas>
@@ -914,8 +920,8 @@
             <div class="stats-vsep"></div>
             <div class="stats-col">
               <div class="section-header">
-                <h3>🥇 Najbardziej aktywni</h3>
-                <p>Wiadomości + minuty voice łącznie.</p>
+                <h3 data-i18n="serverStats.najbardziej_aktywni">🥇 Najbardziej aktywni</h3>
+                <p data-i18n="serverStats.wiadomosci_minuty_voice_acznie">Wiadomości + minuty voice łącznie.</p>
               </div>
               <div id="users-active-list" class="scheduled-list"></div>
             </div>
@@ -929,18 +935,18 @@
           <div class="stats-tab-toolbar">
             <div class="stats-date-range-bar">
               <div class="stats-date-range-presets">
-                <button class="stats-preset-btn active" data-tab="messages" data-preset="today">Dzisiaj</button>
-                <button class="stats-preset-btn" data-tab="messages" data-preset="7d">7 dni</button>
-                <button class="stats-preset-btn" data-tab="messages" data-preset="month">Miesiąc</button>
+                <button class="stats-preset-btn active" data-tab="messages" data-preset="today" data-i18n="serverStats.dzisiaj_2">Dzisiaj</button>
+                <button class="stats-preset-btn" data-tab="messages" data-preset="7d" data-i18n="serverStats.7_dni_2">7 dni</button>
+                <button class="stats-preset-btn" data-tab="messages" data-preset="month" data-i18n="serverStats.miesiac_2">Miesiąc</button>
               </div>
               <div class="stats-date-range-inputs">
                 <label class="stats-date-label">Od <input type="date" class="stats-date-input" id="messages-start-date"></label>
                 <span class="stats-date-separator">—</span>
                 <label class="stats-date-label">Do <input type="date" class="stats-date-input" id="messages-end-date"></label>
-                <button class="btn-primary stats-apply-btn" data-tab="messages">Zastosuj</button>
+                <button class="btn-primary stats-apply-btn" data-tab="messages" data-i18n="serverStats.zastosuj_2">Zastosuj</button>
               </div>
             </div>
-            <button class="btn-secondary stats-csv-btn" id="messages-csv-btn" title="Eksportuj CSV">⬇ CSV</button>
+            <button class="btn-secondary stats-csv-btn" id="messages-csv-btn" title="Eksportuj CSV" data-i18n-title="serverStats.eksportuj_csv_2" data-i18n="serverStats.csv_2">⬇ CSV</button>
           </div>
         </div>
 
@@ -948,11 +954,11 @@
           <div class="server-stats-cards" id="messages-kpi-cards">
             <div class="server-stats-card">
               <div class="server-stats-card-value" id="messages-kpi-total">—</div>
-              <div class="server-stats-card-label">Wiadomości łącznie</div>
+              <div class="server-stats-card-label" data-i18n="serverStats.wiadomosci_acznie">Wiadomości łącznie</div>
             </div>
             <div class="server-stats-card">
               <div class="server-stats-card-value" id="messages-kpi-unique">—</div>
-              <div class="server-stats-card-label">Unikalni użytkownicy</div>
+              <div class="server-stats-card-label" data-i18n="serverStats.unikalni_uzytkownicy">Unikalni użytkownicy</div>
             </div>
           </div>
         </div>
@@ -961,7 +967,7 @@
           <div class="stats-two-col">
             <div class="stats-col" style="flex: 1.5;">
               <div class="section-header">
-                <h3>📈 Wiadomości dziennie</h3>
+                <h3 data-i18n="serverStats.wiadomosci_dziennie">📈 Wiadomości dziennie</h3>
               </div>
               <div class="server-stats-chart-wrapper">
                 <canvas id="messages-timeseries-chart"></canvas>
@@ -970,10 +976,10 @@
             <div class="stats-vsep"></div>
             <div class="stats-col">
               <div class="section-header">
-                <h3>🥇 Top użytkownicy</h3>
+                <h3 data-i18n="serverStats.top_uzytkownicy">🥇 Top użytkownicy</h3>
               </div>
               <div id="messages-top-users-list" class="scheduled-list"></div>
-              <button class="btn-secondary stats-load-more-btn" id="messages-load-more-btn" style="margin-top: 10px;">Załaduj więcej</button>
+              <button class="btn-secondary stats-load-more-btn" id="messages-load-more-btn" style="margin-top: 10px;" data-i18n="serverStats.zaaduj_wiecej">Załaduj więcej</button>
             </div>
           </div>
         </div>
@@ -981,14 +987,14 @@
         <div class="creator-form-card stats-two-col">
           <div class="stats-col">
             <div class="section-header">
-              <h3>📢 Top kanały</h3>
+              <h3 data-i18n="serverStats.top_kanay">📢 Top kanały</h3>
             </div>
             <div id="messages-top-channels-list" class="scheduled-list"></div>
           </div>
           <div class="stats-vsep"></div>
           <div class="stats-col stats-chart-col">
             <div class="section-header">
-              <h3>Udział kanałów</h3>
+              <h3 data-i18n="serverStats.udzia_kanaow">Udział kanałów</h3>
             </div>
             <div class="stats-doughnut-wrapper">
               <canvas id="messages-channels-doughnut"></canvas>
@@ -1003,18 +1009,18 @@
           <div class="stats-tab-toolbar">
             <div class="stats-date-range-bar">
               <div class="stats-date-range-presets">
-                <button class="stats-preset-btn active" data-tab="voice" data-preset="today">Dzisiaj</button>
-                <button class="stats-preset-btn" data-tab="voice" data-preset="7d">7 dni</button>
-                <button class="stats-preset-btn" data-tab="voice" data-preset="month">Miesiąc</button>
+                <button class="stats-preset-btn active" data-tab="voice" data-preset="today" data-i18n="serverStats.dzisiaj_3">Dzisiaj</button>
+                <button class="stats-preset-btn" data-tab="voice" data-preset="7d" data-i18n="serverStats.7_dni_3">7 dni</button>
+                <button class="stats-preset-btn" data-tab="voice" data-preset="month" data-i18n="serverStats.miesiac_3">Miesiąc</button>
               </div>
               <div class="stats-date-range-inputs">
                 <label class="stats-date-label">Od <input type="date" class="stats-date-input" id="voice-start-date"></label>
                 <span class="stats-date-separator">—</span>
                 <label class="stats-date-label">Do <input type="date" class="stats-date-input" id="voice-end-date"></label>
-                <button class="btn-primary stats-apply-btn" data-tab="voice">Zastosuj</button>
+                <button class="btn-primary stats-apply-btn" data-tab="voice" data-i18n="serverStats.zastosuj_3">Zastosuj</button>
               </div>
             </div>
-            <button class="btn-secondary stats-csv-btn" id="voice-csv-btn" title="Eksportuj CSV">⬇ CSV</button>
+            <button class="btn-secondary stats-csv-btn" id="voice-csv-btn" title="Eksportuj CSV" data-i18n-title="serverStats.eksportuj_csv_3" data-i18n="serverStats.csv_3">⬇ CSV</button>
           </div>
         </div>
 
@@ -1022,15 +1028,15 @@
           <div class="server-stats-cards" id="voice-kpi-cards">
             <div class="server-stats-card">
               <div class="server-stats-card-value" id="voice-kpi-minutes">—</div>
-              <div class="server-stats-card-label">Minuty Voice</div>
+              <div class="server-stats-card-label" data-i18n="serverStats.minuty_voice">Minuty Voice</div>
             </div>
             <div class="server-stats-card">
               <div class="server-stats-card-value" id="voice-kpi-hours">—</div>
-              <div class="server-stats-card-label">Godziny Voice</div>
+              <div class="server-stats-card-label" data-i18n="serverStats.godziny_voice">Godziny Voice</div>
             </div>
             <div class="server-stats-card">
               <div class="server-stats-card-value" id="voice-kpi-unique">—</div>
-              <div class="server-stats-card-label">Unikalni użytkownicy</div>
+              <div class="server-stats-card-label" data-i18n="serverStats.unikalni_uzytkownicy_2">Unikalni użytkownicy</div>
             </div>
           </div>
         </div>
@@ -1039,7 +1045,7 @@
           <div class="stats-two-col">
             <div class="stats-col" style="flex: 1.5;">
               <div class="section-header">
-                <h3>📈 Minuty Voice dziennie</h3>
+                <h3 data-i18n="serverStats.minuty_voice_dziennie">📈 Minuty Voice dziennie</h3>
               </div>
               <div class="server-stats-chart-wrapper">
                 <canvas id="voice-timeseries-chart"></canvas>
@@ -1048,10 +1054,10 @@
             <div class="stats-vsep"></div>
             <div class="stats-col">
               <div class="section-header">
-                <h3>🥇 Top użytkownicy Voice</h3>
+                <h3 data-i18n="serverStats.top_uzytkownicy_voice">🥇 Top użytkownicy Voice</h3>
               </div>
               <div id="voice-top-users-list" class="scheduled-list"></div>
-              <button class="btn-secondary stats-load-more-btn" id="voice-load-more-btn" style="margin-top: 10px;">Załaduj więcej</button>
+              <button class="btn-secondary stats-load-more-btn" id="voice-load-more-btn" style="margin-top: 10px;" data-i18n="serverStats.zaaduj_wiecej_2">Załaduj więcej</button>
             </div>
           </div>
         </div>
@@ -1059,14 +1065,14 @@
         <div class="creator-form-card stats-two-col">
           <div class="stats-col">
             <div class="section-header">
-              <h3>🔊 Top kanały Voice</h3>
+              <h3 data-i18n="serverStats.top_kanay_voice">🔊 Top kanały Voice</h3>
             </div>
             <div id="voice-top-channels-list" class="scheduled-list"></div>
           </div>
           <div class="stats-vsep"></div>
           <div class="stats-col stats-chart-col">
             <div class="section-header">
-              <h3>Udział kanałów</h3>
+              <h3 data-i18n="serverStats.udzia_kanaow_2">Udział kanałów</h3>
             </div>
             <div class="stats-doughnut-wrapper">
               <canvas id="voice-channels-doughnut"></canvas>
@@ -1079,18 +1085,18 @@
       <div class="stats-tab-panel" id="stats-tab-settings">
         <div class="creator-form-card">
           <div class="section-header">
-            <h3>⚙️ Ustawienia statystyk</h3>
-            <p>Wybierz kanały, których wiadomości nie będą zliczane w statystykach (np. kanały botów).</p>
+            <h3 data-i18n="serverStats.ustawienia_statystyk">⚙️ Ustawienia statystyk</h3>
+            <p data-i18n="serverStats.wybierz_kanay_ktorych_wiadomosci_nie">Wybierz kanały, których wiadomości nie będą zliczane w statystykach (np. kanały botów).</p>
           </div>
           <div class="stats-excluded-channels-section">
             <div class="form-group">
-              <label class="form-label">Wykluczone kanały</label>
+              <label class="form-label" data-i18n="serverStats.wykluczone_kanay">Wykluczone kanały</label>
               <div id="stats-excluded-channels-list" class="stats-channel-checklist">
-                <div class="scheduled-empty">Ładowanie kanałów...</div>
+                <div class="scheduled-empty" data-i18n="serverStats.adowanie_kanaow">Ładowanie kanałów...</div>
               </div>
             </div>
             <div class="stats-settings-actions">
-              <button class="btn-primary" id="stats-save-excluded-btn">Zapisz ustawienia</button>
+              <button class="btn-primary" id="stats-save-excluded-btn" data-i18n="serverStats.zapisz_ustawienia">Zapisz ustawienia</button>
               <span class="stats-save-status" id="stats-save-status"></span>
             </div>
           </div>
@@ -1098,19 +1104,19 @@
 
         <div class="creator-form-card">
           <div class="section-header">
-            <h3>📦 Eksport wszystkich danych</h3>
-            <p>Pobierz pełne archiwum ZIP ze wszystkimi statystykami w formacie CSV.</p>
+            <h3 data-i18n="serverStats.eksport_wszystkich_danych">📦 Eksport wszystkich danych</h3>
+            <p data-i18n="serverStats.pobierz_pene_archiwum_zip_ze">Pobierz pełne archiwum ZIP ze wszystkimi statystykami w formacie CSV.</p>
           </div>
-          <button class="btn-primary" id="stats-export-all-btn2">⬇ Pobierz archiwum ZIP</button>
+          <button class="btn-primary" id="stats-export-all-btn2" data-i18n="serverStats.pobierz_archiwum_zip">⬇ Pobierz archiwum ZIP</button>
         </div>
 
         <div class="creator-form-card" style="border: 1px solid #ed4245;">
           <div class="section-header">
-            <h3>⚠️ Strefa niebezpieczna</h3>
-            <p>Operacje nieodwracalne. Upewnij się, że wiesz co robisz.</p>
+            <h3 data-i18n="serverStats.strefa_niebezpieczna">⚠️ Strefa niebezpieczna</h3>
+            <p data-i18n="serverStats.operacje_nieodwracalne_upewnij_sie_ze">Operacje nieodwracalne. Upewnij się, że wiesz co robisz.</p>
           </div>
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <button class="btn-danger" id="stats-reset-btn">Resetuj wszystkie statystyki</button>
+            <button class="btn-danger" id="stats-reset-btn" data-i18n="serverStats.resetuj_wszystkie_statystyki">Resetuj wszystkie statystyki</button>
             <span id="stats-reset-status" style="font-size:0.85em;color:#ccc;"></span>
           </div>
         </div>
@@ -1119,53 +1125,53 @@
 
     <div id="section-shop" class="section-panel">
       <div class="section-header">
-        <h2>🛒 Sklep</h2>
-        <p>Zarządzaj przedmiotami w sklepie oraz realizuj zamówienia użytkowników.</p>
+        <h2 data-i18n="shop.sklep">🛒 Sklep</h2>
+        <p data-i18n="shop.zarzadzaj_przedmiotami_w_sklepie_oraz">Zarządzaj przedmiotami w sklepie oraz realizuj zamówienia użytkowników.</p>
       </div>
 
       <div class="stats-tabs-nav">
-        <button class="stats-tab-btn active" data-shop-tab="items">📦 Przedmioty</button>
-        <button class="stats-tab-btn" data-shop-tab="orders">📋 Zamówienia</button>
+        <button class="stats-tab-btn active" data-shop-tab="items" data-i18n="shop.przedmioty">📦 Przedmioty</button>
+        <button class="stats-tab-btn" data-shop-tab="orders" data-i18n="shop.zamowienia">📋 Zamówienia</button>
       </div>
 
       <!-- ───── TAB: Przedmioty ───── -->
       <div class="stats-tab-panel active" id="shop-tab-items">
         <div class="creator-form-card" id="shop-item-form-card" style="display:none;">
           <div class="section-header">
-            <h3 id="shop-form-title">➕ Dodaj przedmiot</h3>
+            <h3 id="shop-form-title" data-i18n="shop.dodaj_przedmiot">➕ Dodaj przedmiot</h3>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px 20px;margin-bottom:16px;">
             <div class="form-group">
-              <label class="form-label">Nazwa</label>
-              <input type="text" class="form-input" id="shop-form-name" maxlength="100" placeholder="Nazwa przedmiotu...">
+              <label class="form-label" data-i18n="shop.nazwa">Nazwa</label>
+              <input type="text" class="form-input" id="shop-form-name" maxlength="100" placeholder="Nazwa przedmiotu..." data-i18n-placeholder="shop.nazwa_przedmiotu">
             </div>
             <div class="form-group">
-              <label class="form-label">Cena (cebuliony 🧅)</label>
+              <label class="form-label" data-i18n="shop.cena_cebuliony">Cena (cebuliony 🧅)</label>
               <input type="number" class="form-input" id="shop-form-price" min="1" max="10000000" placeholder="100">
             </div>
             <div class="form-group">
-              <label class="form-label">Ilość (0 = nieograniczona)</label>
+              <label class="form-label" data-i18n="shop.ilosc_0_nieograniczona">Ilość (0 = nieograniczona)</label>
               <input type="number" class="form-input" id="shop-form-stock" min="0" max="100000" placeholder="10">
             </div>
             <div class="form-group">
-              <label class="form-label">Max na użytkownika (0 = brak limitu)</label>
+              <label class="form-label" data-i18n="shop.max_na_uzytkownika_0_brak">Max na użytkownika (0 = brak limitu)</label>
               <input type="number" class="form-input" id="shop-form-max-per-user" min="0" max="10000" placeholder="1">
             </div>
             <div class="form-group" style="grid-column:1/-1;">
-              <label class="form-label">Opis</label>
-              <textarea class="form-input" id="shop-form-description" maxlength="500" rows="3" placeholder="Krótki opis przedmiotu..."></textarea>
+              <label class="form-label" data-i18n="shop.opis">Opis</label>
+              <textarea class="form-input" id="shop-form-description" maxlength="500" rows="3" placeholder="Krótki opis przedmiotu..." data-i18n-placeholder="shop.krotki_opis_przedmiotu"></textarea>
             </div>
             <div class="form-group">
-              <label class="form-label">Status</label>
+              <label class="form-label" data-i18n="shop.status">Status</label>
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:6px;">
                 <input type="checkbox" id="shop-form-is-active" checked>
-                <span style="font-size:13px;">Aktywny (widoczny i dostępny do zakupu)</span>
+                <span style="font-size:13px;" data-i18n="shop.aktywny_widoczny_i_dostepny_do">Aktywny (widoczny i dostępny do zakupu)</span>
               </label>
             </div>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button class="btn-primary" id="shop-form-submit-btn">Zapisz</button>
-            <button class="btn-secondary" id="shop-form-cancel-btn">Anuluj</button>
+            <button class="btn-primary" id="shop-form-submit-btn" data-i18n="shop.zapisz">Zapisz</button>
+            <button class="btn-secondary" id="shop-form-cancel-btn" data-i18n="shop.anuluj">Anuluj</button>
             <span id="shop-form-status" style="font-size:0.85em;color:var(--text-muted);"></span>
           </div>
         </div>
@@ -1173,23 +1179,23 @@
         <div class="creator-form-card">
           <div class="scheduled-toolbar">
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-              <button class="btn-primary" id="shop-add-item-btn">➕ Dodaj przedmiot</button>
+              <button class="btn-primary" id="shop-add-item-btn" data-i18n="shop.dodaj_przedmiot_2">➕ Dodaj przedmiot</button>
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--text-muted);">
                 <input type="checkbox" id="shop-items-include-inactive">
-                <span>Pokaż nieaktywne</span>
+                <span data-i18n="shop.pokaz_nieaktywne">Pokaż nieaktywne</span>
               </label>
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
-              <span class="preview-note" id="shop-items-count-label">Przedmioty: 0</span>
-              <button class="btn-secondary" id="shop-items-refresh-btn" type="button">Odśwież</button>
+              <span class="preview-note" id="shop-items-count-label" data-i18n="shop.przedmioty_0">Przedmioty: 0</span>
+              <button class="btn-secondary" id="shop-items-refresh-btn" type="button" data-i18n="shop.odswiez">Odśwież</button>
             </div>
           </div>
           <div id="shop-items-list" class="scheduled-list"></div>
           <div class="scheduled-toolbar">
             <div class="image-pagination" id="shop-items-pagination" hidden>
-              <button id="shop-items-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
-              <span class="preview-note" id="shop-items-page-label">Strona 1/1</span>
-              <button id="shop-items-next-btn" class="btn-secondary" type="button">Następna ➡</button>
+              <button id="shop-items-prev-btn" class="btn-secondary" type="button" data-i18n="shop.poprzednia">⬅ Poprzednia</button>
+              <span class="preview-note" id="shop-items-page-label" data-i18n="shop.strona_1_1">Strona 1/1</span>
+              <button id="shop-items-next-btn" class="btn-secondary" type="button" data-i18n="shop.nastepna">Następna ➡</button>
             </div>
           </div>
         </div>
@@ -1200,24 +1206,24 @@
         <div class="creator-form-card">
           <div class="scheduled-toolbar image-library-toolbar" style="flex-wrap:wrap;gap:8px;">
             <select class="form-select" id="shop-orders-status-filter" style="min-width:160px;">
-              <option value="all">Status: wszystkie</option>
-              <option value="pending">Złożone</option>
-              <option value="completed">Zrealizowane</option>
-              <option value="cancelled">Anulowane</option>
+              <option value="all" data-i18n="shop.status_wszystkie">Status: wszystkie</option>
+              <option value="pending" data-i18n="shop.zozone">Złożone</option>
+              <option value="completed" data-i18n="shop.zrealizowane">Zrealizowane</option>
+              <option value="cancelled" data-i18n="shop.anulowane">Anulowane</option>
             </select>
-            <input type="text" class="form-input" id="shop-orders-user-filter" placeholder="Filtruj po UserID..." style="max-width:220px;">
-            <button class="btn-secondary" id="shop-orders-refresh-btn" type="button">Odśwież</button>
-            <span class="preview-note" id="shop-orders-count-label">Zamówienia: 0</span>
+            <input type="text" class="form-input" id="shop-orders-user-filter" placeholder="Filtruj po UserID..." data-i18n-placeholder="shop.filtruj_po_userid" style="max-width:220px;">
+            <button class="btn-secondary" id="shop-orders-refresh-btn" type="button" data-i18n="shop.odswiez_2">Odśwież</button>
+            <span class="preview-note" id="shop-orders-count-label" data-i18n="shop.zamowienia_0">Zamówienia: 0</span>
             <div id="shop-orders-dev-toolbar" hidden style="margin-left:auto;">
-              <button class="btn-danger" id="shop-orders-clear-btn" type="button">Wyczyść całą historię zamówień</button>
+              <button class="btn-danger" id="shop-orders-clear-btn" type="button" data-i18n="shop.wyczysc_caa_historie_zamowien">Wyczyść całą historię zamówień</button>
             </div>
           </div>
           <div id="shop-orders-list" class="scheduled-list"></div>
           <div class="scheduled-toolbar">
             <div class="image-pagination" id="shop-orders-pagination" hidden>
-              <button id="shop-orders-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
-              <span class="preview-note" id="shop-orders-page-label">Strona 1/1</span>
-              <button id="shop-orders-next-btn" class="btn-secondary" type="button">Następna ➡</button>
+              <button id="shop-orders-prev-btn" class="btn-secondary" type="button" data-i18n="shop.poprzednia_2">⬅ Poprzednia</button>
+              <span class="preview-note" id="shop-orders-page-label" data-i18n="shop.strona_1_1_2">Strona 1/1</span>
+              <button id="shop-orders-next-btn" class="btn-secondary" type="button" data-i18n="shop.nastepna_2">Następna ➡</button>
             </div>
           </div>
         </div>
@@ -1226,32 +1232,32 @@
 
     <div id="section-session-activity" class="section-panel">
       <div class="section-header">
-        <h2>👥 Aktywność sesji</h2>
-        <p>Widok tylko dla roli Dev. Kto jest teraz zalogowany oraz historia logowania i wylogowywania.</p>
+        <h2 data-i18n="sessionActivity.aktywnosc_sesji">👥 Aktywność sesji</h2>
+        <p data-i18n="sessionActivity.widok_tylko_dla_roli_dev">Widok tylko dla roli Dev. Kto jest teraz zalogowany oraz historia logowania i wylogowywania.</p>
       </div>
 
       <div class="creator-form-card">
         <div class="scheduled-toolbar">
-          <span class="preview-note" id="session-activity-online-count">Zalogowani: —</span>
+          <span class="preview-note" id="session-activity-online-count" data-i18n="sessionActivity.zalogowani">Zalogowani: —</span>
           <div style="display:flex;gap:8px;align-items:center;">
-            <button id="session-activity-refresh-btn" class="btn-secondary" type="button">Odswiez</button>
-            <button id="session-killswitch-btn" class="btn-danger" type="button" title="Wyloguj wszystkich uzytkownikow z dashboardu">Killswitch — wyloguj wszystkich</button>
+            <button id="session-activity-refresh-btn" class="btn-secondary" type="button" data-i18n="sessionActivity.odswiez">Odswiez</button>
+            <button id="session-killswitch-btn" class="btn-danger" type="button" title="Wyloguj wszystkich uzytkownikow z dashboardu" data-i18n-title="sessionActivity.wyloguj_wszystkich_uzytkownikow_z_dashboardu" data-i18n="sessionActivity.killswitch_wyloguj_wszystkich">Killswitch — wyloguj wszystkich</button>
           </div>
         </div>
 
-        <h3 style="margin:12px 0 8px;font-size:14px;color:var(--text-muted)">Aktualnie zalogowani</h3>
+        <h3 style="margin:12px 0 8px;font-size:14px;color:var(--text-muted)" data-i18n="sessionActivity.aktualnie_zalogowani">Aktualnie zalogowani</h3>
         <div id="session-online-list" class="scheduled-list"></div>
 
-        <h3 style="margin:16px 0 8px;font-size:14px;color:var(--text-muted)">Historia zdarzeń</h3>
+        <h3 style="margin:16px 0 8px;font-size:14px;color:var(--text-muted)" data-i18n="sessionActivity.historia_zdarzen">Historia zdarzeń</h3>
         <div id="session-events-list" class="scheduled-list"></div>
 
         <div class="scheduled-toolbar">
           <div class="image-pagination" id="session-activity-pagination" hidden>
-            <button id="session-activity-prev-btn" class="btn-secondary" type="button">⬅ Poprzednia</button>
-            <span class="preview-note" id="session-activity-page-label">Strona 1/1</span>
-            <button id="session-activity-next-btn" class="btn-secondary" type="button">Nastepna ➡</button>
+            <button id="session-activity-prev-btn" class="btn-secondary" type="button" data-i18n="sessionActivity.poprzednia">⬅ Poprzednia</button>
+            <span class="preview-note" id="session-activity-page-label" data-i18n="sessionActivity.strona_1_1">Strona 1/1</span>
+            <button id="session-activity-next-btn" class="btn-secondary" type="button" data-i18n="sessionActivity.nastepna">Nastepna ➡</button>
           </div>
-          <span class="preview-note" id="session-activity-count-label">Zdarzenia: 0</span>
+          <span class="preview-note" id="session-activity-count-label" data-i18n="sessionActivity.zdarzenia_0">Zdarzenia: 0</span>
         </div>
       </div>
     </div>
@@ -1266,15 +1272,19 @@
 
 <div id="toast-container"></div>
 
-<div class="image-preview-modal" id="image-preview-modal" role="dialog" aria-modal="true" aria-label="Podglad grafiki">
+<div class="image-preview-modal" id="image-preview-modal" role="dialog" aria-modal="true" aria-label="Podglad grafiki" data-i18n-aria-label="sessionActivity.podglad_grafiki">
   <div class="image-preview-modal-inner" id="image-preview-modal-inner">
-    <button class="image-preview-modal-close" id="image-preview-modal-close" type="button" aria-label="Zamknij podglad">&times;</button>
+    <button class="image-preview-modal-close" id="image-preview-modal-close" type="button" aria-label="Zamknij podglad" data-i18n-aria-label="sessionActivity.zamknij_podglad">&times;</button>
     <img id="image-preview-modal-img" src="" alt="">
     <span class="image-preview-modal-name" id="image-preview-modal-name"></span>
   </div>
 </div>
 
 <script src="/public/js/chart.umd.min.js"></script>
+<!-- Katalogi i runtime i18n musza sie zaladowac przed app.js. -->
+<script src="/public/js/i18n/pl.js"></script>
+<script src="/public/js/i18n/en.js"></script>
+<script src="/public/js/i18n/runtime.js"></script>
 <script src="/public/js/app.js"></script>
 </body>
 </html>

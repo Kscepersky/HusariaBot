@@ -12,6 +12,7 @@ import {
 } from '../embed-handlers.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
 import { requireAuth } from '../middleware/require-auth.js';
+import { requireSectionAccess } from '../middleware/require-section-access.js';
 import { parseWarsawDateTimeToTimestamp } from '../scheduler/warsaw-time.js';
 import {
     scheduledPayloadSchema,
@@ -179,7 +180,7 @@ function toListResponsePost(post: ScheduledPost): ScheduledPost {
 
 scheduledRouter.use(requireAuth);
 
-scheduledRouter.get('/', async (_req, res) => {
+scheduledRouter.get('/', requireSectionAccess('scheduled-posts'), async (_req, res) => {
     try {
         const posts = await listScheduledPosts();
         const pendingPosts = posts
@@ -194,7 +195,7 @@ scheduledRouter.get('/', async (_req, res) => {
     }
 });
 
-scheduledRouter.get('/sent', async (_req, res) => {
+scheduledRouter.get('/sent', requireSectionAccess('sent-posts'), async (_req, res) => {
     try {
         const posts = await listScheduledPosts();
         const sentPosts = posts
@@ -209,7 +210,7 @@ scheduledRouter.get('/sent', async (_req, res) => {
     }
 });
 
-scheduledRouter.get('/sent/:id', async (req, res) => {
+scheduledRouter.get('/sent/:id', requireSectionAccess('sent-posts'), async (req, res) => {
     const postId = normalizeTrimmedString(req.params.id);
     if (!postId) {
         res.status(400).json({ error: 'Brakuje identyfikatora posta.' });
@@ -230,7 +231,7 @@ scheduledRouter.get('/sent/:id', async (req, res) => {
     }
 });
 
-scheduledRouter.get('/:id', async (req, res) => {
+scheduledRouter.get('/:id', requireSectionAccess('scheduled-posts'), async (req, res) => {
     const postId = normalizeTrimmedString(req.params.id);
     if (!postId) {
         res.status(400).json({ error: 'Brakuje identyfikatora posta.' });
@@ -251,7 +252,7 @@ scheduledRouter.get('/:id', async (req, res) => {
     }
 });
 
-scheduledRouter.post('/', async (req, res) => {
+scheduledRouter.post('/', requireSectionAccess('scheduled-posts'), async (req, res) => {
     const parsedBody = scheduledPayloadSchema.safeParse(req.body);
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -332,7 +333,7 @@ scheduledRouter.post('/', async (req, res) => {
     }
 });
 
-scheduledRouter.patch('/:id', async (req, res) => {
+scheduledRouter.patch('/:id', requireSectionAccess('scheduled-posts'), async (req, res) => {
     const postId = normalizeTrimmedString(req.params.id);
     if (!postId) {
         res.status(400).json({ error: 'Brakuje identyfikatora posta.' });
@@ -419,7 +420,7 @@ scheduledRouter.patch('/:id', async (req, res) => {
     }
 });
 
-scheduledRouter.delete('/:id', async (req, res) => {
+scheduledRouter.delete('/:id', requireSectionAccess('scheduled-posts'), async (req, res) => {
     const postId = normalizeTrimmedString(req.params.id);
     if (!postId) {
         res.status(400).json({ error: 'Brakuje identyfikatora posta.' });
@@ -447,7 +448,7 @@ scheduledRouter.delete('/:id', async (req, res) => {
     }
 });
 
-scheduledRouter.patch('/sent/:id', async (req, res) => {
+scheduledRouter.patch('/sent/:id', requireSectionAccess('sent-posts'), async (req, res) => {
     const postId = normalizeTrimmedString(req.params.id);
     if (!postId) {
         res.status(400).json({ error: 'Brakuje identyfikatora posta.' });
@@ -682,7 +683,7 @@ scheduledRouter.patch('/sent/:id', async (req, res) => {
     }
 });
 
-scheduledRouter.post('/sent/:id/retry-event', async (req, res) => {
+scheduledRouter.post('/sent/:id/retry-event', requireSectionAccess('sent-posts'), async (req, res) => {
     const postId = normalizeTrimmedString(req.params.id);
     if (!postId) {
         res.status(400).json({ error: 'Brakuje identyfikatora posta.' });
@@ -736,7 +737,7 @@ scheduledRouter.post('/sent/:id/retry-event', async (req, res) => {
     }
 });
 
-scheduledRouter.delete('/sent/:id', async (req, res) => {
+scheduledRouter.delete('/sent/:id', requireSectionAccess('sent-posts'), async (req, res) => {
     const postId = normalizeTrimmedString(req.params.id);
     if (!postId) {
         res.status(400).json({ error: 'Brakuje identyfikatora posta.' });

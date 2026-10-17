@@ -5,6 +5,8 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { mkdir, rename, unlink, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { requireAuth } from '../middleware/require-auth.js';
+import { requireSectionAccess, resolveCurrentDashboardRole } from '../middleware/require-section-access.js';
+import { isDashboardLanguage, resolveAllowedSections, resolveDefaultLanguage } from '../dashboard-sections.js';
 import {
     createExternalGuildScheduledEvent,
     deleteGuildScheduledEvent,
@@ -988,33 +990,6 @@ async function requireCurrentDashboardRole(req: Request, res: Response, next: Ne
     }
 }
 
-async function requireCurrentDashboardDevRole(req: Request, res: Response, next: NextFunction): Promise<void> {
-    const guildId = process.env.GUILD_ID;
-    if (!guildId) {
-        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
-        return;
-    }
-
-    const userId = req.session.user?.id;
-    if (!userId) {
-        res.status(401).json({ error: 'Brak autoryzacji.' });
-        return;
-    }
-
-    try {
-        const member = await getGuildMember(userId, guildId);
-        if (!member || !hasDevRole(member)) {
-            res.status(403).json({ error: 'Brak uprawnień do wykonania tej operacji.' });
-            return;
-        }
-
-        next();
-    } catch (error) {
-        apiLogger.error('DASHBOARD_DEV_ROLE_VERIFY_FAILED', 'Failed to verify dashboard dev role.', { userId }, error);
-        res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień użytkownika.' });
-    }
-}
-
 function normalizeBoolean(value: unknown): boolean {
     return value === true || value === 'true';
 }
@@ -1207,6 +1182,48 @@ apiRouter.get('/me', (req, res) => {
     res.json({ user: req.session.user });
 });
 
+// GET /api/me/access — rola, dozwolone sekcje i jezyk dashboardu.
+// Front buduje na tym nawigacje zamiast zgadywac uprawnienia z kodow 403.
+apiRouter.get('/me/access', async (req, res) => {
+    try {
+        const role = await resolveCurrentDashboardRole(req);
+        if (!role || role === 'member') {
+            res.status(403).json({ error: 'Brak uprawnień do panelu.' });
+            return;
+        }
+
+        // Rola w Discordzie mogla sie zmienic po zalogowaniu — odswiez sesje.
+        if (req.session.user && req.session.user.dashboardRole !== role) {
+            req.session.user = { ...req.session.user, dashboardRole: role };
+        }
+
+        res.json({
+            role,
+            allowedSections: resolveAllowedSections(role),
+            language: req.session.language ?? resolveDefaultLanguage(role),
+            languageSource: req.session.language ? 'user' : 'default',
+        });
+    } catch (error) {
+        apiLogger.error('DASHBOARD_ACCESS_RESOLVE_FAILED', 'Failed to resolve dashboard access.', {
+            actorUserId: req.session.user?.id,
+        }, error);
+        res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień użytkownika.' });
+    }
+});
+
+// PATCH /api/me/language — zapisuje recznie wybrany jezyk dashboardu.
+apiRouter.patch('/me/language', (req, res) => {
+    const language = (req.body as { language?: unknown } | undefined)?.language;
+
+    if (!isDashboardLanguage(language)) {
+        res.status(400).json({ error: 'Nieprawidłowy język. Dozwolone wartości: pl, en.' });
+        return;
+    }
+
+    req.session.language = language;
+    res.json({ language });
+});
+
 // GET /api/channels — live channel list from Discord
 apiRouter.get('/channels', requireCurrentDashboardRole, async (_req, res) => {
     const guildId = process.env.GUILD_ID!;
@@ -1364,7 +1381,7 @@ apiRouter.get('/members/by-ids', requireCurrentDashboardRole, async (req, res) =
 });
 
 // GET /api/timeouts — list active timeouts in current guild
-apiRouter.get('/timeouts', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/timeouts', requireSectionAccess('timeouts-system'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -1393,7 +1410,7 @@ apiRouter.get('/timeouts', requireCurrentDashboardRole, async (req, res) => {
 });
 
 // POST /api/timeouts — create timeout and assign Server Mute role
-apiRouter.post('/timeouts', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.post('/timeouts', requireSectionAccess('timeouts-system'), async (req, res) => {
     const parsedBody = timeoutCreateSchema.safeParse(req.body);
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -1554,7 +1571,7 @@ apiRouter.post('/timeouts', requireCurrentDashboardRole, async (req, res) => {
 });
 
 // POST /api/timeouts/:timeoutId/remove — remove timeout and Server Mute role
-apiRouter.post('/timeouts/:timeoutId/remove', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.post('/timeouts/:timeoutId/remove', requireSectionAccess('timeouts-system'), async (req, res) => {
     const timeoutId = Number.parseInt(String(req.params.timeoutId ?? ''), 10);
     if (!Number.isFinite(timeoutId) || timeoutId <= 0) {
         res.status(400).json({ error: 'Nieprawidlowe timeoutId.' });
@@ -1622,7 +1639,7 @@ apiRouter.post('/timeouts/:timeoutId/remove', requireCurrentDashboardRole, async
 });
 
 // GET /api/images — list available images from /img directory with pagination/search/sort
-apiRouter.get('/images', requireCurrentDashboardRole, (req, res) => {
+apiRouter.get('/images', requireSectionAccess('image-library'), (req, res) => {
     try {
         const search = normalizeTrimmedString(req.query.search);
         const sortByRaw = normalizeTrimmedString(req.query.sortBy);
@@ -1665,7 +1682,7 @@ apiRouter.get('/images', requireCurrentDashboardRole, (req, res) => {
 });
 
 // POST /api/images/upload — upload image into /img library
-apiRouter.post('/images/upload', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.post('/images/upload', requireSectionAccess('image-library'), async (req, res) => {
     const parsedBody = imageLibraryUploadSchema.safeParse(req.body);
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -1763,7 +1780,7 @@ apiRouter.post('/images/upload', requireCurrentDashboardRole, async (req, res) =
 });
 
 // PATCH /api/images/rename — rename image in /img library
-apiRouter.patch('/images/rename', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.patch('/images/rename', requireSectionAccess('image-library'), async (req, res) => {
     const parsedBody = imageLibraryRenameSchema.safeParse(req.body);
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -1850,7 +1867,7 @@ apiRouter.patch('/images/rename', requireCurrentDashboardRole, async (req, res) 
 });
 
 // DELETE /api/images/:filename — delete image from /img library
-apiRouter.delete('/images/:filename', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.delete('/images/:filename', requireSectionAccess('image-library'), async (req, res) => {
     const actorUserId = req.session.user?.id;
     if (!actorUserId) {
         res.status(401).json({ error: 'Brak autoryzacji.' });
@@ -1896,7 +1913,7 @@ apiRouter.delete('/images/:filename', requireCurrentDashboardRole, async (req, r
 });
 
 // GET /api/tickets/history — list closed ticket history records
-apiRouter.get('/tickets/history', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/tickets/history', requireSectionAccess('ticket-history'), async (req, res) => {
     try {
         const search = normalizeTrimmedString(req.query.search);
         const pageRequested = parsePositiveIntQuery(req.query.page, 1);
@@ -1929,7 +1946,7 @@ apiRouter.get('/tickets/history', requireCurrentDashboardRole, async (req, res) 
 });
 
 // DELETE /api/tickets/history — clear all ticket history (Dev only)
-apiRouter.delete('/tickets/history', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.delete('/tickets/history', requireSectionAccess('ticket-history'), async (req, res) => {
     try {
         const guildId = process.env.GUILD_ID;
         if (!guildId) {
@@ -1958,7 +1975,7 @@ apiRouter.delete('/tickets/history', requireCurrentDashboardRole, async (req, re
 });
 
 // GET /api/tickets/transcripts/:fileName — download saved ticket transcript
-apiRouter.get('/tickets/transcripts/:fileName', requireCurrentDashboardRole, (req, res) => {
+apiRouter.get('/tickets/transcripts/:fileName', requireSectionAccess('ticket-history'), (req, res) => {
     try {
         const fileName = normalizeTrimmedString(req.params.fileName);
         const transcriptPath = resolveTicketTranscriptFilePath(fileName);
@@ -1983,7 +2000,7 @@ apiRouter.get('/tickets/transcripts/:fileName', requireCurrentDashboardRole, (re
 });
 
 // GET /api/logs — list structured dashboard/system logs (Dev-only)
-apiRouter.get('/logs', requireCurrentDashboardDevRole, async (req, res) => {
+apiRouter.get('/logs', requireSectionAccess('system-logs'), async (req, res) => {
     const page = parsePositiveIntQuery(req.query.page, 1);
     const pageSize = Math.max(1, Math.min(100, parsePositiveIntQuery(req.query.pageSize, 25)));
     const search = normalizeTrimmedString(req.query.search);
@@ -2043,7 +2060,7 @@ apiRouter.get('/logs', requireCurrentDashboardDevRole, async (req, res) => {
 });
 
 // GET /api/sessions/activity — session activity panel (Dev-only)
-apiRouter.get('/sessions/activity', requireCurrentDashboardDevRole, async (req, res) => {
+apiRouter.get('/sessions/activity', requireSectionAccess('session-activity'), async (req, res) => {
     const page = parsePositiveIntQuery(req.query.page, 1);
     const pageSize = Math.max(1, Math.min(100, parsePositiveIntQuery(req.query.pageSize, 50)));
 
@@ -2059,7 +2076,7 @@ apiRouter.get('/sessions/activity', requireCurrentDashboardDevRole, async (req, 
 });
 
 // GET /api/economy/settings — load economy configuration for dashboard
-apiRouter.get('/economy/settings', requireCurrentDashboardDevRole, async (_req, res) => {
+apiRouter.get('/economy/settings', requireSectionAccess('economy-settings'), async (_req, res) => {
     try {
         const config = await getEconomyConfig();
         res.json({ config });
@@ -2070,7 +2087,7 @@ apiRouter.get('/economy/settings', requireCurrentDashboardDevRole, async (_req, 
 });
 
 // PATCH /api/economy/settings — update economy configuration from dashboard
-apiRouter.patch('/economy/settings', requireCurrentDashboardDevRole, async (req, res) => {
+apiRouter.patch('/economy/settings', requireSectionAccess('economy-settings'), async (req, res) => {
     const parsedBody = economyConfigSchema.safeParse(req.body);
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -2087,7 +2104,7 @@ apiRouter.patch('/economy/settings', requireCurrentDashboardDevRole, async (req,
 });
 
 // POST /api/economy/reset-users — reset economy state for all users in current guild
-apiRouter.post('/economy/reset-users', requireCurrentDashboardDevRole, async (_req, res) => {
+apiRouter.post('/economy/reset-users', requireSectionAccess('economy-settings'), async (_req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2104,7 +2121,7 @@ apiRouter.post('/economy/reset-users', requireCurrentDashboardDevRole, async (_r
 });
 
 // POST /api/economy/denominate-coins — divide every user's coins by a divisor (e.g. 100:1), no other state changes
-apiRouter.post('/economy/denominate-coins', requireCurrentDashboardDevRole, async (req, res) => {
+apiRouter.post('/economy/denominate-coins', requireSectionAccess('economy-settings'), async (req, res) => {
     const parsedBody = economyDenominateCoinsSchema.safeParse(req.body ?? {});
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -2127,7 +2144,7 @@ apiRouter.post('/economy/denominate-coins', requireCurrentDashboardDevRole, asyn
 });
 
 // GET /api/economy/export-csv — export current economy snapshot as importable CSV
-apiRouter.get('/economy/export-csv', requireCurrentDashboardDevRole, async (_req, res) => {
+apiRouter.get('/economy/export-csv', requireSectionAccess('economy-settings'), async (_req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2146,7 +2163,7 @@ apiRouter.get('/economy/export-csv', requireCurrentDashboardDevRole, async (_req
 });
 
 // POST /api/economy/user-mutation — apply manual economy mutation for one user
-apiRouter.post('/economy/user-mutation', requireCurrentDashboardDevRole, async (req, res) => {
+apiRouter.post('/economy/user-mutation', requireSectionAccess('economy-settings'), async (req, res) => {
     const parsedBody = economyUserMutationSchema.safeParse(req.body);
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -2201,7 +2218,7 @@ apiRouter.post('/economy/user-mutation', requireCurrentDashboardDevRole, async (
 });
 
 // GET /api/economy/level-roles — load level->role mappings
-apiRouter.get('/economy/level-roles', requireCurrentDashboardDevRole, async (_req, res) => {
+apiRouter.get('/economy/level-roles', requireSectionAccess('economy-settings'), async (_req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2218,7 +2235,7 @@ apiRouter.get('/economy/level-roles', requireCurrentDashboardDevRole, async (_re
 });
 
 // PUT /api/economy/level-roles — replace level->role mappings
-apiRouter.put('/economy/level-roles', requireCurrentDashboardDevRole, async (req, res) => {
+apiRouter.put('/economy/level-roles', requireSectionAccess('economy-settings'), async (req, res) => {
     const parsedBody = economyLevelRoleMappingsSchema.safeParse(req.body);
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -2255,7 +2272,7 @@ apiRouter.put('/economy/level-roles', requireCurrentDashboardDevRole, async (req
 });
 
 // POST /api/economy/import-csv — strict snapshot import (userId,level,xp,messages,voiceMinutes[,coins])
-apiRouter.post('/economy/import-csv', requireCurrentDashboardDevRole, async (req, res) => {
+apiRouter.post('/economy/import-csv', requireSectionAccess('economy-settings'), async (req, res) => {
     const parsedBody = economyCsvImportSchema.safeParse(req.body);
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -2301,7 +2318,7 @@ apiRouter.post('/economy/import-csv', requireCurrentDashboardDevRole, async (req
 });
 
 // GET /api/economy/leaderboard — load paginated economy leaderboard for dashboard
-apiRouter.get('/economy/leaderboard', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/economy/leaderboard', requireSectionAccess('economy-leaderboard'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2330,7 +2347,7 @@ apiRouter.get('/economy/leaderboard', requireCurrentDashboardRole, async (req, r
 });
 
 // GET /api/events — list Discord scheduled events
-apiRouter.get('/events', async (_req, res) => {
+apiRouter.get('/events', requireSectionAccess('events'), async (_req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2370,7 +2387,7 @@ apiRouter.get('/events', async (_req, res) => {
 });
 
 // POST /api/events — create Discord scheduled event
-apiRouter.post('/events', async (req, res) => {
+apiRouter.post('/events', requireSectionAccess('events'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2406,7 +2423,7 @@ apiRouter.post('/events', async (req, res) => {
 });
 
 // PATCH /api/events/:id — update Discord scheduled event
-apiRouter.patch('/events/:id', async (req, res) => {
+apiRouter.patch('/events/:id', requireSectionAccess('events'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2451,7 +2468,7 @@ apiRouter.patch('/events/:id', async (req, res) => {
 });
 
 // DELETE /api/events/:id — delete Discord scheduled event
-apiRouter.delete('/events/:id', async (req, res) => {
+apiRouter.delete('/events/:id', requireSectionAccess('events'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2477,7 +2494,7 @@ apiRouter.delete('/events/:id', async (req, res) => {
 });
 
 // POST /api/send-image — send an image file to a Discord channel
-apiRouter.post('/send-image', async (req, res) => {
+apiRouter.post('/send-image', requireSectionAccess('embed-creator'), async (req, res) => {
     const parsedBody = sendImageSchema.safeParse(req.body);
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -2505,7 +2522,7 @@ apiRouter.post('/send-image', async (req, res) => {
 });
 
 // POST /api/embed — build & send embed
-apiRouter.post('/embed', async (req, res) => {
+apiRouter.post('/embed', requireSectionAccess('embed-creator'), async (req, res) => {
     const parsedBody = embedPayloadSchema.safeParse(req.body);
     if (!parsedBody.success) {
         res.status(400).json({ error: zodErrorToMessage(parsedBody.error) });
@@ -2631,7 +2648,7 @@ function parseStatsDateRange(
 }
 
 // GET /api/stats/server?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD — summary for a date range
-apiRouter.get('/stats/server', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/server', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2654,7 +2671,7 @@ apiRouter.get('/stats/server', requireCurrentDashboardRole, async (req, res) => 
 });
 
 // GET /api/stats/server/config — read excluded channel IDs for stats
-apiRouter.get('/stats/server/config', requireCurrentDashboardRole, async (_req, res) => {
+apiRouter.get('/stats/server/config', requireSectionAccess('server-stats'), async (_req, res) => {
     try {
         const excludedChannelIds = await getStatsExcludedChannelIds();
         res.json({ excludedChannelIds });
@@ -2665,7 +2682,7 @@ apiRouter.get('/stats/server/config', requireCurrentDashboardRole, async (_req, 
 });
 
 // PUT /api/stats/server/config — update excluded channel IDs for stats
-apiRouter.put('/stats/server/config', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.put('/stats/server/config', requireSectionAccess('server-stats'), async (req, res) => {
     const body: unknown = req.body;
     if (
         typeof body !== 'object'
@@ -2689,7 +2706,7 @@ apiRouter.put('/stats/server/config', requireCurrentDashboardRole, async (req, r
 });
 
 // GET /api/stats/server/top-users?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&limit=10
-apiRouter.get('/stats/server/top-users', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/server/top-users', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2730,7 +2747,7 @@ apiRouter.get('/stats/server/top-users', requireCurrentDashboardRole, async (req
 });
 
 // GET /api/stats/server/timeseries?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD — daily time series
-apiRouter.get('/stats/server/timeseries', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/server/timeseries', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -2773,7 +2790,7 @@ async function resolveChannelsMap(guildId: string): Promise<Map<string, { name: 
 // ── Messages tab ──────────────────────────────────────────────────────────────
 
 // GET /api/stats/messages/summary?startDate=&endDate=
-apiRouter.get('/stats/messages/summary', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/messages/summary', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2788,7 +2805,7 @@ apiRouter.get('/stats/messages/summary', requireCurrentDashboardRole, async (req
 });
 
 // GET /api/stats/messages/timeseries?startDate=&endDate=
-apiRouter.get('/stats/messages/timeseries', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/messages/timeseries', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2803,7 +2820,7 @@ apiRouter.get('/stats/messages/timeseries', requireCurrentDashboardRole, async (
 });
 
 // GET /api/stats/messages/top-users?startDate=&endDate=&limit=10
-apiRouter.get('/stats/messages/top-users', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/messages/top-users', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2827,7 +2844,7 @@ apiRouter.get('/stats/messages/top-users', requireCurrentDashboardRole, async (r
 });
 
 // GET /api/stats/messages/top-channels?startDate=&endDate=&limit=10
-apiRouter.get('/stats/messages/top-channels', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/messages/top-channels', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2854,7 +2871,7 @@ apiRouter.get('/stats/messages/top-channels', requireCurrentDashboardRole, async
 // ── Voice tab ─────────────────────────────────────────────────────────────────
 
 // GET /api/stats/voice/summary?startDate=&endDate=
-apiRouter.get('/stats/voice/summary', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/voice/summary', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2869,7 +2886,7 @@ apiRouter.get('/stats/voice/summary', requireCurrentDashboardRole, async (req, r
 });
 
 // GET /api/stats/voice/timeseries?startDate=&endDate=
-apiRouter.get('/stats/voice/timeseries', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/voice/timeseries', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2884,7 +2901,7 @@ apiRouter.get('/stats/voice/timeseries', requireCurrentDashboardRole, async (req
 });
 
 // GET /api/stats/voice/top-users?startDate=&endDate=&limit=10
-apiRouter.get('/stats/voice/top-users', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/voice/top-users', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2908,7 +2925,7 @@ apiRouter.get('/stats/voice/top-users', requireCurrentDashboardRole, async (req,
 });
 
 // GET /api/stats/voice/top-channels?startDate=&endDate=&limit=10
-apiRouter.get('/stats/voice/top-channels', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/voice/top-channels', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2935,7 +2952,7 @@ apiRouter.get('/stats/voice/top-channels', requireCurrentDashboardRole, async (r
 // ── Members tab ───────────────────────────────────────────────────────────────
 
 // GET /api/stats/members/summary?startDate=&endDate=
-apiRouter.get('/stats/members/summary', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/members/summary', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2950,7 +2967,7 @@ apiRouter.get('/stats/members/summary', requireCurrentDashboardRole, async (req,
 });
 
 // GET /api/stats/members/timeseries?startDate=&endDate=
-apiRouter.get('/stats/members/timeseries', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/members/timeseries', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2965,7 +2982,7 @@ apiRouter.get('/stats/members/timeseries', requireCurrentDashboardRole, async (r
 });
 
 // GET /api/stats/members/active-users?startDate=&endDate=
-apiRouter.get('/stats/members/active-users', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/members/active-users', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -2999,7 +3016,7 @@ function rowsToCsv(headers: string[], rows: string[][]): string {
 }
 
 // GET /api/stats/export/messages?startDate=&endDate=
-apiRouter.get('/stats/export/messages', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/export/messages', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -3021,7 +3038,7 @@ apiRouter.get('/stats/export/messages', requireCurrentDashboardRole, async (req,
 });
 
 // GET /api/stats/export/voice?startDate=&endDate=
-apiRouter.get('/stats/export/voice', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/export/voice', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -3043,7 +3060,7 @@ apiRouter.get('/stats/export/voice', requireCurrentDashboardRole, async (req, re
 });
 
 // GET /api/stats/export/members?startDate=&endDate=
-apiRouter.get('/stats/export/members', requireCurrentDashboardRole, async (req, res) => {
+apiRouter.get('/stats/export/members', requireSectionAccess('server-stats'), async (req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     const range = parseStatsDateRange(req.query.startDate, req.query.endDate);
@@ -3065,7 +3082,7 @@ apiRouter.get('/stats/export/members', requireCurrentDashboardRole, async (req, 
 });
 
 // GET /api/stats/export/all — ZIP with all historical data
-apiRouter.get('/stats/export/all', requireCurrentDashboardRole, async (_req, res) => {
+apiRouter.get('/stats/export/all', requireSectionAccess('server-stats'), async (_req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     try {
@@ -3112,7 +3129,7 @@ apiRouter.get('/stats/export/all', requireCurrentDashboardRole, async (_req, res
 });
 
 // POST /api/stats/reset — usuwa wszystkie statystyki serwera
-apiRouter.post('/stats/reset', requireCurrentDashboardRole, async (_req, res) => {
+apiRouter.post('/stats/reset', requireSectionAccess('server-stats'), async (_req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     try {

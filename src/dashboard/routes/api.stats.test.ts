@@ -23,6 +23,7 @@ vi.mock('../discord-api.js', () => ({
     getGuildRoles: vi.fn(),
     getGuildEmojis: vi.fn(),
     getGuildMember: vi.fn(),
+    resolveDashboardRole: vi.fn(() => 'dev'),
     getDiscordUserById: vi.fn(),
     addGuildMemberRole: vi.fn(),
     removeGuildMemberRole: vi.fn(),

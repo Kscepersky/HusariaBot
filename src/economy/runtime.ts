@@ -8,7 +8,10 @@ import {
     incrementVoiceMinutes,
 } from './repository.js';
 import { getStatsExcludedChannelIds, incrementChannelMessageStats, incrementChannelVoiceStats } from './stats-store.js';
+import { createLogger } from '../utils/logger.js';
 import type { EconomyConfig, EconomyLevelRoleMapping, EconomyXpAwardResult } from './types.js';
+
+const levelRoleLogger = createLogger('economy-level-roles');
 
 const VOICE_TICK_INTERVAL_MS = 60_000;
 const CONFIG_CACHE_TTL_MS = 60_000;
@@ -66,6 +69,7 @@ function resolveProtectedStaffRoleIds(): Set<string> {
         process.env.MODERATOR_ROLE_ID,
         process.env.COMMUNITY_MANAGER_ROLE_ID,
         process.env.DEV_ROLE_ID,
+        process.env.G2STAFF_ROLE_ID,
     ];
 
     return new Set(
@@ -106,13 +110,20 @@ function isVoiceChannelMemberEligible(member: GuildMember, config: EconomyConfig
     return true;
 }
 
-async function applyLevelRoleForMember(
+export async function applyLevelRoleForMember(
     guild: Guild,
     userId: string,
     level: number,
     mappings: EconomyLevelRoleMapping[],
 ): Promise<void> {
+    const baseContext = { guildId: guild.id, userId, level, mappingCount: mappings.length };
+
     if (mappings.length === 0) {
+        levelRoleLogger.debug(
+            'level_role.skipped_no_mappings',
+            'Brak skonfigurowanych mapowan rol levelowych dla serwera.',
+            baseContext,
+        );
         return;
     }
 
@@ -120,11 +131,12 @@ async function applyLevelRoleForMember(
     try {
         member = await guild.members.fetch(userId);
     } catch (error) {
-        console.warn('Nie udalo sie pobrac czlonka do mapowania roli levelowej:', {
-            guildId: guild.id,
-            userId,
+        levelRoleLogger.warn(
+            'level_role.member_fetch_failed',
+            'Nie udalo sie pobrac czlonka do mapowania roli levelowej.',
+            baseContext,
             error,
-        });
+        );
         return;
     }
 
@@ -141,29 +153,53 @@ async function applyLevelRoleForMember(
     if (rolesToRemove.length > 0) {
         try {
             await member.roles.remove(rolesToRemove, 'Economy level role remap');
+            levelRoleLogger.info(
+                'level_role.removed',
+                'Zdjeto nieaktualne role progowe.',
+                { ...baseContext, removedRoleIds: rolesToRemove },
+            );
         } catch (error) {
-            console.warn('Nie udalo sie usunac starych ról levelowych:', {
-                guildId: guild.id,
-                userId,
-                rolesToRemove,
+            levelRoleLogger.warn(
+                'level_role.remove_failed',
+                'Nie udalo sie zdjac nieaktualnych rol progowych.',
+                { ...baseContext, removedRoleIds: rolesToRemove },
                 error,
-            });
+            );
         }
     }
 
-    if (!targetRoleId || member.roles.cache.has(targetRoleId)) {
+    if (!targetRoleId) {
+        levelRoleLogger.debug(
+            'level_role.no_matching_tier',
+            'Level uzytkownika jest ponizej najnizszego skonfigurowanego progu.',
+            baseContext,
+        );
+        return;
+    }
+
+    if (member.roles.cache.has(targetRoleId)) {
+        levelRoleLogger.debug(
+            'level_role.already_current',
+            'Uzytkownik ma juz wlasciwa role progowa.',
+            { ...baseContext, roleId: targetRoleId },
+        );
         return;
     }
 
     try {
         await member.roles.add(targetRoleId, 'Economy level reward');
+        levelRoleLogger.info(
+            'level_role.assigned',
+            'Nadano role za osiagniety level.',
+            { ...baseContext, roleId: targetRoleId },
+        );
     } catch (error) {
-        console.warn('Nie udalo sie nadac roli levelowej:', {
-            guildId: guild.id,
-            userId,
-            roleId: targetRoleId,
+        levelRoleLogger.error(
+            'level_role.assign_failed',
+            'Nie udalo sie nadac roli levelowej - sprawdz uprawnienie MANAGE_ROLES i hierarchie rol bota.',
+            { ...baseContext, roleId: targetRoleId },
             error,
-        });
+        );
     }
 }
 
@@ -185,17 +221,33 @@ async function announceNaturalLevelUp(
         await channel.send({
             content: `<@${awardResult.userId}> wbija level **${awardResult.currentLevel}**!`,
         });
+
+        levelRoleLogger.info(
+            'level_role.level_up_announced',
+            'Wyslano ogloszenie o awansie na nowy level.',
+            {
+                guildId: guild.id,
+                userId: awardResult.userId,
+                level: awardResult.currentLevel,
+                channelId,
+            },
+        );
     } catch (error) {
-        console.warn('Nie udalo sie wyslac ogloszenia level-up:', {
-            guildId: guild.id,
-            userId: awardResult.userId,
-            channelId,
+        levelRoleLogger.warn(
+            'level_role.level_up_announce_failed',
+            'Nie udalo sie wyslac ogloszenia level-up.',
+            {
+                guildId: guild.id,
+                userId: awardResult.userId,
+                level: awardResult.currentLevel,
+                channelId,
+            },
             error,
-        });
+        );
     }
 }
 
-async function applyNaturalLevelUpSideEffects(
+export async function applyNaturalLevelUpSideEffects(
     guild: Guild,
     awardResult: EconomyXpAwardResult,
     mappingsOverride?: EconomyLevelRoleMapping[],
@@ -219,12 +271,16 @@ async function applyNaturalLevelUpSideEffects(
             announceNaturalLevelUp(guild, awardResult),
         ]);
     } catch (error) {
-        console.warn('Nie udalo sie wykonac side-effectow level-up:', {
-            guildId: guild.id,
-            userId: awardResult.userId,
-            currentLevel: awardResult.currentLevel,
+        levelRoleLogger.error(
+            'level_role.side_effects_failed',
+            'Nie udalo sie wykonac side-effectow level-up.',
+            {
+                guildId: guild.id,
+                userId: awardResult.userId,
+                level: awardResult.currentLevel,
+            },
             error,
-        });
+        );
     }
 }
 

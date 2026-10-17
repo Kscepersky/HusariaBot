@@ -70,6 +70,8 @@ vi.mock('../discord-api.js', () => ({
     updateGuildMemberRoles: vi.fn(),
     hasDevRole: vi.fn(() => true),
     hasRequiredRole: vi.fn(() => true),
+    hasG2StaffRole: vi.fn(() => false),
+    resolveDashboardRole: vi.fn(() => 'dev'),
     listGuildScheduledEvents: vi.fn(),
     searchGuildMembers: vi.fn(),
     listImages: vi.fn(),
@@ -145,6 +147,7 @@ import {
     hasDevRole,
     hasRequiredRole,
     removeGuildMemberRole,
+    resolveDashboardRole,
     sendDirectMessage,
     updateGuildMemberRoles,
 } from '../discord-api.js';
@@ -285,6 +288,7 @@ describe('api economy settings routes', () => {
         vi.mocked(getDiscordUserById).mockResolvedValue(null as any);
         vi.mocked(hasDevRole).mockReturnValue(true);
         vi.mocked(hasRequiredRole).mockReturnValue(true);
+        vi.mocked(resolveDashboardRole).mockReturnValue('dev');
         vi.mocked(getStoredLeaderboardProfile).mockResolvedValue(null);
         vi.mocked(upsertStoredLeaderboardProfile).mockResolvedValue(undefined);
         vi.mocked(pruneStoredLeaderboardProfiles).mockResolvedValue(undefined);
@@ -348,6 +352,7 @@ describe('api economy settings routes', () => {
 
     it('zwraca 403 dla logow systemowych gdy uzytkownik utracil role dev', async () => {
         vi.mocked(hasDevRole).mockReturnValue(false);
+        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/logs`);
@@ -646,6 +651,7 @@ describe('api economy settings routes', () => {
     it('zwraca 403 dla recznej mutacji gdy uzytkownik utracil role', async () => {
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
         vi.mocked(hasDevRole).mockReturnValue(false);
+        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/user-mutation`, {
@@ -724,6 +730,7 @@ describe('api economy settings routes', () => {
         const payload = buildConfig();
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
         vi.mocked(hasDevRole).mockReturnValue(false);
+        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/settings`, {
@@ -1138,6 +1145,7 @@ describe('api economy settings routes', () => {
     it('zwraca 403 gdy uzytkownik utracil role dashboardu', async () => {
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
         vi.mocked(hasDevRole).mockReturnValue(false);
+        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/reset-users`, {
@@ -1330,6 +1338,7 @@ describe('api economy settings routes', () => {
     it('zwraca 403 dla leaderboardu gdy uzytkownik utracil role', async () => {
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
         vi.mocked(hasRequiredRole).mockReturnValue(false);
+        vi.mocked(resolveDashboardRole).mockReturnValue('member');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/leaderboard`);
@@ -1357,6 +1366,7 @@ describe('api economy settings routes', () => {
     it('blokuje ustawienia ekonomii dla support role bez roli Dev', async () => {
         vi.mocked(hasRequiredRole).mockReturnValue(true);
         vi.mocked(hasDevRole).mockReturnValue(false);
+        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/settings`);
@@ -1371,6 +1381,7 @@ describe('api economy settings routes', () => {
     it('pozwala support role pobrac leaderboard bez roli Dev', async () => {
         vi.mocked(hasRequiredRole).mockReturnValue(true);
         vi.mocked(hasDevRole).mockReturnValue(false);
+        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
         vi.mocked(getEconomyLeaderboardPage).mockResolvedValue({
             sortBy: 'xp',
             page: 1,
@@ -2389,6 +2400,7 @@ describe('api economy settings routes', () => {
 
     it('zwraca 403 dla /api/images gdy uzytkownik nie ma wymaganej roli dashboardowej', async () => {
         vi.mocked(hasRequiredRole).mockReturnValue(false);
+        vi.mocked(resolveDashboardRole).mockReturnValue('member');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/images`);
@@ -2780,6 +2792,59 @@ describe('api economy settings routes', () => {
                 '910000000000000005',
             );
             expect(vi.mocked(releaseEconomyTimeout)).toHaveBeenCalledTimes(1);
+        });
+    });
+});
+
+// ─── Allowlista sekcji dla roli g2staff ───────────────────────────────────────
+// Ukrywanie zakladek we froncie to kosmetyka. Ten zestaw pilnuje, ze API
+// faktycznie odmawia dostepu do sekcji spoza allowlisty g2staff.
+describe('rola g2staff - egzekwowanie allowlisty sekcji w API', () => {
+    beforeEach(() => {
+        vi.mocked(resolveDashboardRole).mockReturnValue('g2staff');
+        vi.mocked(hasRequiredRole).mockReturnValue(true);
+        vi.mocked(hasDevRole).mockReturnValue(false);
+    });
+
+    const deniedEndpoints: Array<{ section: string; method: string; path: string }> = [
+        { section: 'system-logs', method: 'GET', path: '/api/logs' },
+        { section: 'session-activity', method: 'GET', path: '/api/sessions/activity' },
+        { section: 'economy-settings', method: 'GET', path: '/api/economy/settings' },
+        { section: 'economy-settings', method: 'PATCH', path: '/api/economy/settings' },
+        { section: 'economy-settings', method: 'GET', path: '/api/economy/level-roles' },
+        { section: 'economy-settings', method: 'PUT', path: '/api/economy/level-roles' },
+        { section: 'economy-settings', method: 'GET', path: '/api/economy/export-csv' },
+        { section: 'economy-settings', method: 'POST', path: '/api/economy/reset-users' },
+        { section: 'economy-settings', method: 'POST', path: '/api/economy/user-mutation' },
+        { section: 'timeouts-system', method: 'GET', path: '/api/timeouts' },
+        { section: 'timeouts-system', method: 'POST', path: '/api/timeouts' },
+        { section: 'ticket-history', method: 'GET', path: '/api/tickets/history' },
+        { section: 'ticket-history', method: 'DELETE', path: '/api/tickets/history' },
+    ];
+
+    it.each(deniedEndpoints)('odmawia dostepu do $method $path (sekcja $section)', async ({ method, path }) => {
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}${path}`, {
+                method,
+                headers: { 'content-type': 'application/json' },
+                body: method === 'GET' || method === 'DELETE' ? undefined : JSON.stringify({}),
+            });
+
+            expect(response.status).toBe(403);
+        });
+    });
+
+    const allowedEndpoints: Array<{ section: string; path: string }> = [
+        { section: 'economy-leaderboard', path: '/api/economy/leaderboard' },
+        { section: 'image-library', path: '/api/images' },
+        { section: 'server-stats', path: '/api/stats/server' },
+    ];
+
+    it.each(allowedEndpoints)('przepuszcza GET $path (sekcja $section)', async ({ path }) => {
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}${path}`);
+
+            expect(response.status).not.toBe(403);
         });
     });
 });

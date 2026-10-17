@@ -88,6 +88,8 @@ vi.mock('../event-publisher.js', () => ({
 }));
 
 vi.mock('../discord-api.js', () => ({
+    getGuildMember: vi.fn(async () => ({ roles: [] })),
+    resolveDashboardRole: vi.fn(() => 'dev'),
     editChannelMessage: vi.fn(),
     deleteChannelMessage: vi.fn(),
     deleteGuildScheduledEvent: vi.fn(),
@@ -95,7 +97,13 @@ vi.mock('../discord-api.js', () => ({
 
 import { publishDashboardPost } from '../publish-flow.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
-import { deleteChannelMessage, deleteGuildScheduledEvent, editChannelMessage } from '../discord-api.js';
+import {
+    deleteChannelMessage,
+    deleteGuildScheduledEvent,
+    editChannelMessage,
+    getGuildMember,
+    resolveDashboardRole,
+} from '../discord-api.js';
 import { updateScheduledPost } from '../scheduler/store.js';
 import { scheduledRouter } from './scheduled.js';
 
@@ -200,6 +208,12 @@ describe('scheduled routes - sent posts', () => {
     beforeEach(() => {
         postStore.clear();
         vi.resetAllMocks();
+
+        // requireSectionAccess weryfikuje role na swiezo w Discordzie -
+        // resetAllMocks czysci implementacje z fabryki vi.mock, wiec ustawiamy je ponownie.
+        process.env.GUILD_ID = '123456789012345678';
+        vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as never);
+        vi.mocked(resolveDashboardRole).mockReturnValue('dev');
     });
 
     afterEach(() => {

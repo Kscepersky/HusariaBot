@@ -21,10 +21,12 @@ import {
 import {
     getGuildMember,
     getGuildEmojis,
-    hasRequiredRole,
     hasDevRole,
+    resolveDashboardRole,
     sendDirectMessage,
 } from '../discord-api.js';
+import { requireSectionAccess } from '../middleware/require-section-access.js';
+import { canAccessSection } from '../dashboard-sections.js';
 import { closeOrderTicketViaRest } from '../../shop/order-ticket-closer.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -43,32 +45,11 @@ function parsePositiveIntQuery(value: unknown, fallback: number): number {
     return parsed;
 }
 
-async function requireShopAdminRole(req: Request, res: Response, next: NextFunction): Promise<void> {
-    const guildId = process.env.GUILD_ID;
-    if (!guildId) {
-        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
-        return;
-    }
-
-    const userId = req.session.user?.id;
-    if (!userId) {
-        res.status(401).json({ error: 'Brak autoryzacji.' });
-        return;
-    }
-
-    try {
-        const member = await getGuildMember(userId, guildId);
-        if (!member || !hasRequiredRole(member)) {
-            res.status(403).json({ error: 'Brak uprawnień do zarządzania sklepem.' });
-            return;
-        }
-
-        next();
-    } catch (error) {
-        shopApiLogger.error('SHOP_ROLE_VERIFY_FAILED', 'Nie udało się zweryfikować uprawnień do sklepu.', { userId }, error);
-        res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień użytkownika.' });
-    }
-}
+/**
+ * Dostep do sekcji "shop". Celowo NIE uzywa `hasRequiredRole` - ta funkcja
+ * przepuszcza takze role g2staff, ktora sklepu widziec nie powinna.
+ */
+const requireShopAdminRole = requireSectionAccess('shop');
 
 async function requireShopDevRole(req: Request, res: Response, next: NextFunction): Promise<void> {
     const guildId = process.env.GUILD_ID;
@@ -85,7 +66,7 @@ async function requireShopDevRole(req: Request, res: Response, next: NextFunctio
 
     try {
         const member = await getGuildMember(userId, guildId);
-        if (!member || !hasRequiredRole(member)) {
+        if (!member || !canAccessSection(resolveDashboardRole(member), 'shop')) {
             res.status(403).json({ error: 'Brak uprawnień do zarządzania sklepem.' });
             return;
         }
