@@ -122,6 +122,9 @@
                 <button type="button" class="toolbar-btn" data-prefix="### " title="Nagłówek H3" data-i18n-title="embedCreator.nagowek_h3">H3</button>
                 <button type="button" class="toolbar-btn" data-prefix="> " title="Cytat">❝</button>
                 <button type="button" class="toolbar-btn" data-wrap="`" title="Kod inline" data-i18n-title="embedCreator.kod_inline">&lt;/&gt;</button>
+                <button type="button" class="toolbar-btn toolbar-btn-utility" id="emoji-popover-toggle" title="Wstaw emotkę" data-i18n-title="embedCreator.wstaw_emotke">😀</button>
+                <button type="button" class="toolbar-btn toolbar-btn-utility" id="mention-popover-toggle" title="Wstaw wzmiankę" data-i18n-title="embedCreator.wstaw_wzmianke">@</button>
+                <button type="button" class="toolbar-btn toolbar-btn-utility" id="ansi-popover-toggle" title="Kolory ANSI" data-i18n-title="embedCreator.ansi_kolory">ANSI</button>
               </div>
 
               <div class="editor-popovers">
@@ -130,7 +133,32 @@
                     <span data-i18n="embedCreator.wstaw_emotke">Wstaw emotkę</span>
                     <input type="text" id="emoji-search-input" class="popover-search" placeholder="Szukaj emotki..." data-i18n-placeholder="embedCreator.szukaj_emotki">
                   </div>
+                  <div class="popover-tabs" id="emoji-tabs" role="tablist">
+                    <button type="button" class="popover-tab active" role="tab" data-emoji-tab="server" data-i18n="embedCreator.emotki_serwera">Emotki serwera</button>
+                    <button type="button" class="popover-tab" role="tab" data-emoji-tab="unicode" data-i18n="embedCreator.emotki_standardowe">Standardowe</button>
+                  </div>
+                  <div class="emoji-categories" id="emoji-categories" hidden></div>
                   <div class="emoji-list" id="emoji-list"></div>
+                </div>
+
+                <div class="editor-popover" id="ansi-popover" hidden>
+                  <div class="popover-header">
+                    <span data-i18n="embedCreator.ansi_kolory">Kolory ANSI</span>
+                  </div>
+                  <div class="mention-section">
+                    <span class="mention-label" data-i18n="embedCreator.ansi_kolor_tekstu">Kolor tekstu</span>
+                    <div class="ansi-palette" id="ansi-foreground-colors"></div>
+                  </div>
+                  <div class="mention-section">
+                    <span class="mention-label" data-i18n="embedCreator.ansi_kolor_tla">Kolor tła</span>
+                    <div class="ansi-palette" id="ansi-background-colors"></div>
+                  </div>
+                  <div class="mention-list mention-list-inline">
+                    <button type="button" class="mention-chip" data-ansi-action="bold" data-i18n="embedCreator.ansi_pogrubienie">Pogrubienie</button>
+                    <button type="button" class="mention-chip" data-ansi-action="underline" data-i18n="embedCreator.ansi_podkreslenie">Podkreślenie</button>
+                    <button type="button" class="mention-chip" data-ansi-action="fence" data-i18n="embedCreator.ansi_wstaw_blok">Wstaw blok ANSI</button>
+                  </div>
+                  <p class="popover-hint" data-i18n="embedCreator.ansi_podpowiedz">Zaznacz tekst i wybierz kolor - blok ```ansi dodamy automatycznie. Kolory widać w aplikacji Discord (część starszych klientów mobilnych ich nie wyświetla).</p>
                 </div>
 
                 <div class="editor-popover" id="mention-popover" hidden>
@@ -1285,6 +1313,9 @@
 <script src="/public/js/i18n/pl.js"></script>
 <script src="/public/js/i18n/en.js"></script>
 <script src="/public/js/i18n/runtime.js"></script>
+<script src="/public/js/editor/ansi.js"></script>
+<script src="/public/js/editor/emoji-data.js"></script>
+<script src="/public/js/editor/emoji-search.js"></script>
 <script src="/public/js/app.js"></script>
 </body>
 </html>

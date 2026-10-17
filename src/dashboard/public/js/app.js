@@ -43,6 +43,10 @@ let channels = []
 let roles = []
 let images = []
 let emojis = []
+let emojiTab = 'server'
+let unicodeEmojiGroupKey = null
+let unicodeEmojiIndex = null
+let recentUnicodeEmojis = []
 let mentionChannelResults = []
 let mentionRoleResults = []
 let mentionUserResults = []
@@ -875,6 +879,8 @@ function bindEmbedSectionListeners() {
     }
   })
 
+  recentUnicodeEmojis = window.HusariaEmojiSearch?.loadRecent(window.localStorage) ?? []
+
   const emojiToggle = document.getElementById('emoji-popover-toggle')
   const mentionToggle = document.getElementById('mention-popover-toggle')
   const emojiPopover = document.getElementById('emoji-popover')
@@ -899,11 +905,36 @@ function bindEmbedSectionListeners() {
     togglePopover('mention-popover')
   })
 
+  bindAnsiControls()
+
   emojiPopover?.addEventListener('click', (event) => {
     event.stopPropagation()
+
+    const tabButton = event.target.closest('[data-emoji-tab]')
+    if (tabButton) {
+      emojiTab = tabButton.dataset.emojiTab === 'unicode' ? 'unicode' : 'server'
+      if (emojiSearchInput) emojiSearchInput.value = ''
+      renderEmojiList('')
+      return
+    }
+
+    const groupButton = event.target.closest('[data-emoji-group]')
+    if (groupButton) {
+      unicodeEmojiGroupKey = groupButton.dataset.emojiGroup ?? null
+      renderEmojiList(emojiSearchInput?.value ?? '')
+      return
+    }
+
     const button = event.target.closest('[data-token]')
     const token = button?.dataset.token
     if (!token) return
+
+    // Emotki unicode wstawiamy bez spacji i zostawiamy popover otwarty (często wstawia się kilka).
+    if (button.dataset.raw === '1') {
+      insertToken(token, { padded: false })
+      rememberUnicodeEmoji(token)
+      return
+    }
 
     insertToken(token)
     closeAllPopovers()
@@ -5092,7 +5123,7 @@ async function loadEmojis() {
   }
 }
 
-function renderEmojiList(filterText) {
+function renderServerEmojiList(filterText) {
   const list = document.getElementById('emoji-list')
   if (!list) return
 
@@ -5123,6 +5154,98 @@ function renderEmojiList(filterText) {
         <span>${escapeHtml(emojiName)}</span>
       </button>`
   }).join('')
+}
+
+function renderEmojiList(filterText) {
+  const tabs = document.getElementById('emoji-tabs')
+  tabs?.querySelectorAll('[data-emoji-tab]').forEach((tabButton) => {
+    tabButton.classList.toggle('active', tabButton.dataset.emojiTab === emojiTab)
+  })
+
+  if (emojiTab === 'unicode') {
+    renderUnicodeEmojiList(filterText)
+    return
+  }
+
+  const categories = document.getElementById('emoji-categories')
+  if (categories) categories.hidden = true
+  renderServerEmojiList(filterText)
+}
+
+function getUnicodeEmojiLanguage() {
+  return window.I18n?.getLanguage?.() === 'en' ? 'en' : 'pl'
+}
+
+function buildUnicodeEmojiButton(item) {
+  const emoji = item[window.HusariaEmojiSearch.EMOJI_INDEX]
+  const name = window.HusariaEmojiSearch.displayName(item, getUnicodeEmojiLanguage())
+
+  return `<button type="button" class="emoji-chip emoji-chip-unicode" data-token="${escapeHtml(emoji)}" data-raw="1" title="${escapeHtml(name)}">${escapeHtml(emoji)}</button>`
+}
+
+function renderUnicodeEmojiCategories(groups) {
+  const categories = document.getElementById('emoji-categories')
+  if (!categories) return
+
+  const language = getUnicodeEmojiLanguage()
+  const tabs = groups.map((group) => {
+    const icon = group.items[0]?.[window.HusariaEmojiSearch.EMOJI_INDEX] ?? '•'
+    const activeClass = group.key === unicodeEmojiGroupKey ? ' active' : ''
+    const label = window.HusariaEmojiSearch.groupLabel(group, language)
+
+    return `<button type="button" class="emoji-category-btn${activeClass}" data-emoji-group="${escapeHtml(group.key)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${escapeHtml(icon)}</button>`
+  })
+
+  categories.innerHTML = tabs.join('')
+  categories.hidden = false
+}
+
+function renderUnicodeEmojiList(filterText) {
+  const list = document.getElementById('emoji-list')
+  if (!list) return
+
+  const groups = Array.isArray(window.HusariaUnicodeEmojis) ? window.HusariaUnicodeEmojis : []
+  if (groups.length === 0) {
+    list.innerHTML = `<p class="popover-empty">${t('app.ui_brak_emotek')}</p>`
+    return
+  }
+
+  if (!unicodeEmojiIndex) {
+    unicodeEmojiIndex = window.HusariaEmojiSearch.buildIndex(groups)
+  }
+
+  const query = String(filterText ?? '').trim()
+  if (query) {
+    const categories = document.getElementById('emoji-categories')
+    if (categories) categories.hidden = true
+
+    const matches = window.HusariaEmojiSearch.search(unicodeEmojiIndex, query)
+    list.innerHTML = matches.length > 0
+      ? matches.map(buildUnicodeEmojiButton).join('')
+      : `<p class="popover-empty">${t('app.ui_brak_emotek')}</p>`
+    return
+  }
+
+  if (!unicodeEmojiGroupKey) {
+    unicodeEmojiGroupKey = groups[0].key
+  }
+
+  renderUnicodeEmojiCategories(groups)
+
+  const activeGroup = groups.find((group) => group.key === unicodeEmojiGroupKey) ?? groups[0]
+  const recentMarkup = recentUnicodeEmojis.length > 0
+    ? `<div class="emoji-recent"><span class="mention-label">${t('embedCreator.ostatnio_uzywane')}</span><div class="emoji-recent-list">${recentUnicodeEmojis
+      .map((emoji) => `<button type="button" class="emoji-chip emoji-chip-unicode" data-token="${escapeHtml(emoji)}" data-raw="1">${escapeHtml(emoji)}</button>`)
+      .join('')}</div></div>`
+    : ''
+
+  list.innerHTML = `${recentMarkup}${activeGroup.items.map(buildUnicodeEmojiButton).join('')}`
+}
+
+function rememberUnicodeEmoji(emoji) {
+  recentUnicodeEmojis = window.HusariaEmojiSearch.pushRecent(recentUnicodeEmojis, emoji)
+  window.HusariaEmojiSearch.saveRecent(window.localStorage, recentUnicodeEmojis)
+  renderEmojiList(document.getElementById('emoji-search-input')?.value ?? '')
 }
 
 function renderMentionChannelResults(results, queryText = '') {
@@ -6102,6 +6225,11 @@ function closeAllPopovers() {
   if (mentionPopover) {
     mentionPopover.hidden = true
   }
+
+  const ansiPopover = document.getElementById('ansi-popover')
+  if (ansiPopover) {
+    ansiPopover.hidden = true
+  }
 }
 
 function togglePopover(popoverId) {
@@ -6113,7 +6241,7 @@ function togglePopover(popoverId) {
   popover.hidden = !shouldOpen
 }
 
-function insertToken(token) {
+function insertToken(token, { padded = true } = {}) {
   const target = getActiveEditor()
   if (!target) {
     showToast('Najpierw kliknij pole tekstowe edytora.', 'info')
@@ -6125,7 +6253,7 @@ function insertToken(token) {
   const end = target.selectionEnd ?? value.length
 
   const rightPart = value.slice(end)
-  const needsTrailingSpace = rightPart.length === 0 || !/^\s/.test(rightPart)
+  const needsTrailingSpace = padded && (rightPart.length === 0 || !/^\s/.test(rightPart))
   const insertion = `${token}${needsTrailingSpace ? ' ' : ''}`
 
   target.value = `${value.slice(0, start)}${insertion}${value.slice(end)}`
@@ -6155,6 +6283,80 @@ function getActiveEditor() {
   }
 
   return fallback
+}
+
+function applyAnsiCodes(codes) {
+  const target = getActiveEditor()
+  if (!target) {
+    showToast('Najpierw kliknij pole tekstowe edytora.', 'info')
+    return
+  }
+
+  const value = target.value ?? ''
+  const start = target.selectionStart ?? value.length
+  const end = target.selectionEnd ?? value.length
+  const result = window.HusariaAnsi.applyToSelection(value, start, end, codes)
+
+  target.value = result.value
+  target.setSelectionRange(result.selectionStart, result.selectionEnd)
+  target.dispatchEvent(new Event('input', { bubbles: true }))
+  target.focus()
+}
+
+function insertAnsiFence() {
+  const target = getActiveEditor()
+  if (!target) {
+    showToast('Najpierw kliknij pole tekstowe edytora.', 'info')
+    return
+  }
+
+  const value = target.value ?? ''
+  const start = target.selectionStart ?? value.length
+  const end = target.selectionEnd ?? value.length
+  const result = window.HusariaAnsi.insertFence(value, start, end)
+
+  target.value = result.value
+  target.setSelectionRange(result.selectionStart, result.selectionEnd)
+  target.dispatchEvent(new Event('input', { bubbles: true }))
+  target.focus()
+}
+
+function renderAnsiPalette() {
+  const foreground = document.getElementById('ansi-foreground-colors')
+  const background = document.getElementById('ansi-background-colors')
+  if (!foreground || !background) return
+
+  const buildSwatch = (entry, kind) => `<button type="button" class="ansi-swatch" data-ansi-code="${entry.code}" style="background-color:${entry.css}" title="${escapeHtml(t(`embedCreator.ansi_kolor_${kind}_${entry.key}`))}" aria-label="${escapeHtml(t(`embedCreator.ansi_kolor_${kind}_${entry.key}`))}"></button>`
+
+  foreground.innerHTML = window.HusariaAnsi.FOREGROUND_COLORS.map((entry) => buildSwatch(entry, 'fg')).join('')
+  background.innerHTML = window.HusariaAnsi.BACKGROUND_COLORS.map((entry) => buildSwatch(entry, 'bg')).join('')
+}
+
+function bindAnsiControls() {
+  const ansiToggle = document.getElementById('ansi-popover-toggle')
+  const ansiPopover = document.getElementById('ansi-popover')
+
+  renderAnsiPalette()
+
+  ansiToggle?.addEventListener('click', (event) => {
+    event.stopPropagation()
+    togglePopover('ansi-popover')
+  })
+
+  ansiPopover?.addEventListener('click', (event) => {
+    event.stopPropagation()
+
+    const swatch = event.target.closest('[data-ansi-code]')
+    if (swatch) {
+      applyAnsiCodes([Number(swatch.dataset.ansiCode)])
+      return
+    }
+
+    const action = event.target.closest('[data-ansi-action]')?.dataset.ansiAction
+    if (action === 'bold') applyAnsiCodes([window.HusariaAnsi.BOLD_CODE])
+    if (action === 'underline') applyAnsiCodes([window.HusariaAnsi.UNDERLINE_CODE])
+    if (action === 'fence') insertAnsiFence()
+  })
 }
 
 function wrapSelection(token) {
@@ -6214,7 +6416,11 @@ function renderMarkdown(text) {
   const codeBlocks = []
 
   let html = escaped.replace(/```([\s\S]*?)```/g, (_match, code) => {
-    const index = codeBlocks.push(`<pre class="md-codeblock">${code}</pre>`) - 1
+    const ansiBlock = /^ansi\r?\n([\s\S]*)$/.exec(code)
+    const block = ansiBlock
+      ? `<pre class="md-codeblock md-codeblock-ansi">${window.HusariaAnsi.toHtml(ansiBlock[1])}</pre>`
+      : `<pre class="md-codeblock">${code}</pre>`
+    const index = codeBlocks.push(block) - 1
     return `@@CODEBLOCK_${index}@@`
   })
 

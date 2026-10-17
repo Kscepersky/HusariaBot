@@ -2068,3 +2068,82 @@ input[name="colorName"] { display: none }
     flex-direction: column;
   }
 }
+
+/* ─── Emotki standardowe i ANSI w kreatorze ─────────────────────────── */
+.popover-tabs,
+.emoji-categories,
+.ansi-palette,
+.emoji-recent-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.popover-tab,
+.emoji-category-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 10px;
+  transition: var(--transition);
+}
+
+.popover-tab:hover,
+.emoji-category-btn:hover,
+.popover-tab.active,
+.emoji-category-btn.active {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: rgba(220,20,60,.12);
+}
+
+.emoji-category-btn {
+  min-width: 34px;
+  font-size: 16px;
+  padding: 4px 6px;
+}
+
+.emoji-chip-unicode {
+  font-size: 20px;
+  line-height: 1;
+  padding: 6px;
+  min-width: 36px;
+  justify-content: center;
+}
+
+.emoji-recent {
+  flex-basis: 100%;
+  display: grid;
+  gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ansi-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--border-hover);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.ansi-swatch:hover {
+  border-color: var(--text-primary);
+  transform: scale(1.08);
+}
+
+.popover-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.md-codeblock-ansi {
+  background: #2b2d31;
+}
