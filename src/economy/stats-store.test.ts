@@ -281,7 +281,7 @@ describe('getMessageSummary', () => {
 // ─── getMessageTimeSeries ──────────────────────────────────────────────────────
 
 describe('getMessageTimeSeries', () => {
-    it('wypełnia brakujące daty zerami', async () => {
+    it('brakujące daty przenoszą ostatnią znaną liczbę członków (joins/leaves = 0)', async () => {
         await withTempDb(async () => {
             await seedUserStats([
                 { guildId: GUILD, userId: 'u1', date: D1, messages: 5, voiceMinutes: 0 },
@@ -469,7 +469,7 @@ describe('getMemberTimeSeries', () => {
             const ts = await getMemberTimeSeries(GUILD, D1, D3);
             expect(ts).toHaveLength(3);
             expect(ts[0]).toEqual({ date: D1, memberCount: 100, joins: 0, leaves: 0 });
-            expect(ts[1]).toEqual({ date: D2, memberCount: 0, joins: 0, leaves: 0 });
+            expect(ts[1]).toEqual({ date: D2, memberCount: 100, joins: 0, leaves: 0 });
             expect(ts[2]).toEqual({ date: D3, memberCount: 105, joins: 0, leaves: 0 });
         });
     });
@@ -507,13 +507,13 @@ describe('getMemberSummary', () => {
         });
     });
 
-    it('latestMemberCount = MAX member_count w zakresie', async () => {
+    it('latestMemberCount = najnowsza niezerowa liczba członków', async () => {
         await withTempDb(async () => {
             await recordMemberSnapshot(GUILD, 90, TS_D1);
             await recordMemberSnapshot(GUILD, 95, TS_D2);
             await recordMemberSnapshot(GUILD, 88, TS_D3);
             const result = await getMemberSummary(GUILD, D1, D3);
-            expect(result.latestMemberCount).toBe(95);
+            expect(result.latestMemberCount).toBe(88);
         });
     });
 });

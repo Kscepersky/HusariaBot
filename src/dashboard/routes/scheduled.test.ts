@@ -88,6 +88,7 @@ vi.mock('../event-publisher.js', () => ({
 }));
 
 vi.mock('../discord-api.js', () => ({
+    getGuildTextChannels: vi.fn(async () => [{ id: '123456789012345678' }]),
     getGuildMember: vi.fn(async () => ({ roles: [] })),
     resolveDashboardRole: vi.fn(() => 'dev'),
     editChannelMessage: vi.fn(),
@@ -105,6 +106,7 @@ import {
     resolveDashboardRole,
 } from '../discord-api.js';
 import { updateScheduledPost } from '../scheduler/store.js';
+import { getGuildTextChannels } from '../discord-api.js';
 import { scheduledRouter } from './scheduled.js';
 
 function buildPayload(overrides: Partial<EmbedFormData> = {}): EmbedFormData {
@@ -638,6 +640,134 @@ describe('scheduled routes - sent posts', () => {
             expect(response.status).toBe(200);
             expect(body.success).toBe(true);
             expect(postStore.has(existingPost.id)).toBe(false);
+        });
+    });
+});
+
+describe('scheduled routes - pending posts with stored upload', () => {
+    beforeEach(() => {
+        postStore.clear();
+        vi.resetAllMocks();
+
+        process.env.GUILD_ID = '123456789012345678';
+        vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as never);
+        vi.mocked(resolveDashboardRole).mockReturnValue('dev');
+    });
+
+    afterEach(() => {
+        postStore.clear();
+    });
+
+    function buildPendingPost(payloadOverrides: Partial<EmbedFormData> = {}): ScheduledPost {
+        return buildSentPost({
+            id: 'post-pending',
+            status: 'pending',
+            scheduledFor: Date.now() + 3_600_000,
+            sentAt: undefined,
+            messageId: undefined,
+            pingMessageId: undefined,
+            imageMessageId: undefined,
+            payload: buildPayload({ eventDraft: undefined, ...payloadOverrides }),
+        });
+    }
+
+    async function patchPending(baseUrl: string, id: string, payload: EmbedFormData): Promise<globalThis.Response> {
+        return fetch(`${baseUrl}/api/scheduled/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, scheduleAtLocal: '2099-05-01T20:00' }),
+        });
+    }
+
+    it('zachowuje zapisany upload gdy edycja zaplanowanego posta wysyla placeholder [stored]', async () => {
+        const existing = buildPendingPost({
+            imageMode: 'upload',
+            uploadFileName: 'grafika.png',
+            uploadMimeType: 'image/png',
+            uploadBase64: 'REAL_BASE64_DATA',
+        });
+        postStore.set(existing.id, clonePost(existing));
+
+        await withServer(async (baseUrl) => {
+            const response = await patchPending(baseUrl, existing.id, buildPayload({
+                eventDraft: undefined,
+                imageMode: 'upload',
+                uploadFileName: 'grafika.png',
+                uploadMimeType: 'image/png',
+                uploadBase64: '[stored]',
+            }));
+
+            expect(response.status).toBe(200);
+            expect(postStore.get(existing.id)?.payload.uploadBase64).toBe('REAL_BASE64_DATA');
+        });
+    });
+
+    it('odrzuca placeholder [stored] gdy zaplanowany post nie ma zapisanego uploadu', async () => {
+        const existing = buildPendingPost();
+        postStore.set(existing.id, clonePost(existing));
+
+        await withServer(async (baseUrl) => {
+            const response = await patchPending(baseUrl, existing.id, buildPayload({
+                eventDraft: undefined,
+                imageMode: 'upload',
+                uploadFileName: 'grafika.png',
+                uploadMimeType: 'image/png',
+                uploadBase64: '[stored]',
+            }));
+
+            expect(response.status).toBe(400);
+            expect(postStore.get(existing.id)?.payload.uploadBase64).toBe('');
+        });
+    });
+
+    it('odrzuca placeholder [stored] przy tworzeniu nowego zaplanowanego posta', async () => {
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ...buildPayload({
+                        eventDraft: undefined,
+                        imageMode: 'upload',
+                        uploadFileName: 'grafika.png',
+                        uploadMimeType: 'image/png',
+                        uploadBase64: '[stored]',
+                    }),
+                    scheduleAtLocal: '2099-05-01T20:00',
+                }),
+            });
+
+            expect(response.status).toBe(400);
+            expect(postStore.size).toBe(0);
+        });
+    });
+
+    it('odrzuca kanał, którego nie ma na serwerze', async () => {
+        vi.mocked(getGuildTextChannels).mockResolvedValue([{ id: '999999999999999999' }] as never);
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...buildPayload({ eventDraft: undefined }), scheduleAtLocal: '2099-05-01T20:00' }),
+            });
+
+            expect(response.status).toBe(400);
+            expect(postStore.size).toBe(0);
+        });
+    });
+
+    it('zwraca 502, gdy nie da się pobrać listy kanałów', async () => {
+        vi.mocked(getGuildTextChannels).mockRejectedValue(new Error('discord down'));
+
+        await withServer(async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/api/scheduled`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...buildPayload({ eventDraft: undefined }), scheduleAtLocal: '2099-05-01T20:00' }),
+            });
+
+            expect(response.status).toBe(502);
         });
     });
 });

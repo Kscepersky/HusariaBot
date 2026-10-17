@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { writeFileAtomic } from '../utils/atomic-file.js';
 import { dirname, join } from 'node:path';
 
 interface TicketCounterData {
@@ -53,7 +54,7 @@ export async function getNextTicketNumber(filePath: string = COUNTER_FILE_PATH):
         const nextValue = data.lastNumber + 1;
 
         const updatedData: TicketCounterData = { lastNumber: nextValue };
-        await writeFile(filePath, JSON.stringify(updatedData, null, 2), 'utf8');
+        await writeFileAtomic(filePath, JSON.stringify(updatedData, null, 2));
         return nextValue;
     });
 

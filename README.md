@@ -50,7 +50,7 @@ Every subsystem is backed by structured JSON logging with per-scope loggers, Dis
 A fully configurable engagement system tracking XP, levels, and a server currency (Cebuliony).
 
 - **XP & Leveling** — Members earn XP by sending messages (with per-user cooldown) and spending time in voice channels. Two leveling modes (`progressive` exponential, `linear`) and two curve formulas (`default`, `formula_v2`) can be tuned per guild without a redeploy.
-- **Cebuliony (coins)** — Server currency awarded on level-up, daily claim, and watchparty participation.
+- **Cebuliony (coins)** — Server currency awarded on level-up and daily claim, spendable in the shop.
 - **Daily Rewards with Streak** — Configurable coin range, streak multiplier, max streak days, and grace window. Streak is preserved if the member claims within the grace period after missing a day.
 - **Level Cards** — Canvas-generated image cards showing avatar, level, global rank, and XP progress bar. Rendered and returned as a Discord attachment.
 - **Leaderboard** — Paginated ranking by XP or coins with Discord avatars, member display names, and personal rank highlighting.
@@ -58,13 +58,11 @@ A fully configurable engagement system tracking XP, levels, and a server currenc
 - **Bulk CSV Import** — Import economy snapshots directly: `userId,level,totalxp,messages,voiceMinutes`. Validates each row with clear line-numbered error messages.
 - **Staff Protection** — Configurable set of staff roles exempt from specific economy mechanics (e.g. XP exclusion zones).
 
-### Watchparty
+### Shop
 
-- Automatically creates a dedicated voice channel when a watchparty-enabled post is published or scheduled.
-- The channel is created in the same category as temporary voice channels (`VOICE_CATEGORY_ID`), with a fallback to `WATCHPARTY_CATEGORY_ID` if configured separately.
-- Channel is created open (no lock icon) — all members can join immediately, regardless of whether the watchparty window has started.
-- Awards an XP multiplier and a per-minute coin bonus to all active participants.
-- Full lifecycle management: channel opens at the scheduled time, closes automatically when empty or when the event ends. Includes rollback on persistence failure.
+- Members browse items with `/sklep`, buy with `/kup`, and track purchases with `/zamowienia`.
+- Each purchase opens a private order ticket; staff complete or cancel the order from the dashboard, and the ticket is closed automatically.
+- Items support price, stock, and a per-user purchase limit. Everything is managed from the dashboard Shop section.
 
 ### Temporary Voice Channels
 
@@ -173,8 +171,7 @@ SERVER_MUTE_ROLE_ID=        # Role assigned by /mute — must be below bot's hig
 # ── Channel & Category IDs ────────────────────────────────────────────────────
 SUPPORT_CATEGORY_ID=           # Category where ticket channels are created
 VOICE_TRIGGER_CHANNEL_ID=      # Joining this channel creates a private voice channel
-VOICE_CATEGORY_ID=             # Category for temporary private voice channels (also used by watchparty)
-WATCHPARTY_CATEGORY_ID=        # Optional override — watchparty category (defaults to VOICE_CATEGORY_ID)
+VOICE_CATEGORY_ID=             # Category for temporary private voice channels
 LEVEL_UP_ANNOUNCE_CHANNEL_ID=  # Text channel for level-up announcements (optional)
 
 # ── Dashboard OAuth2 ──────────────────────────────────────────────────────────
@@ -222,6 +219,9 @@ BOT_DEV_LOGS=1
 | `/stankonta` | Display your current coin balance |
 | `/level` | Show your level card — XP, global rank, and progress bar |
 | `/leaderboard-xp` | Server leaderboard ranked by XP and level |
+| `/sklep` | Browse the items available in the shop |
+| `/kup` | Buy an item from the shop |
+| `/zamowienia` | Check your shop orders |
 
 ### Administration Only
 
@@ -237,6 +237,7 @@ BOT_DEV_LOGS=1
 | `/mute` | Assign a timed mute via the Server Mute role |
 | `/ticketyconfig` | Publish the ticket panel embed to a specified channel |
 | `/sendimg` | Send an image from the `/img` library to a channel |
+| `/dashboard` | Send the admin dashboard link |
 | `/ping` | Check bot latency and Discord gateway connection status |
 
 ---
@@ -254,12 +255,15 @@ A full-featured publishing tool that targets any text or announcement channel on
 - **Embed mode** — Build a rich Discord embed: title, description, color, author, footer, and image field. Live Discord-style preview rendered in the browser before sending.
 - **Plain text mode** — Standard Discord message with full markdown and user/role mention support.
 - **Role ping** — Optional role mention sent as a separate message immediately before the post. The bot validates that the role still exists before sending.
-- **Image attach** — Attach from the server image library or upload a file (PNG, JPG, GIF, WebP — max 20 MB). SVG uploads are rejected by a multi-layer content security check.
+- **Image attach** — Attach from the server image library or upload a file (PNG, JPG, GIF, WebP — max 20 MB). SVG uploads go through a strict allowlist check and are served from `/img` with a sandboxing CSP.
+- **ANSI colors** — The editor toolbar has an **ANSI** picker: select text, pick a foreground/background color, bold or underline, and the creator wraps it in a Discord ```ansi block automatically. The live preview renders the same colors. The server only accepts the SGR codes Discord understands (reset, bold, underline, 30–37, 40–47) and strips every other control sequence. Note: some older mobile Discord clients do not render ANSI.
+- **Emoji picker** — Two tabs: the server's custom emojis (fetched live) and the standard Unicode emoji set, searchable in Polish and English, grouped by category, with a "recently used" row. The Unicode data is bundled locally (`public/js/editor/emoji-data.js`, generated from [emojibase-data](https://github.com/milesj/emojibase), MIT), so the dashboard's strict CSP needs no external scripts.
 - **Live preview** — WYSIWYG preview that re-renders on every keystroke.
 
 ### Scheduler
 
 - Schedule posts for any future date and time.
+- Editing a scheduled post preserves its uploaded image; the stored image is never exposed to the browser, only a placeholder that the server resolves on save.
 - Manage the queue: edit, cancel, or immediately publish any pending post.
 - Persistence survives process restarts — the scheduler re-registers all pending timers on startup using stored metadata.
 - Each post card shows the publisher's Discord avatar and name (captured at scheduling time).
@@ -270,7 +274,7 @@ A full-featured publishing tool that targets any text or announcement channel on
 - Edit and resend any historical post directly from the history view.
 - Publisher and last editor are shown with Discord avatar and name on each card.
 - User mentions (`<@userId>`) are resolved to real display names via a prefetch from the Discord API before rendering.
-- Associated Discord event and watchparty channel statuses shown inline.
+- Associated Discord event status shown inline.
 
 ![sent_post](sent_posts.png)
 
@@ -321,13 +325,15 @@ A full-featured analytics panel with tabbed sections and per-tab date filtering:
 ### Discord Events
 
 - Create native Discord Scheduled Events directly from the post creator.
-- Optionally link an event to a watchparty channel — the bot manages the channel lifecycle automatically.
 
-### Watchparty Management
+### Shop Management
 
-- Create watchparty voice channels linked to scheduled posts from the dashboard.
-- Full lifecycle view: pending → open → closed, with last error and channel ID shown.
-- Automatic channel rollback if persistence fails after channel creation.
+- Create, edit, and deactivate shop items; track stock and per-user limits.
+- Review orders, complete or cancel them (with a DM to the buyer), and clean up order history.
+
+### Languages
+
+The dashboard UI is available in Polish and English. The language can be switched from the dashboard UI and the choice is persisted.
 
 ### System Logs (Dev only)
 
@@ -369,6 +375,7 @@ src/
 │   └── ...
 │
 ├── voice-channels/               # Temporary private voice channel lifecycle
+├── shop/                         # Shop repository, UI, order tickets
 ├── tickets/                      # Ticket panel, history store, monotonic counter
 ├── timeouts/                     # Timed mute with SQLite-persisted auto-release
 │
@@ -387,11 +394,17 @@ src/
     ├── publish-flow.ts           # Core publish logic: ping → embed/text → image
     ├── embed-handlers.ts         # Embed payload validation and construction
     ├── event-publisher.ts        # Discord Scheduled Event creation
-    ├── watchparty-publisher.ts   # Watchparty channel creation and teardown
-    ├── watchparty-lifecycle.ts   # Watchparty open/close lifecycle management
+    ├── image-upload.ts           # Shared upload validation (MIME sniffing, SVG safety)
+    ├── channel-guard.ts          # Verifies publish targets belong to the configured guild
+    ├── payload-sanitizer.ts      # Request payload sanitizing, ANSI whitelist, stored-upload handling
     │
     ├── routes/
-    │   ├── api.ts                # All REST endpoints (~2 700 lines, 60+ routes)
+    │   ├── api.ts                # Core REST endpoints (channels, roles, timeouts, events, embed)
+    │   ├── api.economy.ts        # Economy settings, CSV import/export, leaderboard
+    │   ├── api.images.ts         # Image library endpoints
+    │   ├── api.stats.ts          # Server statistics endpoints
+    │   ├── api.shop.ts           # Shop endpoints
+    │   ├── leaderboard-profiles.ts # Leaderboard profile enrichment + caches
     │   ├── auth.ts               # Discord OAuth2 login/logout — records session events
     │   └── scheduled.ts          # Scheduled post CRUD endpoints
     │
@@ -409,7 +422,10 @@ src/
     ├── views/                    # Server-rendered HTML (dashboard.html, login.html)
     ├── public/
     │   ├── css/style.css         # Dashboard stylesheet
-    │   └── js/app.js             # Dashboard frontend — vanilla JS SPA, no bundler
+    │   └── js/
+    │       ├── app.js            # Dashboard frontend — vanilla JS SPA, no bundler
+    │       ├── editor/           # ANSI helpers, emoji data + search (pure, unit-tested)
+    │       └── i18n/             # PL/EN catalogs and runtime
     └── g2-matches/               # PandaScore API client, response cache, types
 ```
 
@@ -442,6 +458,8 @@ Test coverage includes:
 - **Voice channel module** — store, flow, and service layer tested in isolation
 - **Dashboard embed handlers** — payload building, validation edge cases
 - **PandaScore client** — API response parsing and error handling
+- **Scheduler routes** — including the regression test for editing scheduled posts that carry an uploaded image
+- **Editor modules** — ANSI rendering/sanitizing and emoji search
 
 ---
 

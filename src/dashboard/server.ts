@@ -41,6 +41,8 @@ const REQUIRED_ENV = [
 ];
 
 const DASHBOARD_BODY_LIMIT = '32mb';
+const DEFAULT_BODY_LIMIT = '256kb';
+const LARGE_BODY_PATHS = ['/api/images/upload', '/api/embed', '/api/scheduled', '/api/economy/import-csv'];
 const DEFAULT_SESSION_TTL_HOURS = 24;
 const dashboardLogger = createLogger('dashboard:server');
 
@@ -151,7 +153,7 @@ export function createDashboardApp() {
         res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
         res.setHeader(
             'Content-Security-Policy',
-            "default-src 'self'; img-src 'self' https://cdn.discordapp.com data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+            "default-src 'self'; img-src 'self' https://cdn.discordapp.com data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
         );
         next();
     });
@@ -196,9 +198,6 @@ export function createDashboardApp() {
 
     app.use(globalRateLimiter);
 
-    app.use(express.json({ limit: DASHBOARD_BODY_LIMIT }));
-    app.use(express.urlencoded({ extended: true, limit: DASHBOARD_BODY_LIMIT }));
-
     app.use(session({
         secret:            requireEnv('DASHBOARD_SESSION_SECRET'),
         store:             sessionStore,
@@ -212,8 +211,21 @@ export function createDashboardApp() {
         },
     }));
 
+    // Duze body (upload grafik w base64) tylko dla zalogowanych i tylko na trasach, ktore tego potrzebuja.
+    // Reszta dostaje maly limit, wiec anonimowy klient nie zmusi serwera do parsowania 32 MB.
+    const largeJsonParser = express.json({ limit: DASHBOARD_BODY_LIMIT });
+    app.use(LARGE_BODY_PATHS, (req, res, next) => {
+        if (req.session.user) {
+            largeJsonParser(req, res, next);
+            return;
+        }
+        next();
+    });
+    app.use(express.json({ limit: DEFAULT_BODY_LIMIT }));
+    app.use(express.urlencoded({ extended: false, limit: DEFAULT_BODY_LIMIT }));
+
     app.use(ensureCsrfTokenForSession);
-    app.use('/auth/discord/callback', authRateLimiter);
+    app.use(['/auth/discord', '/auth/killswitch'], authRateLimiter);
     app.use('/api', mutationRateLimiter);
     app.use(requireCsrfToken);
 
@@ -228,6 +240,13 @@ export function createDashboardApp() {
     });
 
     app.use('/public', express.static(join(__dirname, 'public')));
+    app.use('/img', (req, res, next) => {
+        // SVG z biblioteki mieszka na origin dashboardu - izolujemy go, zeby nie mogl byc stroną z formularzem/skryptem.
+        if (req.path.toLowerCase().endsWith('.svg')) {
+            res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; style-src 'unsafe-inline'");
+        }
+        next();
+    });
     app.use('/img',    express.static(join(__dirname, '..', '..', 'img')));
 
     app.use('/auth', authRouter);

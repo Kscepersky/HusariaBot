@@ -69,4 +69,38 @@ export function requireSectionAccess(section: DashboardSection): RequestHandler 
     };
 }
 
+/**
+ * Przepuszcza tylko role `dev`. Dla operacji destrukcyjnych lub konfiguracyjnych,
+ * do ktorych sekcja (np. server-stats) jest dostepna szerszej grupie tylko do odczytu.
+ */
+export function requireDevRole(): RequestHandler {
+    return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        const userId = req.session.user?.id;
+        if (!userId) {
+            res.status(401).json({ error: 'Brak autoryzacji.' });
+            return;
+        }
+
+        try {
+            const role = await resolveCurrentDashboardRole(req);
+
+            if (role !== 'dev') {
+                accessLogger.warn('DASHBOARD_DEV_ONLY_DENIED', 'Odmowa dostepu do operacji tylko dla roli dev.', {
+                    actorUserId: userId,
+                    actorUserRole: role ?? 'unknown',
+                    path: req.originalUrl,
+                    method: req.method,
+                });
+                res.status(403).json({ error: 'Brak uprawnień do wykonania tej operacji.' });
+                return;
+            }
+
+            next();
+        } catch (error) {
+            accessLogger.error('DASHBOARD_DEV_ONLY_VERIFY_FAILED', 'Nie udalo sie zweryfikowac roli dev.', { actorUserId: userId }, error);
+            res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień użytkownika.' });
+        }
+    };
+}
+
 export { resolveAllowedSections };

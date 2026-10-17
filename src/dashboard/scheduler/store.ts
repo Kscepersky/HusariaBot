@@ -1,8 +1,11 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { backupCorruptFile, writeFileAtomic } from '../../utils/atomic-file.js';
+import { createLogger } from '../../utils/logger.js';
 import { dirname, join } from 'node:path';
 import type { ScheduledPost, ScheduledPostStatus, ScheduledPostStoreData } from './types.js';
 
 const STORE_FILE_PATH = join(process.cwd(), 'data', 'scheduled-posts.json');
+const storeLogger = createLogger('dashboard:scheduler-store');
 let storeLock = Promise.resolve();
 
 function clonePayload<T extends ScheduledPost['payload']>(payload: T): T {
@@ -60,11 +63,20 @@ async function ensureStoreFile(filePath: string): Promise<void> {
 async function loadStore(filePath: string): Promise<ScheduledPostStoreData> {
     await ensureStoreFile(filePath);
     const content = await readFile(filePath, 'utf8');
+
+    try {
+        JSON.parse(content);
+    } catch (parseError) {
+        // Nie wolno po cichu uznac uszkodzonego pliku za pusty - kolejny zapis skasowalby historie.
+        const backupPath = await backupCorruptFile(filePath);
+        storeLogger.error('SCHEDULED_STORE_CORRUPT', 'Plik zaplanowanych postow jest uszkodzony.', { filePath, backupPath }, parseError);
+    }
+
     return toScheduledPostStoreData(content);
 }
 
 async function saveStore(store: ScheduledPostStoreData, filePath: string): Promise<void> {
-    await writeFile(filePath, JSON.stringify(store, null, 2), 'utf8');
+    await writeFileAtomic(filePath, JSON.stringify(store, null, 2));
 }
 
 function withStoreLock<T>(work: () => Promise<T>): Promise<T> {

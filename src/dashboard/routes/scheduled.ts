@@ -7,10 +7,18 @@ import {
     buildEmbedJson,
     validateEmbedForm,
     type EmbedFormData,
-    type EventDraftFormData,
-    type MatchInfoSnapshot,
 } from '../embed-handlers.js';
+import {
+    STORED_UPLOAD_ERROR,
+    STORED_UPLOAD_PLACEHOLDER,
+    areEventDraftsEqual,
+    normalizeTrimmedString,
+    resolveStoredUpload,
+    sanitizeEmbedPayload,
+} from '../payload-sanitizer.js';
+import { verifyTargetChannel } from '../channel-guard.js';
 import { tryCreateDiscordEventFromPayload } from '../event-publisher.js';
+import { buildActorContext } from './actor-context.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { requireSectionAccess } from '../middleware/require-section-access.js';
 import { parseWarsawDateTimeToTimestamp } from '../scheduler/warsaw-time.js';
@@ -28,20 +36,10 @@ import {
 } from '../scheduler/store.js';
 import { registerScheduledPost, unregisterScheduledPost } from '../scheduler/service.js';
 import type { ScheduledPost } from '../scheduler/types.js';
-import type { SessionUser } from '../types.js';
 import { createLogger } from '../../utils/logger.js';
 
 export const scheduledRouter = Router();
 const scheduledLogger = createLogger('dashboard:scheduled-routes');
-
-function buildActorContext(user: SessionUser | undefined): { actorUserId?: string; actorUserName?: string; actorUserRole?: string } {
-    if (!user) return {};
-    return {
-        actorUserId: user.id,
-        actorUserName: user.globalName ?? user.username,
-        actorUserRole: user.dashboardRole,
-    };
-}
 
 interface ScheduledPostRequestBody extends Omit<EmbedFormData, 'mentionRoleEnabled'> {
     mentionRoleEnabled?: boolean | string;
@@ -50,15 +48,6 @@ interface ScheduledPostRequestBody extends Omit<EmbedFormData, 'mentionRoleEnabl
 
 interface ScheduledPostEditRequestBody extends ScheduledPostRequestBody {}
 
-const STORED_UPLOAD_PLACEHOLDER = '[stored]';
-
-function normalizeTrimmedString(value: unknown): string {
-    return typeof value === 'string' ? value.trim() : '';
-}
-
-function normalizeBoolean(value: unknown): boolean {
-    return value === true || value === 'true';
-}
 
 function isValidChannelId(channelId: string): boolean {
     return /^\d{17,20}$/.test(channelId);
@@ -66,106 +55,6 @@ function isValidChannelId(channelId: string): boolean {
 
 function isValidPingTarget(value: string): boolean {
     return value === 'everyone' || value === 'here' || /^\d{17,20}$/.test(value);
-}
-
-function sanitizeMatchInfo(input: unknown): MatchInfoSnapshot | undefined {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) {
-        return undefined;
-    }
-
-    const raw = input as Partial<MatchInfoSnapshot>;
-    const matchId = normalizeTrimmedString(raw.matchId);
-    if (!matchId) {
-        return undefined;
-    }
-
-    return {
-        matchId,
-        game: normalizeTrimmedString(raw.game),
-        g2TeamName: normalizeTrimmedString(raw.g2TeamName),
-        opponent: normalizeTrimmedString(raw.opponent),
-        tournament: normalizeTrimmedString(raw.tournament),
-        matchType: normalizeTrimmedString(raw.matchType),
-        beginAtUtc: normalizeTrimmedString(raw.beginAtUtc),
-        date: normalizeTrimmedString(raw.date),
-        time: normalizeTrimmedString(raw.time),
-    };
-}
-
-function sanitizeEventDraft(input: unknown): EventDraftFormData | undefined {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) {
-        return undefined;
-    }
-
-    const raw = input as Partial<EventDraftFormData>;
-
-    return {
-        enabled: normalizeBoolean(raw.enabled),
-        title: normalizeTrimmedString(raw.title),
-        description: normalizeTrimmedString(raw.description),
-        location: normalizeTrimmedString(raw.location),
-        startAtLocal: normalizeTrimmedString(raw.startAtLocal),
-        endAtLocal: normalizeTrimmedString(raw.endAtLocal),
-    };
-}
-
-function normalizeEventDraftForCompare(input: EventDraftFormData | undefined): {
-    enabled: boolean;
-    title: string;
-    description: string;
-    location: string;
-    startAtLocal: string;
-    endAtLocal: string;
-} | null {
-    if (!input || input.enabled !== true) {
-        return null;
-    }
-
-    return {
-        enabled: true,
-        title: normalizeTrimmedString(input.title),
-        description: normalizeTrimmedString(input.description),
-        location: normalizeTrimmedString(input.location),
-        startAtLocal: normalizeTrimmedString(input.startAtLocal),
-        endAtLocal: normalizeTrimmedString(input.endAtLocal),
-    };
-}
-
-function areEventDraftsEqual(left: EventDraftFormData | undefined, right: EventDraftFormData | undefined): boolean {
-    const normalizedLeft = normalizeEventDraftForCompare(left);
-    const normalizedRight = normalizeEventDraftForCompare(right);
-
-    if (!normalizedLeft || !normalizedRight) {
-        return false;
-    }
-
-    return normalizedLeft.title === normalizedRight.title
-        && normalizedLeft.description === normalizedRight.description
-        && normalizedLeft.location === normalizedRight.location
-        && normalizedLeft.startAtLocal === normalizedRight.startAtLocal
-        && normalizedLeft.endAtLocal === normalizedRight.endAtLocal;
-}
-
-function sanitizePayload(input: ScheduledPostRequestBody): EmbedFormData {
-    const mentionRoleId = normalizeTrimmedString(input.mentionRoleId);
-    const mentionRoleEnabled = input.mentionRoleEnabled === true || input.mentionRoleEnabled === 'true';
-
-    return {
-        mode: input.mode,
-        channelId: normalizeTrimmedString(input.channelId),
-        title: normalizeTrimmedString(input.title),
-        content: normalizeTrimmedString(input.content),
-        colorName: normalizeTrimmedString(input.colorName),
-        mentionRoleEnabled,
-        mentionRoleId: mentionRoleEnabled ? mentionRoleId : '',
-        imageMode: input.imageMode,
-        imageFilename: normalizeTrimmedString(input.imageFilename),
-        uploadFileName: normalizeTrimmedString(input.uploadFileName),
-        uploadMimeType: normalizeTrimmedString(input.uploadMimeType),
-        uploadBase64: normalizeTrimmedString(input.uploadBase64),
-        matchInfo: sanitizeMatchInfo(input.matchInfo),
-        eventDraft: sanitizeEventDraft(input.eventDraft),
-    };
 }
 
 function toListResponsePost(post: ScheduledPost): ScheduledPost {
@@ -278,7 +167,12 @@ scheduledRouter.post('/', requireSectionAccess('scheduled-posts'), async (req, r
         return;
     }
 
-    const payload = sanitizePayload(body);
+    const payload = resolveStoredUpload(sanitizeEmbedPayload(body));
+    if (!payload) {
+        res.status(400).json({ error: STORED_UPLOAD_ERROR });
+        return;
+    }
+
     const validationError = validateEmbedForm(payload);
     if (validationError) {
         res.status(400).json({ error: validationError });
@@ -287,6 +181,10 @@ scheduledRouter.post('/', requireSectionAccess('scheduled-posts'), async (req, r
 
     if (!isValidChannelId(payload.channelId)) {
         res.status(400).json({ error: 'Wybierz kanał docelowy.' });
+        return;
+    }
+
+    if (!await verifyTargetChannel(payload.channelId, res)) {
         return;
     }
 
@@ -360,7 +258,8 @@ scheduledRouter.patch('/:id', requireSectionAccess('scheduled-posts'), async (re
         return;
     }
 
-    const payload = sanitizePayload(body);
+    const payload = sanitizeEmbedPayload(body);
+
     const validationError = validateEmbedForm(payload);
     if (validationError) {
         res.status(400).json({ error: validationError });
@@ -372,6 +271,10 @@ scheduledRouter.patch('/:id', requireSectionAccess('scheduled-posts'), async (re
         return;
     }
 
+    if (!await verifyTargetChannel(payload.channelId, res)) {
+        return;
+    }
+
     const pingTarget = normalizeTrimmedString(payload.mentionRoleId);
     if (payload.mentionRoleEnabled && !isValidPingTarget(pingTarget)) {
         res.status(400).json({ error: 'Wybrany target pingu ma nieprawidłową wartość.' });
@@ -379,14 +282,22 @@ scheduledRouter.patch('/:id', requireSectionAccess('scheduled-posts'), async (re
     }
 
     try {
+        // Placeholder uploadu rozwiązujemy w atomowym callbacku, na aktualnym stanie posta.
+        let storedUploadMissing = false;
         const updated = await updateScheduledPost(postId, (post) => {
             if (post.status !== 'pending') {
                 return post;
             }
 
+            const resolvedPayload = resolveStoredUpload(payload, post.payload);
+            if (!resolvedPayload) {
+                storedUploadMissing = true;
+                return post;
+            }
+
             return {
                 ...post,
-                payload,
+                payload: resolvedPayload,
                 scheduledFor,
                 updatedAt: Date.now(),
                 eventStatus: payload.eventDraft?.enabled ? 'pending' : 'not_requested',
@@ -394,6 +305,11 @@ scheduledRouter.patch('/:id', requireSectionAccess('scheduled-posts'), async (re
                 eventLastError: undefined,
             };
         });
+
+        if (storedUploadMissing) {
+            res.status(400).json({ error: STORED_UPLOAD_ERROR });
+            return;
+        }
 
         if (!updated || updated.status !== 'pending') {
             res.status(404).json({ error: 'Nie znaleziono zaplanowanego posta do edycji.' });
@@ -462,7 +378,7 @@ scheduledRouter.patch('/sent/:id', requireSectionAccess('sent-posts'), async (re
     }
 
     const body = parsedBody.data as ScheduledPostEditRequestBody;
-    const payload = sanitizePayload(body);
+    const payload = sanitizeEmbedPayload(body);
 
     const validationError = validateEmbedForm(payload);
     if (validationError) {

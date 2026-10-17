@@ -15,25 +15,19 @@ import {
     buildEmbedJson,
     type EmbedFormData,
 } from './embed-handlers.js';
+import {
+    ALLOWED_UPLOAD_MIME,
+    ImageUploadValidationError,
+    MAX_UPLOAD_BYTES,
+    MIME_EXTENSION,
+    detectImageMime,
+    normalizeUploadMimeType,
+    parseUploadData,
+    validateSvgSafety,
+} from './image-upload.js';
 import { createLogger } from '../utils/logger.js';
 
 const publishLogger = createLogger('dashboard:publish-flow');
-
-const ALLOWED_UPLOAD_MIME = new Set([
-    'image/png',
-    'image/jpeg',
-    'image/gif',
-    'image/webp',
-    'image/svg+xml',
-]);
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
-const MIME_EXTENSION: Record<string, string> = {
-    'image/png': '.png',
-    'image/jpeg': '.jpg',
-    'image/gif': '.gif',
-    'image/webp': '.webp',
-    'image/svg+xml': '.svg',
-};
 
 interface PreparedUpload {
     buffer: Buffer;
@@ -57,14 +51,6 @@ function imgDirPath(): string {
     return join(__dirname, '..', '..', 'img');
 }
 
-function normalizeUploadMimeType(mimeType: string): string {
-    const normalized = mimeType.trim().toLowerCase();
-    if (normalized === 'image/jpg') {
-        return 'image/jpeg';
-    }
-    return normalized;
-}
-
 function normalizeTrimmedString(value: unknown): string {
     return typeof value === 'string' ? value.trim() : '';
 }
@@ -86,101 +72,6 @@ async function saveUploadToImageLibrary(buffer: Buffer, mimeType: string): Promi
     await writeFile(join(targetDir, filename), buffer);
 
     return filename;
-}
-
-function parseUploadData(uploadBase64: string): Buffer | null {
-    const trimmed = uploadBase64.trim();
-    const dataUrlMatch = /^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/.exec(trimmed);
-
-    let base64Data = trimmed;
-    if (dataUrlMatch) {
-        base64Data = dataUrlMatch[2] ?? '';
-    }
-
-    const normalized = base64Data.replace(/\s+/g, '');
-    if (!normalized || normalized.length % 4 !== 0 || !/^[A-Za-z0-9+/]+=*$/.test(normalized)) {
-        return null;
-    }
-
-    return Buffer.from(normalized, 'base64');
-}
-
-function detectImageMime(buffer: Buffer): string | null {
-    if (
-        buffer.length >= 8
-        && buffer[0] === 0x89
-        && buffer[1] === 0x50
-        && buffer[2] === 0x4e
-        && buffer[3] === 0x47
-        && buffer[4] === 0x0d
-        && buffer[5] === 0x0a
-        && buffer[6] === 0x1a
-        && buffer[7] === 0x0a
-    ) {
-        return 'image/png';
-    }
-
-    if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-        return 'image/jpeg';
-    }
-
-    if (buffer.length >= 6) {
-        const gifHeader = buffer.toString('ascii', 0, 6);
-        if (gifHeader === 'GIF87a' || gifHeader === 'GIF89a') {
-            return 'image/gif';
-        }
-    }
-
-    if (buffer.length >= 12) {
-        const riffHeader = buffer.toString('ascii', 0, 4);
-        const webpHeader = buffer.toString('ascii', 8, 12);
-        if (riffHeader === 'RIFF' && webpHeader === 'WEBP') {
-            return 'image/webp';
-        }
-    }
-
-    const svgProbe = buffer.toString('utf8', 0, Math.min(buffer.length, 4096)).trimStart();
-    if (svgProbe.startsWith('<?xml') || svgProbe.startsWith('<svg') || svgProbe.includes('<svg')) {
-        return 'image/svg+xml';
-    }
-
-    return null;
-}
-
-function validateSvgSafety(buffer: Buffer): void {
-    const svgContent = buffer.toString('utf8');
-
-    if (/<script[\s>]/i.test(svgContent)) {
-        throw new Error('Plik SVG zawiera niedozwolone skrypty.');
-    }
-
-    if (/\son[a-z]+\s*=\s*/i.test(svgContent)) {
-        throw new Error('Plik SVG zawiera niedozwolone atrybuty zdarzen.');
-    }
-
-    if (/(xlink:href|href)\s*=\s*['"]\s*javascript:/i.test(svgContent)) {
-        throw new Error('Plik SVG zawiera niedozwolone odwolania JavaScript.');
-    }
-
-    if (/<!DOCTYPE[^>]*\[/i.test(svgContent) || /<!ENTITY/i.test(svgContent)) {
-        throw new Error('Plik SVG zawiera niedozwolone deklaracje XML Entity.');
-    }
-
-    if (/<use[\s>]/i.test(svgContent)) {
-        throw new Error('Plik SVG zawiera niedozwolone elementy use.');
-    }
-
-    if (/<(image|feImage)[\s>]/i.test(svgContent)) {
-        throw new Error('Plik SVG zawiera niedozwolone elementy image.');
-    }
-
-    if (/<style[\s>]/i.test(svgContent)) {
-        throw new Error('Plik SVG zawiera niedozwolone elementy style.');
-    }
-
-    if (/data\s*:\s*text\//i.test(svgContent)) {
-        throw new Error('Plik SVG zawiera niedozwolone data URI z tekstem.');
-    }
 }
 
 export async function publishDashboardPost(
@@ -222,7 +113,7 @@ export async function publishDashboardPost(
     if (publishData.imageMode === 'library' && publishData.imageFilename) {
         const availableImages = listImages();
         if (!availableImages.includes(publishData.imageFilename)) {
-            throw new Error('Wybrany obraz z biblioteki nie istnieje.');
+            throw new ImageUploadValidationError('Wybrany obraz z biblioteki nie istnieje.');
         }
     }
 
@@ -236,21 +127,21 @@ export async function publishDashboardPost(
         const normalizedUploadMimeType = normalizeUploadMimeType(publishData.uploadMimeType);
 
         if (!ALLOWED_UPLOAD_MIME.has(normalizedUploadMimeType)) {
-            throw new Error('Nieobsługiwany format pliku graficznego.');
+            throw new ImageUploadValidationError('Nieobsługiwany format pliku graficznego.');
         }
 
         const imageBuffer = parseUploadData(publishData.uploadBase64);
         if (!imageBuffer || !imageBuffer.length) {
-            throw new Error('Wgrany plik graficzny ma nieprawidłowy format.');
+            throw new ImageUploadValidationError('Wgrany plik graficzny ma nieprawidłowy format.');
         }
 
         if (imageBuffer.length > MAX_UPLOAD_BYTES) {
-            throw new Error('Wgrany plik jest za duzy (max 20 MB).');
+            throw new ImageUploadValidationError('Wgrany plik jest za duzy (max 20 MB).');
         }
 
         const detectedMime = detectImageMime(imageBuffer);
         if (!detectedMime || detectedMime !== normalizedUploadMimeType) {
-            throw new Error('Zawartość pliku nie zgadza się z typem obrazu.');
+            throw new ImageUploadValidationError('Zawartość pliku nie zgadza się z typem obrazu.');
         }
 
         if (detectedMime === 'image/svg+xml') {

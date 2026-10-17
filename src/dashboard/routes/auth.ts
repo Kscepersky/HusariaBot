@@ -97,7 +97,8 @@ authRouter.get('/discord', (req, res) => {
 });
 
 authRouter.get('/discord/callback', async (req, res) => {
-    const { code, state } = req.query as { code?: string; state?: string };
+    const code = typeof req.query.code === 'string' ? req.query.code : undefined;
+    const state = typeof req.query.state === 'string' ? req.query.state : undefined;
 
     if (!code || !state || state !== req.session.oauthState) {
         authLogger.warn('DASHBOARD_LOGIN_INVALID_STATE', 'Odrzucono logowanie dashboardu przez nieprawidlowy OAuth state.', buildAuthLogContext(req, {

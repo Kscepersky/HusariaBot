@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { writeFileAtomic } from '../utils/atomic-file.js';
 import { dirname, join } from 'node:path';
 import type { TemporaryVoiceChannelRecord, TemporaryVoiceChannelStoreData } from './types.js';
 
@@ -82,7 +83,7 @@ async function loadStore(filePath: string): Promise<TemporaryVoiceChannelStoreDa
 }
 
 async function saveStore(store: TemporaryVoiceChannelStoreData, filePath: string): Promise<void> {
-    await writeFile(filePath, JSON.stringify(store, null, 2), 'utf8');
+    await writeFileAtomic(filePath, JSON.stringify(store, null, 2));
 }
 
 function withStoreLock<T>(work: () => Promise<T>): Promise<T> {
