@@ -13,7 +13,10 @@ const ALLOWED_UPLOAD_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '
 const CREATOR_IMAGE_PAGE_SIZE = 8
 const IMAGE_LIBRARY_PAGE_SIZE = 12
 const ECONOMY_LEADERBOARD_AUTO_REFRESH_MS = 60_000
-const DASHBOARD_LOGS_PAGE_SIZE = 25
+const DASHBOARD_LOGS_PAGE_SIZE = 40
+const DASHBOARD_LOGS_AUTO_REFRESH_MS = 10_000
+const LOG_CATEGORY_ICONS = { security: '🛡️', auth: '🔑', posts: '📝', economy: '💰', shop: '🛒', events: '🎉', bot: '🤖', system: '⚙️' }
+const LOG_CATEGORY_ORDER = ['security', 'auth', 'posts', 'economy', 'shop', 'events', 'bot', 'system']
 const DASHBOARD_LOGS_SEARCH_DEBOUNCE_MS = 300
 const UPLOAD_MIME_BY_EXT = {
   '.png': 'image/png',
@@ -119,6 +122,14 @@ let dashboardLogsTotalPages = 1
 let dashboardLogsTotalRows = 0
 let dashboardLogsSearch = ''
 let dashboardLogsLevel = 'all'
+let dashboardLogsScope = 'all'
+let dashboardLogsCategory = 'all'
+let dashboardLogsRange = '24h'
+let dashboardLogsSummary = null
+let dashboardLogsAutoRefreshId = null
+let dashboardLogsHideNoise = true
+let dashboardLogsHiddenNoiseCount = 0
+let dashboardLogsScopes = []
 let dashboardLogsLoadRequestId = 0
 let dashboardLogsSearchDebounceId = null
 let dashboardLogsAbortController = null
@@ -1555,6 +1566,75 @@ function bindSystemLogsSectionListeners() {
     void loadDashboardLogs({ page: 1, silent: true })
   })
 
+  document.getElementById('system-logs-ranges')?.addEventListener('click', (event) => {
+    const pill = event.target.closest?.('[data-range]')
+    if (!pill) return
+    dashboardLogsRange = pill.dataset.range
+    dashboardLogsPage = 1
+    document.querySelectorAll('#system-logs-ranges .log-pill').forEach((node) => {
+      node.classList.toggle('active', node === pill)
+    })
+    void loadDashboardLogs({ page: 1, silent: true })
+  })
+
+  const filterClickTargets = ['system-logs-stats', 'system-logs-categories']
+  filterClickTargets.forEach((id) => {
+    document.getElementById(id)?.addEventListener('click', (event) => {
+      const target = event.target.closest?.('[data-log-level],[data-log-category]')
+      if (!target) return
+      if (target.dataset.logLevel !== undefined) {
+        dashboardLogsLevel = normalizeDashboardLogLevel(target.dataset.logLevel, true)
+        const levelSelect = document.getElementById('system-logs-level')
+        if (levelSelect) levelSelect.value = dashboardLogsLevel
+      }
+      if (target.dataset.logCategory !== undefined) {
+        dashboardLogsCategory = target.dataset.logCategory
+      }
+      dashboardLogsPage = 1
+      void loadDashboardLogs({ page: 1, silent: true })
+    })
+  })
+
+  document.getElementById('system-logs-list')?.addEventListener('click', (event) => {
+    const copyButton = event.target.closest?.('[data-log-copy]')
+    if (!copyButton) return
+    const pre = copyButton.closest('details')?.querySelector('pre')
+    if (pre && navigator.clipboard) {
+      navigator.clipboard.writeText(pre.textContent ?? '').then(
+        () => showToast(t('systemLogs.skopiowano'), 'success'),
+        () => showToast(t('systemLogs.kopiowanie_nieudane'), 'error'),
+      )
+    }
+  })
+
+  document.getElementById('system-logs-auto-refresh')?.addEventListener('change', (event) => {
+    if (dashboardLogsAutoRefreshId) {
+      clearInterval(dashboardLogsAutoRefreshId)
+      dashboardLogsAutoRefreshId = null
+    }
+    if (event.target.checked) {
+      dashboardLogsAutoRefreshId = setInterval(() => {
+        if (currentSection === 'system-logs' && !document.hidden) {
+          void loadDashboardLogs({ silent: true })
+        }
+      }, DASHBOARD_LOGS_AUTO_REFRESH_MS)
+    }
+  })
+
+  document.getElementById('system-logs-scope')?.addEventListener('change', (event) => {
+    clearDashboardLogsSearchDebounce()
+    dashboardLogsScope = String(event.target.value ?? 'all')
+    dashboardLogsPage = 1
+    void loadDashboardLogs({ page: 1, silent: true })
+  })
+
+  document.getElementById('system-logs-hide-noise')?.addEventListener('change', (event) => {
+    clearDashboardLogsSearchDebounce()
+    dashboardLogsHideNoise = event.target.checked === true
+    dashboardLogsPage = 1
+    void loadDashboardLogs({ page: 1, silent: true })
+  })
+
   refreshButton?.addEventListener('click', () => {
     clearDashboardLogsSearchDebounce()
     void loadDashboardLogs({ silent: true })
@@ -1615,6 +1695,10 @@ async function loadDashboardLogs(options = {}) {
     pageSize: String(DASHBOARD_LOGS_PAGE_SIZE),
     search: dashboardLogsSearch,
     level: dashboardLogsLevel,
+    scope: dashboardLogsScope,
+    hideNoise: dashboardLogsHideNoise ? '1' : '0',
+    category: dashboardLogsCategory,
+    range: dashboardLogsRange,
   })
 
   cancelDashboardLogsRequest()
@@ -1645,6 +1729,9 @@ async function loadDashboardLogs(options = {}) {
     dashboardLogsTotalRows = Number.isFinite(Number(payload.pagination?.totalRows))
       ? Math.max(0, Number(payload.pagination.totalRows))
       : dashboardLogEntries.length
+    dashboardLogsHiddenNoiseCount = Number.isFinite(Number(payload.hiddenNoiseCount)) ? Number(payload.hiddenNoiseCount) : 0
+    dashboardLogsScopes = Array.isArray(payload.scopes) ? payload.scopes.map(String) : []
+    dashboardLogsSummary = payload.summary ?? null
 
     renderDashboardLogs()
   } catch (error) {
@@ -2116,6 +2203,8 @@ function renderDashboardLogs() {
     return
   }
 
+  renderDashboardLogFilters()
+
   if (countLabel) {
     countLabel.textContent = `Wpisy: ${dashboardLogsTotalRows}`
   }
@@ -2144,45 +2233,185 @@ function renderDashboardLogs() {
     return
   }
 
-  list.innerHTML = dashboardLogEntries.map((entry) => {
-    const level = normalizeDashboardLogLevel(entry.level)
-    const levelLabel = escapeHtml(level.toUpperCase())
-    const action = escapeHtml(String(entry.action ?? 'UNKNOWN'))
-    const scope = escapeHtml(String(entry.scope ?? 'system'))
-    const message = escapeHtml(String(entry.message ?? t('app.brak_tresci')))
-    const timestamp = formatTimestampInWarsaw(Number(entry.timestampMs ?? Date.now()))
-    const contextJson = escapeHtml(JSON.stringify(entry.context ?? {}, null, 2))
-    const errorLabel = entry.error?.message
-      ? `<div class="log-error">Blad: ${escapeHtml(String(entry.error.message))}</div>`
-      : ''
-    const actorHtml = entry.actorUser?.displayName
-      ? buildAuthorHtml(entry.actorUser.displayName, null, null, 'Aktor', entry.actorUser.avatarUrl, entry.actorUser.role ?? null)
-      : ''
-    const targetHtml = entry.targetUser?.displayName
-      ? buildAuthorHtml(entry.targetUser.displayName, null, null, 'Cel', entry.targetUser.avatarUrl, entry.targetUser.role ?? null)
-      : ''
-    const userChips = actorHtml || targetHtml
-      ? `<div class="scheduled-card-meta">${actorHtml}${targetHtml}</div>`
-      : ''
+  list.innerHTML = buildDashboardLogsHtml(dashboardLogEntries)
+}
 
-    return `
-      <article class="scheduled-card log-card">
-        <div class="scheduled-card-header">
-          <span class="scheduled-card-title">${timestamp}</span>
-          <span class="scheduled-chip log-level-${level}">${levelLabel}</span>
+function humanizeLogAction(action) {
+  const words = String(action ?? 'UNKNOWN').toLowerCase().replace(/[._]/g, ' ').split(' ').filter(Boolean)
+  const text = words.join(' ')
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+function formatRelativeLogTime(timestampMs) {
+  const diffSeconds = Math.max(0, Math.round((Date.now() - timestampMs) / 1000))
+  if (diffSeconds < 60) return t('systemLogs.czas_przed_chwila')
+  if (diffSeconds < 3600) return t('systemLogs.czas_min', { p1: Math.floor(diffSeconds / 60) })
+  if (diffSeconds < 86400) return t('systemLogs.czas_godz', { p1: Math.floor(diffSeconds / 3600) })
+  return t('systemLogs.czas_dni', { p1: Math.floor(diffSeconds / 86400) })
+}
+
+/** Zdanie opisujace zdarzenie; gdy brak szablonu dla akcji - zwykla tresc wpisu. */
+function buildLogSummaryText(entry) {
+  const key = `logs.sum.${entry.action}`
+  const catalog = window.DASHBOARD_I18N?.pl ?? {}
+  if (!(key in catalog)) {
+    return String(entry.message ?? t('app.brak_tresci'))
+  }
+
+  const context = entry.context ?? {}
+  const shortId = (value) => (value ? String(value) : '?')
+  return t(key, {
+    actor: entry.actorUser?.displayName ?? context.actorUserName ?? context.username ?? shortId(context.actorUserId),
+    target: entry.targetUser?.displayName ?? shortId(context.targetUserId ?? context.userId),
+    level: context.level ?? '?',
+    ip: context.ip ?? '?',
+    method: context.method ?? '',
+    path: context.path ?? '',
+    role: context.actorUserRole ?? '?',
+    section: context.section ?? '?',
+    itemName: context.itemName ?? context.itemId ?? '?',
+    botTag: context.botTag ?? '?',
+    port: context.port ?? '?',
+    count: context.count ?? context.deletedCount ?? '?',
+    removed: Array.isArray(context.removedRoleIds) ? context.removedRoleIds.length : 0,
+  })
+}
+
+function renderDashboardLogFilters() {
+  const scopeSelect = document.getElementById('system-logs-scope')
+  const noiseNote = document.getElementById('system-logs-noise-note')
+  const statsBox = document.getElementById('system-logs-stats')
+  const categoriesBox = document.getElementById('system-logs-categories')
+  const summary = dashboardLogsSummary
+
+  if (scopeSelect instanceof HTMLSelectElement) {
+    const scopes = [...new Set([...dashboardLogsScopes, dashboardLogsScope].filter((scope) => scope && scope !== 'all'))]
+    scopeSelect.innerHTML = [`<option value="all">${escapeHtml(t('systemLogs.zakres_wszystkie'))}</option>`]
+      .concat(scopes.map((scope) => `<option value="${escapeHtml(scope)}">${escapeHtml(scope)}</option>`))
+      .join('')
+    scopeSelect.value = dashboardLogsScope
+  }
+
+  if (noiseNote instanceof HTMLElement) {
+    noiseNote.hidden = !(dashboardLogsHideNoise && dashboardLogsHiddenNoiseCount > 0)
+    noiseNote.textContent = t('systemLogs.ukryto_szum', { p1: dashboardLogsHiddenNoiseCount })
+  }
+
+  if (statsBox && summary) {
+    const cards = [
+      { level: 'error', label: t('systemLogs.stat_bledy'), count: summary.levelCounts.error, tone: 'error' },
+      { level: 'warn', label: t('systemLogs.stat_ostrzezenia'), count: summary.levelCounts.warn, tone: 'warn' },
+      { level: 'info', label: t('systemLogs.stat_info'), count: summary.levelCounts.info, tone: 'info' },
+      { level: 'all', label: t('systemLogs.stat_wszystkie'), count: summary.total, tone: 'all' },
+    ]
+    statsBox.innerHTML = cards.map((card) => `
+      <button type="button" class="log-stat log-stat-${card.tone}${dashboardLogsLevel === card.level ? ' active' : ''}" data-log-level="${card.level}">
+        <span class="log-stat-count">${Number(card.count)}</span>
+        <span class="log-stat-label">${escapeHtml(card.label)}</span>
+      </button>`).join('')
+  }
+
+  if (categoriesBox && summary) {
+    const total = LOG_CATEGORY_ORDER.reduce((sum, category) => sum + Number(summary.categoryCounts[category] ?? 0), 0)
+    const pills = [`<button type="button" class="log-pill${dashboardLogsCategory === 'all' ? ' active' : ''}" data-log-category="all">${escapeHtml(t('systemLogs.kat_wszystkie'))} <b>${total}</b></button>`]
+    LOG_CATEGORY_ORDER.forEach((category) => {
+      const count = Number(summary.categoryCounts[category] ?? 0)
+      if (count === 0 && dashboardLogsCategory !== category) return
+      pills.push(`<button type="button" class="log-pill${dashboardLogsCategory === category ? ' active' : ''}" data-log-category="${category}">${LOG_CATEGORY_ICONS[category]} ${escapeHtml(t(`systemLogs.kat_${category}`))} <b>${count}</b></button>`)
+    })
+    categoriesBox.innerHTML = pills.join('')
+  }
+}
+
+function buildLogContextChipsHtml(entry) {
+  const context = entry.context ?? {}
+  const chips = []
+  const addChip = (label, value) => {
+    if (value === undefined || value === null || value === '') return
+    chips.push(`<span class="log-chip">${label ? `<b>${escapeHtml(label)}</b> ` : ''}${escapeHtml(String(value))}</span>`)
+  }
+
+  addChip('', context.method && context.path ? `${context.method} ${context.path}` : context.path)
+  addChip('IP', context.ip)
+  addChip('user', context.targetUserId ?? context.userId)
+  addChip('channel', context.channelId)
+  addChip('post', context.postId ? String(context.postId).slice(0, 8) : '')
+
+  const people = [
+    entry.actorUser?.displayName ? buildAuthorHtml(entry.actorUser.displayName, null, null, t('app.log_aktor'), entry.actorUser.avatarUrl, entry.actorUser.role ?? null) : '',
+    entry.targetUser?.displayName ? buildAuthorHtml(entry.targetUser.displayName, null, null, t('app.log_cel'), entry.targetUser.avatarUrl, entry.targetUser.role ?? null) : '',
+  ].join('')
+
+  return chips.length > 0 || people ? `<div class="log-chips">${people}${chips.join('')}</div>` : ''
+}
+
+function buildDashboardLogRowHtml(entry, repeatCount) {
+  const level = normalizeDashboardLogLevel(entry.level)
+  const category = LOG_CATEGORY_ICONS[entry.category] ? entry.category : 'system'
+  const timestampMs = Number(entry.timestampMs ?? Date.now())
+  const absoluteTime = formatTimestampInWarsaw(timestampMs)
+  const hasContext = entry.context && Object.keys(entry.context).length > 0
+  const summaryText = buildLogSummaryText(entry)
+  const errorHtml = entry.error?.message
+    ? `<div class="log-error">${escapeHtml(String(entry.error.message))}</div>`
+    : ''
+  const detailsHtml = hasContext || entry.error
+    ? `<details class="log-context-details"><summary>${escapeHtml(t('systemLogs.szczegoly'))} <button type="button" class="log-copy-btn" data-log-copy>${escapeHtml(t('systemLogs.kopiuj'))}</button></summary><pre class="log-context-pre">${escapeHtml(JSON.stringify({ action: entry.action, scope: entry.scope, message: entry.message, context: entry.context ?? {}, error: entry.error ?? null }, null, 2))}</pre></details>`
+    : ''
+  const repeatBadge = repeatCount > 1 ? `<span class="log-repeat">×${repeatCount}</span>` : ''
+
+  return `
+    <article class="log-row log-row-${level}">
+      <div class="log-icon log-icon-${category}" title="${escapeHtml(t(`systemLogs.kat_${category}`))}">${LOG_CATEGORY_ICONS[category]}</div>
+      <div class="log-body">
+        <div class="log-row-top">
+          <span class="log-title">${escapeHtml(summaryText)}</span>
+          ${repeatBadge}
+          <span class="scheduled-chip log-level-${level}">${escapeHtml(level.toUpperCase())}</span>
         </div>
-        <div class="scheduled-card-meta">
-          <span class="scheduled-chip">Akcja: ${action}</span>
-          <span class="scheduled-chip">Zakres: ${scope}</span>
+        <div class="log-meta">
+          <span title="${escapeHtml(absoluteTime)}">${escapeHtml(formatRelativeLogTime(timestampMs))} · ${escapeHtml(absoluteTime)}</span>
+          <span class="log-scope">${escapeHtml(humanizeLogAction(entry.action))} · ${escapeHtml(String(entry.scope ?? 'system'))}</span>
         </div>
-        ${userChips}
-        <div class="scheduled-preview">${message}</div>
-        ${errorLabel}
-        <details class="log-context-details">
-          <summary>Szczegoly kontekstu</summary>
-          <pre class="log-context-pre">${contextJson}</pre>
-        </details>
-      </article>`
+        ${errorHtml}
+        ${buildLogContextChipsHtml(entry)}
+        ${detailsHtml}
+      </div>
+    </article>`
+}
+
+/** Zwija sasiadujace identyczne wpisy (ta sama akcja, tresc i poziom) w jeden z licznikiem. */
+function groupRepeatedLogEntries(entries) {
+  const grouped = []
+  entries.forEach((entry) => {
+    const previous = grouped[grouped.length - 1]
+    const sameAsPrevious = previous
+      && previous.entry.action === entry.action
+      && previous.entry.level === entry.level
+      && previous.entry.message === entry.message
+      && JSON.stringify(previous.entry.context?.targetUserId ?? previous.entry.context?.userId) === JSON.stringify(entry.context?.targetUserId ?? entry.context?.userId)
+    if (sameAsPrevious) {
+      previous.count += 1
+      return
+    }
+    grouped.push({ entry, count: 1 })
+  })
+  return grouped
+}
+
+function buildDashboardLogsHtml(entries) {
+  let currentDay = ''
+  return groupRepeatedLogEntries(entries).map(({ entry, count }) => {
+    const day = new Intl.DateTimeFormat('pl-PL', {
+      timeZone: 'Europe/Warsaw',
+      weekday: 'long',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(new Date(Number(entry.timestampMs ?? Date.now())))
+    const header = day !== currentDay ? `<div class="log-day-header">${escapeHtml(day)}</div>` : ''
+    currentDay = day
+    return header + buildDashboardLogRowHtml(entry, count)
   }).join('')
 }
 
@@ -2939,6 +3168,12 @@ function bindEconomyLeaderboardSectionListeners() {
     await loadEconomyLeaderboard({ silent: false })
   })
 
+  const auditToolbar = document.getElementById('economy-role-audit-toolbar')
+  if (auditToolbar) {
+    auditToolbar.hidden = currentDashboardRole !== 'dev'
+  }
+  document.getElementById('economy-role-audit-btn')?.addEventListener('click', runEconomyRoleAudit)
+
   sortSelect?.addEventListener('change', async () => {
     const nextSortBy = sortSelect.value === 'coins' ? 'coins' : 'xp'
     await loadEconomyLeaderboard({
@@ -2969,6 +3204,121 @@ function bindEconomyLeaderboardSectionListeners() {
       page: economyLeaderboardPage + 1,
     })
   })
+}
+
+const ECONOMY_ROLE_AUDIT_STATUS_KEYS = {
+  missing: 'economyLeaderboard.audyt_brak_rangi',
+  wrong: 'economyLeaderboard.audyt_zla_ranga',
+  unexpected: 'economyLeaderboard.audyt_ranga_za_wysoka',
+}
+
+let economyRoleAuditRoles = {}
+
+function buildEconomyRoleChipHtml(roleId, extraClass = '') {
+  const role = economyRoleAuditRoles[roleId]
+  const color = role?.color ? `#${Number(role.color).toString(16).padStart(6, '0')}` : 'var(--text-secondary)'
+  const name = role?.name ?? roleId
+  return `<span class="role-audit-chip ${extraClass}" style="--role-color:${escapeHtml(color)}">${escapeHtml(name)}</span>`
+}
+
+function buildEconomyRoleChipsHtml(roleIds, extraClass = '') {
+  return roleIds.length > 0
+    ? roleIds.map((roleId) => buildEconomyRoleChipHtml(roleId, extraClass)).join('')
+    : '<span class="role-audit-none">—</span>'
+}
+
+function buildEconomyRoleAuditCardHtml(issue) {
+  const toRemove = issue.currentMappedRoleIds.filter((roleId) => roleId !== issue.expectedRoleId)
+  const toAdd = issue.expectedRoleId && !issue.currentMappedRoleIds.includes(issue.expectedRoleId)
+    ? [issue.expectedRoleId]
+    : []
+  const statusKey = ECONOMY_ROLE_AUDIT_STATUS_KEYS[issue.status] ?? 'economyLeaderboard.audyt_zla_ranga'
+
+  return `
+    <div class="role-audit-card" data-user-id="${escapeHtml(issue.userId)}">
+      <div class="role-audit-head">
+        <div>
+          <div class="role-audit-name">${escapeHtml(issue.username || issue.userId)}</div>
+          <div class="role-audit-sub">${escapeHtml(issue.userId)} • ${escapeHtml(t('economyLeaderboard.audyt_level'))} ${Number(issue.level)}</div>
+        </div>
+        <span class="role-audit-status role-audit-status-${escapeHtml(issue.status)}">${escapeHtml(t(statusKey))}</span>
+      </div>
+      <div class="role-audit-rows">
+        <div><span class="role-audit-label">${escapeHtml(t('economyLeaderboard.audyt_powinna'))}</span>${buildEconomyRoleChipsHtml(issue.expectedRoleId ? [issue.expectedRoleId] : [])}</div>
+        <div><span class="role-audit-label">${escapeHtml(t('economyLeaderboard.audyt_ma'))}</span>${buildEconomyRoleChipsHtml(issue.currentMappedRoleIds)}</div>
+        <div><span class="role-audit-label">${escapeHtml(t('economyLeaderboard.audyt_nadaj'))}</span>${buildEconomyRoleChipsHtml(toAdd, 'role-audit-chip-add')}</div>
+        <div><span class="role-audit-label">${escapeHtml(t('economyLeaderboard.audyt_zdejmij'))}</span>${buildEconomyRoleChipsHtml(toRemove, 'role-audit-chip-remove')}</div>
+      </div>
+      <button type="button" class="btn-secondary role-audit-fix-btn" data-user-id="${escapeHtml(issue.userId)}">${escapeHtml(t('economyLeaderboard.napraw'))}</button>
+    </div>`
+}
+
+function bindEconomyRoleAuditFixButtons(container) {
+  container.querySelectorAll('.role-audit-fix-btn').forEach((button) => {
+    button.addEventListener('click', () => void runEconomyRoleFixUser(button))
+  })
+}
+
+async function runEconomyRoleFixUser(button) {
+  const userId = button.dataset.userId
+  const card = button.closest('.role-audit-card')
+  button.disabled = true
+  button.textContent = t('economyLeaderboard.naprawianie')
+
+  try {
+    const response = await fetchWithCsrf('/api/economy/level-roles/fix-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetUserId: userId }),
+    })
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? t('economyLeaderboard.naprawianie_nieudane'))
+    }
+
+    showToast(`✅ ${t('economyLeaderboard.naprawiono')}`, 'success')
+    card?.remove()
+  } catch (error) {
+    button.disabled = false
+    button.textContent = t('economyLeaderboard.napraw')
+    showToast(`❌ ${error instanceof Error ? error.message : t('economyLeaderboard.naprawianie_nieudane')}`, 'error')
+  }
+}
+
+async function runEconomyRoleAudit() {
+  const button = document.getElementById('economy-role-audit-btn')
+  const status = document.getElementById('economy-role-audit-status')
+  const result = document.getElementById('economy-role-audit-result')
+  if (!button || !status || !result) return
+
+  button.disabled = true
+  status.textContent = t('economyLeaderboard.sprawdzanie')
+  result.innerHTML = ''
+
+  try {
+    const response = await fetchWithCsrf('/api/economy/level-roles/audit', { method: 'POST' })
+    const payload = await parseApiResponse(response)
+    if (!response.ok) {
+      throw new Error(payload.error ?? t('economyLeaderboard.sprawdzanie_nieudane'))
+    }
+
+    const { report, mappingCount } = payload
+    status.textContent = `${t('economyLeaderboard.audyt_sprawdzono')} ${report.checkedUsers}/${report.totalUsers} • OK: ${report.okUsers} • ${t('economyLeaderboard.audyt_do_poprawy')}: ${report.issues.length} • ${t('economyLeaderboard.audyt_poza_serwerem')}: ${report.notOnServerUsers}`
+
+    if (mappingCount === 0) {
+      result.innerHTML = `<p class="preview-note">${escapeHtml(t('economyLeaderboard.brak_mapowan'))}</p>`
+      return
+    }
+
+    economyRoleAuditRoles = payload.roles ?? {}
+    result.innerHTML = report.issues.map(buildEconomyRoleAuditCardHtml).join('')
+    bindEconomyRoleAuditFixButtons(result)
+  } catch (error) {
+    status.textContent = ''
+    showToast(`❌ ${error instanceof Error ? error.message : t('economyLeaderboard.sprawdzanie_nieudane')}`, 'error')
+  } finally {
+    button.disabled = false
+  }
 }
 
 function bindTimeoutSectionListeners() {

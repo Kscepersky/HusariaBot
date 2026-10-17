@@ -100,6 +100,7 @@ export interface DiscordRole {
     position: number;
     managed: boolean;
     permissions: string;
+    color?: number;
 }
 
 interface DiscordBotUser {
@@ -243,11 +244,15 @@ export async function getDiscordUserById(userId: string): Promise<DiscordUser | 
     return resp.json() as Promise<DiscordUser>;
 }
 
-export async function getGuildMember(userId: string, guildId: string): Promise<DiscordGuildMember | null> {
+export async function getGuildMember(
+    userId: string,
+    guildId: string,
+    forceFresh = false,
+): Promise<DiscordGuildMember | null> {
     const cacheKey = `${guildId}:${userId}`;
     const now = Date.now();
     const cached = guildMemberCache.get(cacheKey);
-    if (cached && now - cached.fetchedAt < GUILD_MEMBER_CACHE_TTL_MS) {
+    if (!forceFresh && cached && now - cached.fetchedAt < GUILD_MEMBER_CACHE_TTL_MS) {
         return cached.data;
     }
 
@@ -733,6 +738,35 @@ export async function deleteGuildScheduledEvent(guildId: string, eventId: string
         const errPayload = await resp.json().catch(() => ({}));
         throw new Error(`Failed to delete Discord event: ${resp.status} — ${JSON.stringify(errPayload)}`);
     }
+}
+
+const GUILD_MEMBERS_PAGE_SIZE = 1000;
+const GUILD_MEMBERS_MAX_PAGES = 100;
+
+/** Pobiera wszystkich czlonkow serwera (strony po 1000, wymaga intentu GUILD_MEMBERS). */
+export async function listAllGuildMembers(guildId: string): Promise<DiscordGuildMember[]> {
+    const members: DiscordGuildMember[] = [];
+    let after = '0';
+
+    for (let page = 0; page < GUILD_MEMBERS_MAX_PAGES; page += 1) {
+        const params = new URLSearchParams({ limit: String(GUILD_MEMBERS_PAGE_SIZE), after });
+        const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members?${params.toString()}`, {
+            headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+        });
+
+        if (!resp.ok) throw new Error(`Failed to list guild members: ${resp.status}`);
+
+        const batch = await resp.json() as DiscordGuildMember[];
+        members.push(...batch);
+
+        const lastId = batch[batch.length - 1]?.user?.id;
+        if (batch.length < GUILD_MEMBERS_PAGE_SIZE || !lastId) {
+            break;
+        }
+        after = lastId;
+    }
+
+    return members;
 }
 
 export async function searchGuildMembers(guildId: string, query: string, limit = 8): Promise<DiscordMentionUser[]> {

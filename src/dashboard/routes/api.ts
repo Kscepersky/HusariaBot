@@ -62,6 +62,14 @@ import { parseTimeoutDurationParts } from '../../timeouts/duration.js';
 import { clearTicketHistory, listTicketHistoryEntries, resolveTicketTranscriptFilePath } from '../../tickets/history-store.js';
 import { createLogger } from '../../utils/logger.js';
 import { listDashboardLogs } from '../../utils/log-reader.js';
+import { LOG_CATEGORIES, type LogCategory } from '../../utils/log-categories.js';
+
+const LOG_RANGE_MS: Record<string, number> = {
+    '1h': 60 * 60 * 1000,
+    '24h': 24 * 60 * 60 * 1000,
+    '7d': 7 * 24 * 60 * 60 * 1000,
+    '30d': 30 * 24 * 60 * 60 * 1000,
+};
 import { enrichWithDiscordUser } from '../../utils/discord-user-cache.js';
 import { listSessionActivity } from '../session/session-events.js';
 
@@ -832,17 +840,31 @@ apiRouter.get('/logs', requireSectionAccess('system-logs'), async (req, res) => 
         ? levelRaw as (typeof allowedLogLevels)[number]
         : 'all';
 
+    const scopeRaw = normalizeTrimmedString(req.query.scope);
+    const scope = /^[\w:.-]{1,64}$/.test(scopeRaw) ? scopeRaw : 'all';
+    const hideNoise = normalizeTrimmedString(req.query.hideNoise) !== '0';
+    const categoryRaw = normalizeTrimmedString(req.query.category).toLowerCase();
+    const category = (LOG_CATEGORIES as readonly string[]).includes(categoryRaw) ? categoryRaw as LogCategory : 'all';
+    const rangeMs = LOG_RANGE_MS[normalizeTrimmedString(req.query.range)] ?? 0;
+    const sinceMs = rangeMs > 0 ? Date.now() - rangeMs : 0;
+
     try {
         const result = await listDashboardLogs({
             page,
             pageSize,
             search,
             level,
+            scope,
+            hideNoise,
+            category,
+            sinceMs,
         });
 
         const enrichedEntries = result.entries.map((entry) => {
             const actorId = typeof entry.context?.actorUserId === 'string' ? entry.context.actorUserId : undefined;
-            const targetId = typeof entry.context?.targetUserId === 'string' ? entry.context.targetUserId : undefined;
+            const targetId = typeof entry.context?.targetUserId === 'string'
+                ? entry.context.targetUserId
+                : (typeof entry.context?.userId === 'string' ? entry.context.userId : undefined);
             const cachedActor = enrichWithDiscordUser(actorId);
             const storedActorName = typeof entry.context?.actorUserName === 'string' ? entry.context.actorUserName : null;
             const storedActorRole = typeof entry.context?.actorUserRole === 'string' ? entry.context.actorUserRole : null;
@@ -866,9 +888,15 @@ apiRouter.get('/logs', requireSectionAccess('system-logs'), async (req, res) => 
                 totalRows: result.totalRows,
                 totalPages: result.totalPages,
             },
+            hiddenNoiseCount: result.hiddenNoiseCount,
+            scopes: result.scopes,
+            summary: result.summary,
             filters: {
                 level,
                 search,
+                scope,
+                hideNoise,
+                category,
             },
         });
     } catch (error) {

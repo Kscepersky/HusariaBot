@@ -1,6 +1,7 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { LogLevel, StructuredLogEntry } from './logger.js';
+import { LOG_CATEGORIES, categorizeLogEntry, type LogCategory } from './log-categories.js';
 
 const LOG_DIRECTORY_PATH = join(process.cwd(), 'logs');
 const LOG_FILE_PATTERN = /^system-\d{4}-\d{2}-\d{2}\.jsonl$/;
@@ -13,14 +14,31 @@ export interface DashboardLogListQuery {
     pageSize: number;
     search: string;
     level: LogLevel | 'all';
+    scope?: string;
+    hideNoise?: boolean;
+    category?: LogCategory | 'all';
+    /** Odciecie czasowe w ms (wpisy starsze sa pomijane); 0/undefined = bez limitu. */
+    sinceMs?: number;
 }
 
+export interface DashboardLogSummary {
+    total: number;
+    levelCounts: Record<'error' | 'warn' | 'info' | 'debug', number>;
+    categoryCounts: Record<LogCategory, number>;
+}
+
+/** Akcje generowane masowo przez boty/skanery - domyslnie ukrywane w widoku. */
+export const NOISE_LOG_ACTIONS: readonly string[] = ['DASHBOARD_RATE_LIMIT_HIT'];
+
 export interface DashboardLogListResult {
-    entries: StructuredLogEntry[];
+    entries: Array<StructuredLogEntry & { category: LogCategory }>;
     page: number;
     pageSize: number;
     totalRows: number;
     totalPages: number;
+    hiddenNoiseCount: number;
+    scopes: string[];
+    summary: DashboardLogSummary;
 }
 
 function normalizeJsonLine(rawLine: string): StructuredLogEntry | null {
@@ -125,6 +143,27 @@ function sanitizeError(rawError: unknown): StructuredLogEntry['error'] {
     };
 }
 
+const logFileCache = new Map<string, { signature: string; entries: StructuredLogEntry[] }>();
+
+/** Parsuje plik tylko gdy sie zmienil (rozmiar/mtime) - stare dni nie sa czytane przy kazdym zapytaniu. */
+async function readLogFileEntries(filePath: string): Promise<StructuredLogEntry[]> {
+    const fileStat = await stat(filePath);
+    const signature = `${fileStat.size}:${fileStat.mtimeMs}`;
+    const cached = logFileCache.get(filePath);
+    if (cached && cached.signature === signature) {
+        return cached.entries;
+    }
+
+    const content = await readFile(filePath, 'utf8');
+    const parsedEntries = content
+        .split(/\r?\n/g)
+        .map((line) => normalizeJsonLine(line))
+        .filter((entry): entry is StructuredLogEntry => entry !== null);
+
+    logFileCache.set(filePath, { signature, entries: parsedEntries });
+    return parsedEntries;
+}
+
 async function readAllLogEntries(): Promise<StructuredLogEntry[]> {
     let files: string[] = [];
 
@@ -150,16 +189,7 @@ async function readAllLogEntries(): Promise<StructuredLogEntry[]> {
     const entries: StructuredLogEntry[] = [];
 
     for (const filename of orderedFiles) {
-        const filePath = join(LOG_DIRECTORY_PATH, filename);
-        const content = await readFile(filePath, 'utf8');
-        const lines = content.split(/\r?\n/g);
-
-        for (const line of lines) {
-            const parsed = normalizeJsonLine(line);
-            if (parsed) {
-                entries.push(parsed);
-            }
-        }
+        entries.push(...await readLogFileEntries(join(LOG_DIRECTORY_PATH, filename)));
     }
 
     return entries.sort((left, right) => right.timestampMs - left.timestampMs);
@@ -191,12 +221,49 @@ export async function listDashboardLogs(query: DashboardLogListQuery): Promise<D
     const levelFilter = query.level;
     const searchLower = query.search.trim().toLowerCase();
 
-    const filtered = (await readAllLogEntries()).filter((entry) => {
-        if (levelFilter !== 'all' && entry.level !== levelFilter) {
+    const scopeFilter = query.scope && query.scope !== 'all' ? query.scope : null;
+    const categoryFilter = query.category && query.category !== 'all' ? query.category : null;
+    const hideNoise = query.hideNoise === true;
+    const sinceMs = Number.isFinite(query.sinceMs) ? Number(query.sinceMs) : 0;
+    const allEntries = await readAllLogEntries();
+    const scopes = [...new Set(allEntries.map((entry) => entry.scope))].sort();
+    let hiddenNoiseCount = 0;
+
+    const matchesLevel = (entry: StructuredLogEntry): boolean => {
+        if (levelFilter === 'all') return true;
+        if (levelFilter === 'error') return entry.level === 'error' || entry.level === 'fatal';
+        return entry.level === levelFilter;
+    };
+
+    // Wspolna czesc filtrow (czas, zakres, szukanie, szum) - liczniki w podsumowaniu opieraja sie na niej.
+    const base = allEntries.filter((entry) => {
+        if (sinceMs > 0 && entry.timestampMs < sinceMs) return false;
+        if (scopeFilter && entry.scope !== scopeFilter) return false;
+        if (!matchesSearch(entry, searchLower)) return false;
+
+        if (hideNoise && NOISE_LOG_ACTIONS.includes(entry.action)) {
+            hiddenNoiseCount += 1;
             return false;
         }
 
-        return matchesSearch(entry, searchLower);
+        return true;
+    });
+
+    const summary: DashboardLogSummary = {
+        total: base.length,
+        levelCounts: { error: 0, warn: 0, info: 0, debug: 0 },
+        categoryCounts: Object.fromEntries(LOG_CATEGORIES.map((category) => [category, 0])) as Record<LogCategory, number>,
+    };
+    for (const entry of base) {
+        const bucket = entry.level === 'fatal' ? 'error' : (entry.level === 'trace' ? 'debug' : entry.level);
+        summary.levelCounts[bucket] += 1;
+        if (matchesLevel(entry)) {
+            summary.categoryCounts[categorizeLogEntry(entry)] += 1;
+        }
+    }
+
+    const filtered = base.filter((entry) => {
+        return matchesLevel(entry) && (!categoryFilter || categorizeLogEntry(entry) === categoryFilter);
     });
 
     const totalRows = filtered.length;
@@ -205,10 +272,13 @@ export async function listDashboardLogs(query: DashboardLogListQuery): Promise<D
     const offset = (page - 1) * safePageSize;
 
     return {
-        entries: filtered.slice(offset, offset + safePageSize),
+        entries: filtered.slice(offset, offset + safePageSize).map((entry) => ({ ...entry, category: categorizeLogEntry(entry) })),
         page,
         pageSize: safePageSize,
         totalRows,
         totalPages,
+        hiddenNoiseCount,
+        scopes,
+        summary,
     };
 }

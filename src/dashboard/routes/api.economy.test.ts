@@ -298,6 +298,13 @@ describe('api economy settings routes', () => {
             pageSize: 25,
             totalRows: 0,
             totalPages: 1,
+            hiddenNoiseCount: 0,
+            scopes: [],
+            summary: {
+                total: 0,
+                levelCounts: { error: 0, warn: 0, info: 0, debug: 0 },
+                categoryCounts: { security: 0, auth: 0, posts: 0, economy: 0, shop: 0, events: 0, bot: 0, system: 0 },
+            },
         });
     });
 
@@ -339,6 +346,9 @@ describe('api economy settings routes', () => {
             expect(body.filters).toEqual({
                 level: 'error',
                 search: 'scheduled',
+                scope: 'all',
+                hideNoise: true,
+                category: 'all',
             });
 
             expect(vi.mocked(listDashboardLogs)).toHaveBeenCalledWith({
@@ -346,6 +356,10 @@ describe('api economy settings routes', () => {
                 pageSize: 25,
                 search: 'scheduled',
                 level: 'error',
+                scope: 'all',
+                hideNoise: true,
+                category: 'all',
+                sinceMs: 0,
             });
         });
     });

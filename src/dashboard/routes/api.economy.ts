@@ -1,8 +1,12 @@
 import { Router,   } from 'express';
 import { config } from 'dotenv';
-import { requireSectionAccess, } from '../middleware/require-section-access.js';
+import { requireDevRole, requireSectionAccess, } from '../middleware/require-section-access.js';
 import {
+    addGuildMemberRole,
     getGuildMember,
+    getGuildRoles,
+    listAllGuildMembers,
+    removeGuildMemberRole,
     updateGuildMemberRoles,
 } from '../discord-api.js';
 import {
@@ -15,6 +19,7 @@ import {
 } from '../validation/request-schemas.js';
 import { parsePositiveIntQuery } from './query-utils.js';
 import { enrichEconomyLeaderboard } from './leaderboard-profiles.js';
+import { buildLevelRoleAuditReport, buildLevelRoleFixPlan } from './level-role-audit.js';
 import {
     normalizeTrimmedString,
 } from '../payload-sanitizer.js';
@@ -30,6 +35,7 @@ import {
     getEconomyLeaderboardPage,
     getEconomyLevelRoleMappings,
     importEconomyCsvSnapshot,
+    listEconomyUserLevels,
     replaceEconomyLevelRoleMappings,
     resetEconomyUsers,
     updateEconomyConfig,
@@ -440,6 +446,100 @@ economyRouter.post('/economy/import-csv', requireSectionAccess('economy-settings
 
         apiLogger.error('ECONOMY_CSV_IMPORT_FAILED', 'Failed to import economy CSV snapshot.', {}, error);
         res.status(500).json({ error: 'Nie udało się zaimportować danych CSV ekonomii.' });
+    }
+});
+
+// POST /api/economy/level-roles/audit — read-only check of every user's level vs. threshold role (dev only)
+economyRouter.post('/economy/level-roles/audit', requireSectionAccess('economy-leaderboard'), requireDevRole(), async (_req, res) => {
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    try {
+        const protectedRoleIds = resolveProtectedStaffRoleIds();
+        const mappings = (await getEconomyLevelRoleMappings(guildId))
+            .filter((mapping) => !protectedRoleIds.has(String(mapping.roleId)));
+        const [users, members, guildRoles] = await Promise.all([
+            listEconomyUserLevels(guildId),
+            listAllGuildMembers(guildId),
+            getGuildRoles(guildId),
+        ]);
+        const mappedRoleIds = new Set(mappings.map((mapping) => String(mapping.roleId)));
+        const roles = Object.fromEntries(
+            guildRoles
+                .filter((role) => mappedRoleIds.has(role.id))
+                .map((role) => [role.id, { name: role.name, color: role.color ?? 0 }]),
+        );
+
+        res.json({
+            success: true,
+            mappingCount: mappings.length,
+            roles,
+            report: buildLevelRoleAuditReport(users, members, mappings),
+        });
+    } catch (error) {
+        apiLogger.error('ECONOMY_LEVEL_ROLE_AUDIT_FAILED', 'Failed to audit level roles.', {}, error);
+        res.status(500).json({ error: 'Nie udało się sprawdzić rang levelowych.' });
+    }
+});
+
+// POST /api/economy/level-roles/fix-user — correct threshold roles of a single user (dev only)
+economyRouter.post('/economy/level-roles/fix-user', requireSectionAccess('economy-leaderboard'), requireDevRole(), async (req, res) => {
+    const targetUserId = normalizeTrimmedString(req.body?.targetUserId);
+    if (!/^\d{17,20}$/.test(targetUserId)) {
+        res.status(400).json({ error: 'Nieprawidłowe ID użytkownika.' });
+        return;
+    }
+
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
+        return;
+    }
+
+    try {
+        const protectedRoleIds = resolveProtectedStaffRoleIds();
+        const mappings = (await getEconomyLevelRoleMappings(guildId))
+            .filter((mapping) => !protectedRoleIds.has(String(mapping.roleId)));
+        if (mappings.length === 0) {
+            res.status(400).json({ error: 'Brak skonfigurowanych mapowań rang levelowych.' });
+            return;
+        }
+
+        const user = (await listEconomyUserLevels(guildId)).find((entry) => entry.userId === targetUserId);
+        const member = await getGuildMember(targetUserId, guildId, true);
+        if (!user || !member) {
+            res.status(404).json({ error: 'Użytkownika nie ma w ekonomii lub na serwerze.' });
+            return;
+        }
+
+        const [action] = buildLevelRoleFixPlan(buildLevelRoleAuditReport([user], [member], mappings).issues);
+        if (!action) {
+            res.json({ success: true, changed: false, addedRoleId: null, removedRoleIds: [] });
+            return;
+        }
+
+        for (const roleId of action.removeRoleIds) {
+            await removeGuildMemberRole(guildId, targetUserId, roleId);
+        }
+        if (action.addRoleId) {
+            await addGuildMemberRole(guildId, targetUserId, action.addRoleId);
+        }
+
+        apiLogger.info('LEVEL_ROLE_FIX_USER', 'Level roles corrected for user.', {
+            guildId,
+            targetUserId,
+            level: user.level,
+            addedRoleId: action.addRoleId,
+            removedRoleIds: action.removeRoleIds,
+            actorUserId: req.session.user?.id,
+        });
+        res.json({ success: true, changed: true, addedRoleId: action.addRoleId, removedRoleIds: action.removeRoleIds });
+    } catch (error) {
+        apiLogger.error('ECONOMY_LEVEL_ROLE_FIX_USER_FAILED', 'Failed to fix level roles for user.', { targetUserId }, error);
+        res.status(500).json({ error: 'Nie udało się naprawić rang użytkownika. Sprawdź uprawnienia i hierarchię roli bota.' });
     }
 });
 

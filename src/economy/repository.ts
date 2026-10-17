@@ -1611,6 +1611,21 @@ export async function awardVoiceXp(
     });
 }
 
+export async function listEconomyUserLevels(guildId: string): Promise<Array<{ userId: string; level: number }>> {
+    const db = await getEconomyDatabase();
+    const rows = await db.all<Array<{ user_id: string; level: number }>>(
+        `
+        SELECT user_id, level
+        FROM economy_users
+        WHERE guild_id = ?
+        ORDER BY level DESC, user_id ASC
+        `,
+        guildId,
+    );
+
+    return rows.map((row) => ({ userId: row.user_id, level: row.level }));
+}
+
 export async function getEconomyLeaderboardPage(
     guildId: string,
     sortBy: EconomyLeaderboardSortBy,
