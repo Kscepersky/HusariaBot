@@ -881,8 +881,6 @@ function bindEmbedSectionListeners() {
 
   recentUnicodeEmojis = window.HusariaEmojiSearch?.loadRecent(window.localStorage) ?? []
 
-  const emojiToggle = document.getElementById('emoji-popover-toggle')
-  const mentionToggle = document.getElementById('mention-popover-toggle')
   const emojiPopover = document.getElementById('emoji-popover')
   const mentionPopover = document.getElementById('mention-popover')
   const emojiSearchInput = document.getElementById('emoji-search-input')
@@ -895,17 +893,8 @@ function bindEmbedSectionListeners() {
   const mentionUserSearch = document.getElementById('mention-user-search')
   const mentionUserResultsContainer = document.getElementById('mention-user-results')
 
-  emojiToggle?.addEventListener('click', (event) => {
-    event.stopPropagation()
-    togglePopover('emoji-popover')
-  })
-
-  mentionToggle?.addEventListener('click', (event) => {
-    event.stopPropagation()
-    togglePopover('mention-popover')
-  })
-
   bindAnsiControls()
+  bindPopoverCollapse()
 
   emojiPopover?.addEventListener('click', (event) => {
     event.stopPropagation()
@@ -937,7 +926,6 @@ function bindEmbedSectionListeners() {
     }
 
     insertToken(token)
-    closeAllPopovers()
   })
 
   mentionPopover?.addEventListener('click', (event) => {
@@ -947,7 +935,6 @@ function bindEmbedSectionListeners() {
     if (!token) return
 
     insertToken(token)
-    closeAllPopovers()
   })
 
   emojiSearchInput?.addEventListener('input', () => {
@@ -955,11 +942,6 @@ function bindEmbedSectionListeners() {
   })
 
   mentionChannelSearch?.addEventListener('input', () => {
-    const mentionPopoverElement = document.getElementById('mention-popover')
-    if (mentionPopoverElement?.hidden) {
-      mentionPopoverElement.hidden = false
-    }
-
     if (mentionChannelSearchDebounceId) {
       clearTimeout(mentionChannelSearchDebounceId)
     }
@@ -970,11 +952,6 @@ function bindEmbedSectionListeners() {
   })
 
   mentionRoleSearch?.addEventListener('input', () => {
-    const mentionPopoverElement = document.getElementById('mention-popover')
-    if (mentionPopoverElement?.hidden) {
-      mentionPopoverElement.hidden = false
-    }
-
     if (mentionRoleSearchDebounceId) {
       clearTimeout(mentionRoleSearchDebounceId)
     }
@@ -985,11 +962,6 @@ function bindEmbedSectionListeners() {
   })
 
   mentionUserSearch?.addEventListener('input', () => {
-    const mentionPopoverElement = document.getElementById('mention-popover')
-    if (mentionPopoverElement?.hidden) {
-      mentionPopoverElement.hidden = false
-    }
-
     if (mentionUserSearchDebounceId) {
       clearTimeout(mentionUserSearchDebounceId)
     }
@@ -997,16 +969,6 @@ function bindEmbedSectionListeners() {
     mentionUserSearchDebounceId = setTimeout(async () => {
       await searchMentionUsers(mentionUserSearch.value)
     }, 220)
-  })
-
-  document.addEventListener('click', () => {
-    closeAllPopovers()
-  })
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      closeAllPopovers()
-    }
   })
 
   const pingToggle = document.getElementById('ping-role-enabled')
@@ -6214,31 +6176,29 @@ async function fileToDataUrl(file) {
   })
 }
 
-function closeAllPopovers() {
-  const emojiPopover = document.getElementById('emoji-popover')
-  const mentionPopover = document.getElementById('mention-popover')
+function bindPopoverCollapse() {
+  document.querySelectorAll('.editor-popover > .popover-header, .timestamp-tools > .timestamp-tools-header').forEach((header) => {
+    header.setAttribute('role', 'button')
+    header.setAttribute('tabindex', '0')
+    header.setAttribute('aria-expanded', 'true')
 
-  if (emojiPopover) {
-    emojiPopover.hidden = true
-  }
+    const toggle = () => {
+      const collapsed = header.parentElement.classList.toggle('is-collapsed')
+      header.setAttribute('aria-expanded', String(!collapsed))
+    }
 
-  if (mentionPopover) {
-    mentionPopover.hidden = true
-  }
-
-  const ansiPopover = document.getElementById('ansi-popover')
-  if (ansiPopover) {
-    ansiPopover.hidden = true
-  }
-}
-
-function togglePopover(popoverId) {
-  const popover = document.getElementById(popoverId)
-  if (!popover) return
-
-  const shouldOpen = popover.hidden
-  closeAllPopovers()
-  popover.hidden = !shouldOpen
+    header.addEventListener('click', (event) => {
+      if (event.target.closest('input')) return
+      toggle()
+    })
+    header.addEventListener('keydown', (event) => {
+      if (event.target !== header) return
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        toggle()
+      }
+    })
+  })
 }
 
 function insertToken(token, { padded = true } = {}) {
@@ -6261,7 +6221,7 @@ function insertToken(token, { padded = true } = {}) {
   const caretPos = start + insertion.length
   target.setSelectionRange(caretPos, caretPos)
   target.dispatchEvent(new Event('input', { bubbles: true }))
-  target.focus()
+  target.focus({ preventScroll: true })
 }
 
 function clearUploadPreviewUrl() {
@@ -6300,7 +6260,7 @@ function applyAnsiCodes(codes) {
   target.value = result.value
   target.setSelectionRange(result.selectionStart, result.selectionEnd)
   target.dispatchEvent(new Event('input', { bubbles: true }))
-  target.focus()
+  target.focus({ preventScroll: true })
 }
 
 function insertAnsiFence() {
@@ -6318,7 +6278,7 @@ function insertAnsiFence() {
   target.value = result.value
   target.setSelectionRange(result.selectionStart, result.selectionEnd)
   target.dispatchEvent(new Event('input', { bubbles: true }))
-  target.focus()
+  target.focus({ preventScroll: true })
 }
 
 function renderAnsiPalette() {
@@ -6332,16 +6292,49 @@ function renderAnsiPalette() {
   background.innerHTML = window.HusariaAnsi.BACKGROUND_COLORS.map((entry) => buildSwatch(entry, 'bg')).join('')
 }
 
+function renderAnsiEffects() {
+  const container = document.getElementById('ansi-effects')
+  if (!container) return
+
+  const cssFor = (code) => window.HusariaAnsi.FOREGROUND_COLORS.find((entry) => entry.code === code)?.css ?? '#ffffff'
+
+  container.innerHTML = window.HusariaAnsi.EFFECTS.map((effect) => {
+    const stops = effect.codes.map(cssFor)
+    const gradient = stops.length > 1 ? stops.join(', ') : `${stops[0]}, ${stops[0]}`
+    const label = escapeHtml(t(`embedCreator.ansi_efekt_${effect.key}`))
+
+    return `<button type="button" class="ansi-effect-btn" data-ansi-effect="${effect.key}" style="background-image:linear-gradient(90deg, ${gradient})" title="${label}">${label}</button>`
+  }).join('')
+}
+
+function applyAnsiEffect(effectKey) {
+  const target = getActiveEditor()
+  if (!target) {
+    showToast('Najpierw kliknij pole tekstowe edytora.', 'info')
+    return
+  }
+
+  const value = target.value ?? ''
+  const start = target.selectionStart ?? 0
+  const end = target.selectionEnd ?? 0
+  const result = window.HusariaAnsi.applyEffect(value, start, end, effectKey)
+
+  if (!result) {
+    showToast(t('embedCreator.ansi_efekt_zaznacz'), 'info')
+    return
+  }
+
+  target.value = result.value
+  target.setSelectionRange(result.selectionStart, result.selectionEnd)
+  target.dispatchEvent(new Event('input', { bubbles: true }))
+  target.focus({ preventScroll: true })
+}
+
 function bindAnsiControls() {
-  const ansiToggle = document.getElementById('ansi-popover-toggle')
   const ansiPopover = document.getElementById('ansi-popover')
 
   renderAnsiPalette()
-
-  ansiToggle?.addEventListener('click', (event) => {
-    event.stopPropagation()
-    togglePopover('ansi-popover')
-  })
+  renderAnsiEffects()
 
   ansiPopover?.addEventListener('click', (event) => {
     event.stopPropagation()
@@ -6349,6 +6342,12 @@ function bindAnsiControls() {
     const swatch = event.target.closest('[data-ansi-code]')
     if (swatch) {
       applyAnsiCodes([Number(swatch.dataset.ansiCode)])
+      return
+    }
+
+    const effect = event.target.closest('[data-ansi-effect]')
+    if (effect) {
+      applyAnsiEffect(effect.dataset.ansiEffect)
       return
     }
 
@@ -6380,7 +6379,7 @@ function wrapSelection(token) {
   const caretPos = selected ? start + wrapped.length : start + token.length
   target.setSelectionRange(caretPos, caretPos)
   target.dispatchEvent(new Event('input', { bubbles: true }))
-  target.focus()
+  target.focus({ preventScroll: true })
 }
 
 function prefixSelectionLines(prefix) {
@@ -6406,7 +6405,7 @@ function prefixSelectionLines(prefix) {
   target.value = `${value.slice(0, start)}${prefixed}${value.slice(end)}`
   target.setSelectionRange(start, start + prefixed.length)
   target.dispatchEvent(new Event('input', { bubbles: true }))
-  target.focus()
+  target.focus({ preventScroll: true })
 }
 
 function renderMarkdown(text) {

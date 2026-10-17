@@ -29,6 +29,19 @@
     { code: 47, key: 'white', css: '#fdf6e3' },
   ]
 
+  // Efekty kolorują tekst znak po znaku. `cycle` powtarza kolory w kółko (tęcza),
+  // `stretch` rozciąga je na całe zaznaczenie (płynniejszy gradient).
+  const EFFECTS = [
+    { key: 'rainbow', mode: 'cycle', codes: [31, 33, 32, 36, 34, 35] },
+    { key: 'fire', mode: 'stretch', codes: [37, 33, 31] },
+    { key: 'ocean', mode: 'stretch', codes: [37, 36, 34] },
+    { key: 'sunset', mode: 'stretch', codes: [33, 31, 35, 34] },
+    { key: 'forest', mode: 'stretch', codes: [33, 32, 36] },
+    { key: 'neon', mode: 'cycle', codes: [35, 36] },
+    { key: 'poland', mode: 'stretch', codes: [37, 31] },
+    { key: 'husaria', mode: 'cycle', codes: [31, 30], extra: [40] },
+  ]
+
   const FENCE = '```'
   const ANSI_FENCE_OPEN = '```ansi\n'
 
@@ -75,32 +88,201 @@
     return { leading, trailing }
   }
 
-  // Owija zaznaczenie sekwencją ANSI; poza blokiem ```ansi dodaje blok automatycznie.
-  // Przy pustym zaznaczeniu kursor ląduje między sekwencją otwierającą a resetem.
-  function applyToSelection(value, start, end, codes) {
-    const source = String(value ?? '')
-    const selected = source.slice(start, end)
-    const open = `${ESC}[${codes.join(';')}m`
-    const inner = `${open}${selected}${ESC}[${RESET_CODE}m`
-    const insideFence = isInsideAnsiFence(source, start)
+  const DEFAULT_STATE = { fg: null, bg: null, bold: false, underline: false }
 
-    let inserted = inner
-    let caretOffset = selected ? inner.length : open.length
+  function sameState(a, b) {
+    return a.fg === b.fg && a.bg === b.bg && a.bold === b.bold && a.underline === b.underline
+  }
 
-    if (!insideFence) {
-      const { leading, trailing } = fenceLayout(source, start, end)
-      const prefix = `${leading}${ANSI_FENCE_OPEN}`
-      inserted = `${prefix}${inner}\n${FENCE}${trailing}`
-      caretOffset = selected ? inserted.length : prefix.length + open.length
+  function stateToCodes(state) {
+    return [
+      state.bold ? BOLD_CODE : null,
+      state.underline ? UNDERLINE_CODE : null,
+      state.fg,
+      state.bg,
+    ].filter((code) => code !== null)
+  }
+
+  // Czy przejście wymaga resetu, bo któryś atrybut trzeba wyłączyć (kod koloru tylko nadpisuje kolor).
+  function needsReset(from, to) {
+    return (from.bold && !to.bold)
+      || (from.underline && !to.underline)
+      || (from.fg !== null && to.fg === null)
+      || (from.bg !== null && to.bg === null)
+  }
+
+  // Najkrótsza sekwencja prowadząca z jednego stanu stylu do drugiego.
+  function transition(from, to) {
+    if (sameState(from, to)) return ''
+
+    if (needsReset(from, to)) {
+      const codes = stateToCodes(to)
+      const reset = `${ESC}[${RESET_CODE}m`
+      return codes.length === 0 ? reset : `${reset}${ESC}[${codes.join(';')}m`
     }
 
-    const caret = start + caretOffset
+    const changed = [
+      to.bold && !from.bold ? BOLD_CODE : null,
+      to.underline && !from.underline ? UNDERLINE_CODE : null,
+      to.fg !== from.fg ? to.fg : null,
+      to.bg !== from.bg ? to.bg : null,
+    ].filter((code) => code !== null)
+
+    return `${ESC}[${changed.join(';')}m`
+  }
+
+  // Styl obowiązujący tuż przed `index` (tylko wewnątrz otwartego bloku ```ansi).
+  function stateBefore(source, index) {
+    if (!isInsideAnsiFence(source, index)) return DEFAULT_STATE
+
+    const before = source.slice(0, index)
+    const region = before.slice(before.lastIndexOf(FENCE) + FENCE.length)
+    const pattern = new RegExp(SGR_PATTERN.source, 'g')
+
+    let state = DEFAULT_STATE
+    let match = pattern.exec(region)
+
+    while (match !== null) {
+      state = applyCodesToState(state, match[1])
+      match = pattern.exec(region)
+    }
+
+    return state
+  }
+
+  // Przepisuje zaznaczenie znak po znaku, dokładając `codesForChar(i)` do stylu, który
+  // już tam jest. Dzięki temu pogrubienie + kolor + tło się łączą, a tekst za zaznaczeniem
+  // zachowuje swój pierwotny styl (zwykły reset zdejmowałby też style zewnętrzne).
+  function rewriteSelection(source, start, end, codesForChar) {
+    const selected = source.slice(start, end)
+    const pattern = new RegExp(SGR_PATTERN.source, 'g')
+
+    let state = stateBefore(source, start)
+    let emitted = state
+    let out = ''
+    let charIndex = 0
+    let cursor = 0
+
+    const writeText = (text) => {
+      for (const char of Array.from(text)) {
+        const codes = codesForChar(charIndex)
+        const target = codes.length > 0 ? applyCodesToState(state, codes.join(';')) : state
+        charIndex += 1
+        out += `${transition(emitted, target)}${char}`
+        emitted = target
+      }
+    }
+
+    let match = pattern.exec(selected)
+
+    while (match !== null) {
+      writeText(selected.slice(cursor, match.index))
+      state = applyCodesToState(state, match[1])
+      cursor = match.index + match[0].length
+      match = pattern.exec(selected)
+    }
+
+    writeText(selected.slice(cursor))
+
+    // Jeśli tuż za zaznaczeniem jest reset, nie ma po co przywracać dawnego stylu.
+    const resetFollows = /^\u001b\[0?m/.test(source.slice(end))
+
+    return resetFollows ? out : `${out}${transition(emitted, state)}`
+  }
+
+  // Zaznaczenie obejmujące linie ```ansi / ``` nie ma kolorować samych znaczników bloku.
+  function excludeFenceMarkers(source, start, end) {
+    const selected = source.slice(start, end)
+    const opening = selected.match(/^\s*```ansi\r?\n/)
+    const closing = selected.slice(opening ? opening[0].length : 0).match(/\r?\n```\s*$/)
 
     return {
-      value: `${source.slice(0, start)}${inserted}${source.slice(end)}`,
-      selectionStart: caret,
-      selectionEnd: caret,
+      start: start + (opening ? opening[0].length : 0),
+      end: end - (closing ? closing[0].length : 0),
     }
+  }
+
+  // Wkleja `inner` w miejsce zaznaczenia (dokładając blok ```ansi poza blokiem) i zwraca
+  // zaznaczenie obejmujące wstawiony fragment - dzięki temu od razu można nałożyć kolejny styl.
+  function commitInner(source, start, end, inner, caretInInner) {
+    let prefix = ''
+    let suffix = ''
+
+    if (!isInsideAnsiFence(source, start)) {
+      const { leading, trailing } = fenceLayout(source, start, end)
+      prefix = `${leading}${ANSI_FENCE_OPEN}`
+      suffix = `\n${FENCE}${trailing}`
+    }
+
+    const innerStart = start + prefix.length
+
+    return {
+      value: `${source.slice(0, start)}${prefix}${inner}${suffix}${source.slice(end)}`,
+      selectionStart: caretInInner === undefined ? innerStart : innerStart + caretInInner,
+      selectionEnd: caretInInner === undefined ? innerStart + inner.length : innerStart + caretInInner,
+    }
+  }
+
+  // Nakłada styl na zaznaczenie (łącząc go z istniejącym); poza blokiem ```ansi dodaje blok.
+  // Zaznaczenie zostaje na zmienionym tekście. Przy pustym zaznaczeniu kursor ląduje
+  // między sekwencją otwierającą a resetem.
+  function applyToSelection(value, start, end, codes) {
+    const source = String(value ?? '')
+
+    if (start === end) {
+      const open = `${ESC}[${codes.join(';')}m`
+      return commitInner(source, start, end, `${open}${ESC}[${RESET_CODE}m`, open.length)
+    }
+
+    const range = excludeFenceMarkers(source, start, end)
+    const inner = rewriteSelection(source, range.start, range.end, () => codes)
+
+    return commitInner(source, range.start, range.end, inner)
+  }
+
+  // Wybiera kody kolorów dla kolejnych widocznych znaków (`visibleCount` sztuk).
+  function effectCodesFor(effect, visibleCount) {
+    const { codes, mode } = effect
+
+    return Array.from({ length: visibleCount }, (_, index) => (
+      mode === 'cycle'
+        ? codes[index % codes.length]
+        : codes[Math.floor((index * codes.length) / visibleCount)]
+    ))
+  }
+
+  // Kod koloru dla każdego znaku; białe znaki dziedziczą kolor sąsiada, żeby nie mnożyć sekwencji.
+  function effectCodesPerChar(plain, effect) {
+    const chars = Array.from(plain)
+    const visibleCount = chars.filter((char) => !/\s/.test(char)).length
+    const colors = effectCodesFor(effect, visibleCount)
+
+    let visibleIndex = 0
+    let lastCode = colors[0]
+
+    return chars.map((char) => {
+      if (/\s/.test(char)) return lastCode
+
+      lastCode = colors[visibleIndex]
+      visibleIndex += 1
+      return lastCode
+    })
+  }
+
+  // Nakłada efekt kolorystyczny na zaznaczenie, zachowując pogrubienie, podkreślenie i tło.
+  // Zwraca null, gdy efekt jest nieznany albo zaznaczenie nie zawiera widocznych znaków.
+  function applyEffect(value, start, end, effectKey) {
+    const effect = EFFECTS.find((entry) => entry.key === effectKey)
+    const source = String(value ?? '')
+    const range = excludeFenceMarkers(source, start, end)
+    const plain = stripAnsi(source.slice(range.start, range.end))
+
+    if (!effect || plain.trim() === '') return null
+
+    const perChar = effectCodesPerChar(plain, effect)
+    const inner = rewriteSelection(source, range.start, range.end, (index) => [perChar[index], ...(effect.extra ?? [])])
+
+    return commitInner(source, range.start, range.end, inner)
   }
 
   // Wstawia pusty blok ```ansi (lub opakowuje w niego zaznaczenie).
@@ -185,6 +367,7 @@
     ESC,
     FOREGROUND_COLORS,
     BACKGROUND_COLORS,
+    EFFECTS,
     BOLD_CODE,
     UNDERLINE_CODE,
     RESET_CODE,
@@ -192,6 +375,7 @@
     stripAnsi,
     isInsideAnsiFence,
     applyToSelection,
+    applyEffect,
     insertFence,
     toHtml,
   }
