@@ -308,4 +308,67 @@ describe('getGuildMember', () => {
 
     await expect(getGuildMember('987654321098765432', '123456789012345678')).rejects.toBeInstanceOf(DiscordRateLimitedError)
   })
+
+  it('retries a short 429 and returns the member', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ message: 'You are being rate limited.', retry_after: 0.01 }, 429))
+      .mockResolvedValueOnce(jsonResponse({ roles: ['r1'], nick: null }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { getGuildMember } = await import('./discord-api.js')
+
+    await expect(getGuildMember('987654321098765432', '123456789012345678')).resolves.toMatchObject({ roles: ['r1'] })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('serves a stale cached member when a refresh is rate limited', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ roles: ['r1'], nick: null }))
+      .mockResolvedValue(jsonResponse({ message: 'You are being rate limited.', retry_after: 30 }, 429))
+    vi.stubGlobal('fetch', fetchMock)
+    const now = vi.spyOn(Date, 'now')
+
+    const { getGuildMember } = await import('./discord-api.js')
+
+    now.mockReturnValue(1_000_000)
+    await getGuildMember('987654321098765432', '123456789012345678')
+    now.mockReturnValue(1_000_000 + 60_000)
+
+    await expect(getGuildMember('987654321098765432', '123456789012345678')).resolves.toMatchObject({ roles: ['r1'] })
+    now.mockRestore()
+  })
+
+  it('does not serve stale data when a fresh member is forced', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ roles: ['r1'], nick: null }))
+      .mockResolvedValue(jsonResponse({ message: 'You are being rate limited.', retry_after: 30 }, 429))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { getGuildMember, DiscordRateLimitedError } = await import('./discord-api.js')
+
+    await getGuildMember('987654321098765432', '123456789012345678')
+    await expect(getGuildMember('987654321098765432', '123456789012345678', true)).rejects.toBeInstanceOf(DiscordRateLimitedError)
+  })
+})
+
+describe('guild member role mutations', () => {
+  it('retries a short 429 when removing a role', async () => {
+    process.env.DISCORD_TOKEN = 'test-token'
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ message: 'You are being rate limited.', retry_after: 0.01 }, 429))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { removeGuildMemberRole } = await import('./discord-api.js')
+
+    await expect(removeGuildMemberRole('123456789012345678', '987654321098765432', '111111111111111111')).resolves.toBe('updated')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
 })

@@ -22,6 +22,14 @@ function isRateLimitDisabled(): boolean {
     return process.env.DASHBOARD_DISABLE_RATE_LIMIT === '1';
 }
 
+function getSessionUserId(req: Request): string | null {
+    return req.session?.user?.id ?? null;
+}
+
+// Zalogowany uzytkownik jest liczony po ID z sesji, a nie po IP: wspolny NAT/proxy
+// i boty skanujace z tego samego adresu nie zjadaja mu limitu, a konto nadal ma sufit.
+const userKeyGenerator = (req: Request): string => `user:${getSessionUserId(req) ?? 'unknown'}`;
+
 const globalLimiter = rateLimit({
     windowMs: parsePositiveInt(process.env.DASHBOARD_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
     max: parsePositiveInt(process.env.DASHBOARD_RATE_LIMIT_MAX, 240),
@@ -32,6 +40,27 @@ const globalLimiter = rateLimit({
         rateLimitLogger.warn('DASHBOARD_RATE_LIMIT_HIT', 'Rate limit global hit.', {
             requestId: req.requestId,
             limiter: 'global',
+            ip: req.ip,
+            method: req.method,
+            path: req.path,
+            userAgent: req.get('user-agent') ?? '',
+        });
+        res.status(429).json({ error: 'Zbyt wiele zapytan. Sprobuj ponownie pozniej.' });
+    },
+});
+
+const userGlobalLimiter = rateLimit({
+    windowMs: parsePositiveInt(process.env.DASHBOARD_RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
+    max: parsePositiveInt(process.env.DASHBOARD_USER_RATE_LIMIT_MAX, 3000),
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userKeyGenerator,
+    skip: () => isRateLimitDisabled(),
+    handler: (req, res) => {
+        rateLimitLogger.warn('DASHBOARD_RATE_LIMIT_HIT', 'Rate limit global (user) hit.', {
+            requestId: req.requestId,
+            limiter: 'global-user',
+            userId: getSessionUserId(req),
             ip: req.ip,
             method: req.method,
             path: req.path,
@@ -79,8 +108,29 @@ const mutationLimiter = rateLimit({
     },
 });
 
+const userMutationLimiter = rateLimit({
+    windowMs: parsePositiveInt(process.env.DASHBOARD_MUTATION_RATE_LIMIT_WINDOW_MS, 60 * 1000),
+    max: parsePositiveInt(process.env.DASHBOARD_USER_MUTATION_RATE_LIMIT_MAX, 240),
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userKeyGenerator,
+    skip: () => isRateLimitDisabled(),
+    handler: (req, res) => {
+        rateLimitLogger.warn('DASHBOARD_RATE_LIMIT_HIT', 'Rate limit mutation (user) hit.', {
+            requestId: req.requestId,
+            limiter: 'mutation-user',
+            userId: getSessionUserId(req),
+            ip: req.ip,
+            method: req.method,
+            path: req.path,
+            userAgent: req.get('user-agent') ?? '',
+        });
+        res.status(429).json({ error: 'Zbyt wiele operacji modyfikujacych. Poczekaj chwile.' });
+    },
+});
+
 export function globalRateLimiter(req: Request, res: Response, next: NextFunction): void {
-    void globalLimiter(req, res, next);
+    void (getSessionUserId(req) ? userGlobalLimiter : globalLimiter)(req, res, next);
 }
 
 export function authRateLimiter(req: Request, res: Response, next: NextFunction): void {
@@ -93,5 +143,5 @@ export function mutationRateLimiter(req: Request, res: Response, next: NextFunct
         return;
     }
 
-    void mutationLimiter(req, res, next);
+    void (getSessionUserId(req) ? userMutationLimiter : mutationLimiter)(req, res, next);
 }

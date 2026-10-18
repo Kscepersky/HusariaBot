@@ -461,27 +461,48 @@ apiRouter.get('/members/by-ids', requireCurrentDashboardRole, async (req, res) =
         return;
     }
 
-    try {
-        const memberResults = await Promise.all(
-            ids.map(async (id) => {
-                const member = await getGuildMember(id, guildId);
-                if (!member) return null;
-                const displayName = member.nick ?? member.user?.global_name ?? member.user?.username ?? id;
-                const avatarHash = member.user?.avatar ?? null;
-                const avatarUrl = avatarHash
-                    ? `https://cdn.discordapp.com/avatars/${encodeURIComponent(id)}/${encodeURIComponent(avatarHash)}.png?size=64`
-                    : null;
-                return { id, displayName, avatarUrl };
-            }),
-        );
+    const settled = await Promise.allSettled(
+        ids.map(async (id) => {
+            const member = await getGuildMember(id, guildId);
+            if (!member) return null;
+            const displayName = member.nick ?? member.user?.global_name ?? member.user?.username ?? id;
+            const avatarHash = member.user?.avatar ?? null;
+            const avatarUrl = avatarHash
+                ? `https://cdn.discordapp.com/avatars/${encodeURIComponent(id)}/${encodeURIComponent(avatarHash)}.png?size=64`
+                : null;
+            return { id, displayName, avatarUrl };
+        }),
+    );
 
-        res.json({ members: memberResults.filter(Boolean) });
-    } catch (err) {
-        apiLogger.error('MEMBERS_BY_IDS_FETCH_FAILED', 'Nie udalo sie pobrac czlonkow serwera po ID.', {
-            requestedCount: ids.length,
-        }, err);
-        res.status(500).json({ error: 'Nie udało się pobrać danych użytkowników.' });
+    const members = settled.flatMap((result) => (result.status === 'fulfilled' && result.value ? [result.value] : []));
+    const failures = settled.flatMap((result) => (result.status === 'rejected' ? [result.reason as unknown] : []));
+
+    if (failures.length === 0) {
+        res.json({ members });
+        return;
     }
+
+    // Czesciowy wynik jest lepszy niz blad: front pokaze ID dla brakujacych i dociagnie je przy kolejnym odswiezeniu.
+    if (members.length > 0) {
+        apiLogger.warn('MEMBERS_BY_IDS_PARTIAL', 'Pobrano tylko czesc czlonkow serwera po ID.', {
+            requestedCount: ids.length,
+            failedCount: failures.length,
+        });
+        res.json({ members, partial: true });
+        return;
+    }
+
+    const rateLimited = failures.find((failure): failure is DiscordRateLimitedError => failure instanceof DiscordRateLimitedError);
+    if (rateLimited) {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil(rateLimited.retryAfterSeconds))));
+        res.status(503).json({ error: 'Discord chwilowo ogranicza zapytania. Spróbuj ponownie za chwilę.' });
+        return;
+    }
+
+    apiLogger.error('MEMBERS_BY_IDS_FETCH_FAILED', 'Nie udalo sie pobrac czlonkow serwera po ID.', {
+        requestedCount: ids.length,
+    }, failures[0]);
+    res.status(500).json({ error: 'Nie udało się pobrać danych użytkowników.' });
 });
 
 // GET /api/timeouts — list active timeouts in current guild

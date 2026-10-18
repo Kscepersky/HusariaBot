@@ -15,6 +15,9 @@ const GUILD_CHANNELS_CACHE_TTL_MS = 60_000;
 const GUILD_ROLES_CACHE_TTL_MS = 60_000;
 const GUILD_EMOJIS_CACHE_TTL_MS = 120_000;
 const GUILD_MEMBER_CACHE_TTL_MS = 30_000;
+const GUILD_MEMBER_STALE_MAX_AGE_MS = 10 * 60_000;
+const DISCORD_429_MAX_RETRIES = 2;
+const DISCORD_429_MAX_WAIT_MS = 2_000;
 
 interface DiscordRateLimitPayload {
     message?: string;
@@ -60,6 +63,33 @@ export class DiscordRateLimitedError extends Error {
         super('Discord events endpoint is rate limited.');
         this.retryAfterSeconds = retryAfterSeconds;
     }
+}
+
+async function readRetryAfterMs(resp: Response): Promise<number> {
+    const header = Number.parseFloat(resp.headers.get('retry-after') ?? '');
+    if (Number.isFinite(header)) return Math.max(0, header * 1000);
+
+    const body = await resp.clone().json().catch(() => null) as DiscordRateLimitPayload | null;
+    const retryAfter = body?.retry_after;
+    return typeof retryAfter === 'number' && Number.isFinite(retryAfter) ? Math.max(0, retryAfter * 1000) : 1_000;
+}
+
+/**
+ * fetch do Discorda, ktory przy krotkim 429 (<= DISCORD_429_MAX_WAIT_MS) czeka retry_after
+ * i ponawia. Dluzszy 429 zwraca bez czekania, zeby nie blokowac requestu dashboardu.
+ */
+async function discordFetch(url: string, init: RequestInit): Promise<Response> {
+    let resp = await fetch(url, init);
+
+    for (let attempt = 0; attempt < DISCORD_429_MAX_RETRIES && resp.status === 429; attempt += 1) {
+        const waitMs = await readRetryAfterMs(resp);
+        if (waitMs > DISCORD_429_MAX_WAIT_MS) break;
+
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        resp = await fetch(url, init);
+    }
+
+    return resp;
 }
 
 function requireEnv(name: string): string {
@@ -260,7 +290,7 @@ export async function getGuildMember(
     if (inFlight) return inFlight;
 
     const request = (async (): Promise<DiscordGuildMember | null> => {
-        const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}`, {
+        const resp = await discordFetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}`, {
             headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
         });
 
@@ -269,6 +299,12 @@ export async function getGuildMember(
             return null;
         }
         if (resp.status === 429) {
+            // Odswiezenie nie wyszlo: lepiej pokazac niedawno znanego czlonka niz wywalic request (np. sprawdzenie roli).
+            if (!forceFresh && cached && now - cached.fetchedAt < GUILD_MEMBER_STALE_MAX_AGE_MS) {
+                guildMemberCache.set(cacheKey, { data: cached.data, fetchedAt: Date.now() });
+                return cached.data;
+            }
+
             const retryAfterHeader = resp.headers.get('retry-after');
             const retryAfterFromHeader = retryAfterHeader ? Number.parseFloat(retryAfterHeader) : Number.NaN;
             const retryAfterFromBody = await resp.json()
@@ -315,7 +351,7 @@ export async function updateGuildMemberRoles(
             .filter((roleId) => isValidDiscordId(roleId)),
     )];
 
-    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}`, {
+    const resp = await discordFetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}`, {
         method: 'PATCH',
         headers: {
             Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}`,
@@ -355,7 +391,7 @@ export async function addGuildMemberRole(
         throw new Error('Invalid role ID format.');
     }
 
-    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
+    const resp = await discordFetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
         method: 'PUT',
         headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
     });
@@ -389,7 +425,7 @@ export async function removeGuildMemberRole(
         throw new Error('Invalid role ID format.');
     }
 
-    const resp = await fetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
+    const resp = await discordFetch(`${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
     });

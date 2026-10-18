@@ -196,8 +196,6 @@ export function createDashboardApp() {
         next();
     });
 
-    app.use(globalRateLimiter);
-
     app.use(session({
         secret:            requireEnv('DASHBOARD_SESSION_SECRET'),
         store:             sessionStore,
@@ -210,6 +208,10 @@ export function createDashboardApp() {
             secure:   process.env.NODE_ENV === 'production',
         },
     }));
+
+    // Po sesji, zeby zalogowany uzytkownik byl liczony po ID, a nie po IP.
+    // Boty bez ciasteczka nie powoduja odczytu ze store sesji (saveUninitialized: false).
+    app.use(globalRateLimiter);
 
     // Duze body (upload grafik w base64) tylko dla zalogowanych i tylko na trasach, ktore tego potrzebuja.
     // Reszta dostaje maly limit, wiec anonimowy klient nie zmusi serwera do parsowania 32 MB.
