@@ -23,6 +23,12 @@ function clonePost(post: ScheduledPost): ScheduledPost {
     };
 }
 
+vi.mock('../../permissions/access.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../permissions/access.js')>()),
+    isOwner: vi.fn(() => true),
+    resolveUserAccess: vi.fn(),
+}));
+
 vi.mock('../middleware/require-auth.js', () => ({
     requireAuth: (req: Request, _res: ExpressResponse, next: NextFunction): void => {
         const reqWithSession = req as unknown as {
@@ -90,7 +96,6 @@ vi.mock('../event-publisher.js', () => ({
 vi.mock('../discord-api.js', () => ({
     getGuildTextChannels: vi.fn(async () => [{ id: '123456789012345678' }]),
     getGuildMember: vi.fn(async () => ({ roles: [] })),
-    resolveDashboardRole: vi.fn(() => 'dev'),
     editChannelMessage: vi.fn(),
     deleteChannelMessage: vi.fn(),
     deleteGuildScheduledEvent: vi.fn(),
@@ -103,11 +108,11 @@ import {
     deleteGuildScheduledEvent,
     editChannelMessage,
     getGuildMember,
-    resolveDashboardRole,
 } from '../discord-api.js';
 import { updateScheduledPost } from '../scheduler/store.js';
 import { getGuildTextChannels } from '../discord-api.js';
 import { scheduledRouter } from './scheduled.js';
+import { applyTestRole } from './test-access.js';
 
 function buildPayload(overrides: Partial<EmbedFormData> = {}): EmbedFormData {
     return {
@@ -215,7 +220,7 @@ describe('scheduled routes - sent posts', () => {
         // resetAllMocks czysci implementacje z fabryki vi.mock, wiec ustawiamy je ponownie.
         process.env.GUILD_ID = '123456789012345678';
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as never);
-        vi.mocked(resolveDashboardRole).mockReturnValue('dev');
+        applyTestRole('dev');
     });
 
     afterEach(() => {
@@ -651,7 +656,7 @@ describe('scheduled routes - pending posts with stored upload', () => {
 
         process.env.GUILD_ID = '123456789012345678';
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as never);
-        vi.mocked(resolveDashboardRole).mockReturnValue('dev');
+        applyTestRole('dev');
     });
 
     afterEach(() => {

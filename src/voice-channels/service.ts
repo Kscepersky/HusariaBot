@@ -8,6 +8,8 @@ import {
     type VoiceState,
 } from 'discord.js';
 import { getTemporaryVoiceConfig } from './constants.js';
+import { getOwnerId } from '../permissions/access.js';
+import { getSupportRoleIds } from '../utils/role-access.js';
 import {
     deleteTemporaryVoiceChannelRecord,
     findTemporaryVoiceChannelByOwner,
@@ -112,8 +114,10 @@ function clearPendingEmptyChannelDeletion(channelId: string): void {
     pendingEmptyChannelDeletionTimers.delete(channelId);
 }
 
-function getManageChannelOverwriteTargets(ownerId: string, managerRoleIds: readonly string[]): string[] {
-    return [...new Set([ownerId, ...managerRoleIds])];
+/** Support (rola z panelu) i owner moga zarzadzac kazdym tymczasowym kanalem. */
+async function resolveVoiceManagerIds(channelOwnerId: string): Promise<string[]> {
+    const targetIds = [...await getSupportRoleIds(), getOwnerId()];
+    return [...new Set(targetIds)].filter((targetId) => targetId !== channelOwnerId);
 }
 
 async function deleteTemporaryVoiceChannelIfStillEmpty(guild: Guild, channelId: string): Promise<void> {
@@ -189,9 +193,8 @@ export async function ensureTemporaryVoiceChannelForMember(state: VoiceState): P
             reason: `Tymczasowy kanal voice dla ${member.user.tag}`,
         });
 
-        const overwriteTargets = getManageChannelOverwriteTargets(member.id, config.managerRoleIds);
+        const managerRoleIds = await resolveVoiceManagerIds(member.id);
         const manageChannelReason = `Nadanie zarzadzania kanalem dla ${member.user.tag}`;
-        const managerRoleIds = overwriteTargets.filter((targetId) => targetId !== member.id);
 
         try {
             await createdChannel.permissionOverwrites.edit(

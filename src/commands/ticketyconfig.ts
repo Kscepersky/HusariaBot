@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, SlashCommandBuilder } from 'discord.js';
-import { ensureSupportRole } from '../utils/role-access.js';
+import { ensureSectionAccess } from '../utils/role-access.js';
 import { buildTicketsConfigModal } from '../tickets/flow';
 
 export const ticketyConfigCommand = {
@@ -9,7 +9,7 @@ export const ticketyConfigCommand = {
         .setDefaultMemberPermissions(null),
 
     async execute(interaction: ChatInputCommandInteraction) {
-        if (!(await ensureSupportRole(interaction))) {
+        if (!(await ensureSectionAccess(interaction, 'ticket-history'))) {
             return;
         }
 

@@ -5,10 +5,8 @@ import {
     exchangeCode,
     getDiscordUser,
     getGuildMember,
-    hasRequiredRole,
-    hasDevRole,
-    resolveDashboardRole,
 } from '../discord-api.js';
+import { isOwner, resolveUserAccess } from '../../permissions/access.js';
 import type { SessionUser } from '../types.js';
 import { createLogger } from '../../utils/logger.js';
 import { cacheDiscordUser } from '../../utils/discord-user-cache.js';
@@ -114,18 +112,24 @@ authRouter.get('/discord/callback', async (req, res) => {
     try {
         const accessToken  = await exchangeCode(code, process.env.DISCORD_REDIRECT_URI!);
         const discordUser  = await getDiscordUser(accessToken);
-        const member       = await getGuildMember(discordUser.id, GUILD_ID);
+        const userIsOwner  = isOwner(discordUser.id);
 
-        if (!member) {
-            authLogger.warn('DASHBOARD_LOGIN_NOT_MEMBER', 'Odrzucono logowanie: uzytkownik nie jest czlonkiem guildii.', buildAuthLogContext(req, {
-                targetUserId: discordUser.id,
-            }));
-            res.redirect('/auth/error?msg=not_member');
-            return;
+        // Owner loguje sie zawsze; pozostali musza byc na serwerze i miec nadane uprawnienia.
+        if (!userIsOwner) {
+            const member = await getGuildMember(discordUser.id, GUILD_ID);
+
+            if (!member) {
+                authLogger.warn('DASHBOARD_LOGIN_NOT_MEMBER', 'Odrzucono logowanie: uzytkownik nie jest czlonkiem guildii.', buildAuthLogContext(req, {
+                    targetUserId: discordUser.id,
+                }));
+                res.redirect('/auth/error?msg=not_member');
+                return;
+            }
         }
 
-        if (!hasRequiredRole(member)) {
-            authLogger.warn('DASHBOARD_LOGIN_NO_ACCESS', 'Odrzucono logowanie: brak wymaganej roli dashboardu.', buildAuthLogContext(req, {
+        const access = await resolveUserAccess(discordUser.id);
+        if (!access.role) {
+            authLogger.warn('DASHBOARD_LOGIN_NO_ACCESS', 'Odrzucono logowanie: brak uprawnien do dashboardu.', buildAuthLogContext(req, {
                 targetUserId: discordUser.id,
             }));
             res.redirect('/auth/error?msg=no_access');
@@ -137,7 +141,7 @@ authRouter.get('/discord/callback', async (req, res) => {
             username:     discordUser.username,
             globalName:   discordUser.global_name,
             avatar:       discordUser.avatar,
-            dashboardRole: resolveDashboardRole(member),
+            dashboardRole: access.role,
         };
 
         await new Promise<void>((resolve, reject) => {
@@ -158,7 +162,7 @@ authRouter.get('/discord/callback', async (req, res) => {
             username: sessionUser.username,
             globalName: sessionUser.globalName ?? null,
             avatarHash: sessionUser.avatar ?? null,
-            dashboardRole: resolveDashboardRole(member),
+            dashboardRole: access.role,
             ip: req.ip ?? '',
             userAgent: req.get('user-agent') ?? '',
             createdAt: Date.now(),
@@ -232,16 +236,15 @@ authRouter.post('/killswitch', async (req, res) => {
     }
 
     try {
-        const member = await getGuildMember(actor.id, GUILD_ID);
-        if (!member || !hasDevRole(member)) {
-            authLogger.warn('DASHBOARD_KILLSWITCH_DENIED', 'Odrzucono killswitch: brak roli Dev.', buildAuthLogContext(req, {
+        if (!isOwner(actor.id)) {
+            authLogger.warn('DASHBOARD_KILLSWITCH_DENIED', 'Odrzucono killswitch: tylko owner.', buildAuthLogContext(req, {
                 actorUserId: actor.id,
             }));
-            res.status(403).json({ error: 'Brak uprawnień. Wymagana rola Dev.' });
+            res.status(403).json({ error: 'Brak uprawnień. Wymagany owner.' });
             return;
         }
     } catch (err) {
-        authLogger.error('DASHBOARD_KILLSWITCH_ROLE_CHECK_FAILED', 'Nie udalo sie zweryfikowac roli dla killswitch.', buildAuthLogContext(req), err);
+        authLogger.error('DASHBOARD_KILLSWITCH_ROLE_CHECK_FAILED', 'Nie udalo sie zweryfikowac ownera dla killswitch.', buildAuthLogContext(req), err);
         res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień.' });
         return;
     }
@@ -282,7 +285,7 @@ authRouter.post('/killswitch', async (req, res) => {
 });
 
 const ERROR_MESSAGES: Record<string, string> = {
-    no_access:     'Nie masz uprawnień. Wymagana rola: Zarząd, Moderator, Community Manager lub Dev.',
+    no_access:     'Nie masz uprawnień do dashboardu. Poproś ownera bota o nadanie dostępu.',
     not_member:    'Nie jesteś członkiem tego serwera Discord.',
     invalid_state: 'Błąd autoryzacji — nieprawidłowy stan. Spróbuj ponownie.',
     auth_failed:   'Logowanie nie powiodło się. Spróbuj ponownie.',
@@ -290,8 +293,8 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 authRouter.get('/error', (req, res) => {
-    const key = req.query.msg as string;
-    const message = ERROR_MESSAGES[key] ?? 'Wystąpił nieznany błąd.';
+    const key = typeof req.query.msg === 'string' ? req.query.msg : '';
+    const message = Object.hasOwn(ERROR_MESSAGES, key) ? ERROR_MESSAGES[key] : 'Wystąpił nieznany błąd.';
     res.status(403).send(buildErrorHtml(message));
 });
 

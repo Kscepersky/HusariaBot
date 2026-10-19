@@ -4,8 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync,  } from 'node:fs';
 import { buildActorContext } from './actor-context.js';
 import { requireAuth } from '../middleware/require-auth.js';
-import { requireSectionAccess, resolveCurrentDashboardRole } from '../middleware/require-section-access.js';
-import { isDashboardLanguage, resolveAllowedSections, resolveDefaultLanguage } from '../dashboard-sections.js';
+import { requireOwner, requireSectionAccess, resolveCurrentAccess } from '../middleware/require-section-access.js';
+import { DEFAULT_DASHBOARD_LANGUAGE, isDashboardLanguage } from '../dashboard-sections.js';
 import {
     createExternalGuildScheduledEvent,
     deleteGuildScheduledEvent,
@@ -16,8 +16,6 @@ import {
     addGuildMemberRole,
     removeGuildMemberRole,
     listGuildScheduledEvents,
-    hasDevRole,
-    hasRequiredRole,
     searchGuildMembers,
     sendImageToChannel,
     sendDirectMessage,
@@ -41,6 +39,7 @@ import { parsePositiveIntQuery } from './query-utils.js';
 import { economyRouter } from './api.economy.js';
 import { imagesRouter, isClientValidationError } from './api.images.js';
 import { statsRouter } from './api.stats.js';
+import { permissionsRouter } from './api.permissions.js';
 import { publishDashboardPost } from '../publish-flow.js';
 import {
     normalizeTrimmedString,
@@ -152,8 +151,8 @@ async function requireCurrentDashboardRole(req: Request, res: Response, next: Ne
     }
 
     try {
-        const member = await getGuildMember(userId, guildId);
-        if (!member || !hasRequiredRole(member)) {
+        const access = await resolveCurrentAccess(req);
+        if (!access.role) {
             res.status(403).json({ error: 'Brak uprawnień do wykonania tej operacji.' });
             return;
         }
@@ -290,21 +289,21 @@ apiRouter.get('/me', (req, res) => {
 // Front buduje na tym nawigacje zamiast zgadywac uprawnienia z kodow 403.
 apiRouter.get('/me/access', async (req, res) => {
     try {
-        const role = await resolveCurrentDashboardRole(req);
-        if (!role || role === 'member') {
+        const access = await resolveCurrentAccess(req);
+        if (!access.role) {
             res.status(403).json({ error: 'Brak uprawnień do panelu.' });
             return;
         }
 
-        // Rola w Discordzie mogla sie zmienic po zalogowaniu — odswiez sesje.
-        if (req.session.user && req.session.user.dashboardRole !== role) {
-            req.session.user = { ...req.session.user, dashboardRole: role };
+        // Uprawnienia moga sie zmienic po zalogowaniu - odswiez sesje.
+        if (req.session.user && req.session.user.dashboardRole !== access.role) {
+            req.session.user = { ...req.session.user, dashboardRole: access.role };
         }
 
         res.json({
-            role,
-            allowedSections: resolveAllowedSections(role),
-            language: req.session.language ?? resolveDefaultLanguage(role),
+            role: access.role,
+            allowedSections: access.sections,
+            language: req.session.language ?? DEFAULT_DASHBOARD_LANGUAGE,
             languageSource: req.session.language ? 'user' : 'default',
         });
     } catch (error) {
@@ -796,21 +795,9 @@ apiRouter.get('/tickets/history', requireSectionAccess('ticket-history'), async 
     }
 });
 
-// DELETE /api/tickets/history — clear all ticket history (Dev only)
-apiRouter.delete('/tickets/history', requireSectionAccess('ticket-history'), async (req, res) => {
+// DELETE /api/tickets/history — clear all ticket history (owner only)
+apiRouter.delete('/tickets/history', requireSectionAccess('ticket-history'), requireOwner(), async (req, res) => {
     try {
-        const guildId = process.env.GUILD_ID;
-        if (!guildId) {
-            res.status(500).json({ error: 'Brakuje GUILD_ID.' });
-            return;
-        }
-
-        const member = await getGuildMember(req.session.user!.id, guildId);
-        if (!member || !hasDevRole(member)) {
-            res.status(403).json({ error: 'Brak uprawnien. Wymagana rola Dev.' });
-            return;
-        }
-
         await clearTicketHistory();
 
         apiLogger.info('TICKET_HISTORY_CLEARED', 'Wyczyszczono historie ticketow.', {
@@ -1241,3 +1228,4 @@ apiRouter.post('/embed', requireSectionAccess('embed-creator'), async (req, res)
 apiRouter.use(statsRouter);
 apiRouter.use(imagesRouter);
 apiRouter.use(economyRouter);
+apiRouter.use(permissionsRouter);

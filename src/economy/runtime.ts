@@ -1,3 +1,4 @@
+import { getProtectedStaffRoleIds } from '../utils/role-access.js';
 import type { Client, Guild, GuildMember, Message, VoiceBasedChannel } from 'discord.js';
 import {
     awardMessageXp,
@@ -61,22 +62,6 @@ function resolveMessageCooldownKey(guildId: string, userId: string): string {
 function resolveLevelUpAnnouncementChannelId(): string | null {
     const channelId = process.env.LEVEL_UP_ANNOUNCE_CHANNEL_ID?.trim();
     return channelId && channelId.length > 0 ? channelId : null;
-}
-
-function resolveProtectedStaffRoleIds(): Set<string> {
-    const roleIds = [
-        process.env.ADMIN_ROLE_ID,
-        process.env.MODERATOR_ROLE_ID,
-        process.env.COMMUNITY_MANAGER_ROLE_ID,
-        process.env.DEV_ROLE_ID,
-        process.env.G2STAFF_ROLE_ID,
-    ];
-
-    return new Set(
-        roleIds
-            .map((roleId) => String(roleId ?? '').trim())
-            .filter((roleId) => /^\d{17,20}$/.test(roleId)),
-    );
 }
 
 async function getCachedEconomyConfig(nowTimestamp: number): Promise<EconomyConfig> {
@@ -258,7 +243,7 @@ export async function applyNaturalLevelUpSideEffects(
 
     try {
         const mappings = mappingsOverride ?? await getEconomyLevelRoleMappings(guild.id);
-        const protectedRoleIds = resolveProtectedStaffRoleIds();
+        const protectedRoleIds = await getProtectedStaffRoleIds();
         const safeMappings = mappings.filter((mapping) => !protectedRoleIds.has(mapping.roleId));
 
         if (safeMappings.length === 0) {

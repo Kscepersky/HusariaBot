@@ -13,7 +13,7 @@ import {
 import { resolveEconomyGuildId } from '../economy/discord.js';
 import { parseTimeoutDurationParts, type TimeoutDurationUnit } from '../timeouts/duration.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
-import { ensureSupportRole } from '../utils/role-access.js';
+import { ensureSectionAccess } from '../utils/role-access.js';
 import { createLogger } from '../utils/logger.js';
 
 const MAX_REASON_LENGTH = 500;
@@ -95,7 +95,7 @@ export const muteCommand = {
         }),
 
     async execute(interaction: ChatInputCommandInteraction) {
-        if (!(await ensureSupportRole(interaction))) {
+        if (!(await ensureSectionAccess(interaction, 'timeouts-system'))) {
             return;
         }
 

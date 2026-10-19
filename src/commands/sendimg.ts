@@ -6,7 +6,7 @@ import {
 } from 'discord.js';
 import { readdirSync, existsSync } from 'node:fs';
 import { extname, join, basename } from 'node:path';
-import { ensureSupportRole } from '../utils/role-access.js';
+import { ensureSectionAccess } from '../utils/role-access.js';
 
 const IMG_DIR = join(__dirname, '..', '..', 'img');
 const SUPPORTED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
@@ -44,7 +44,7 @@ export const sendImgCommand = {
     data: builder,
 
     async execute(interaction: ChatInputCommandInteraction) {
-        if (!(await ensureSupportRole(interaction))) {
+        if (!(await ensureSectionAccess(interaction, 'embed-creator'))) {
             return;
         }
 

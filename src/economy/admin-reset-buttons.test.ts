@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ADMIN_ROLE_ID } from '../utils/role-access.js';
 import { addCoinsByAdmin, getEconomyUserState } from './repository.js';
 import { resetEconomyDatabaseForTests } from './database.js';
 import { buildEconomyResetCustomId, handleEconomyResetButton } from './admin-reset-buttons.js';
 import { logEconomyAdminMutation } from './admin-log.js';
+
+const OWNER_ID = '100000000000000001';
+process.env.OWNER_ID = OWNER_ID;
+process.env.PERMISSIONS_DB_PATH = ':memory:';
 
 vi.mock('./admin-log.js', () => ({
     logEconomyAdminMutation: vi.fn().mockResolvedValue(undefined),
@@ -60,8 +63,7 @@ describe('handleEconomyResetButton', () => {
             const interaction = {
                 customId: buildEconomyResetCustomId('coins', 'confirm', USER_ID),
                 guildId: GUILD_ID,
-                user: { id: 'admin-1' },
-                member: { roles: [ADMIN_ROLE_ID] },
+                user: { id: OWNER_ID },
                 deferUpdate: vi.fn().mockResolvedValue(undefined),
                 editReply: vi.fn().mockResolvedValue(undefined),
                 update: vi.fn().mockResolvedValue(undefined),
@@ -96,8 +98,7 @@ describe('handleEconomyResetButton', () => {
             const interaction = {
                 customId: buildEconomyResetCustomId('coins', 'cancel', USER_ID),
                 guildId: GUILD_ID,
-                user: { id: 'admin-1' },
-                member: { roles: [ADMIN_ROLE_ID] },
+                user: { id: OWNER_ID },
                 update: vi.fn().mockResolvedValue(undefined),
                 replied: false,
                 deferred: false,
@@ -140,8 +141,7 @@ describe('handleEconomyResetButton', () => {
             const interaction = {
                 customId: buildEconomyResetCustomId('coins', 'confirm', USER_ID),
                 guildId: null,
-                user: { id: 'admin-1' },
-                member: { roles: [ADMIN_ROLE_ID] },
+                user: { id: OWNER_ID },
                 update: vi.fn().mockResolvedValue(undefined),
                 replied: false,
                 deferred: false,
@@ -172,8 +172,7 @@ describe('handleEconomyResetButton', () => {
             const interaction = {
                 customId: buildEconomyResetCustomId('coins', 'confirm', USER_ID),
                 guildId: GUILD_ID,
-                user: { id: 'admin-1' },
-                member: { roles: [ADMIN_ROLE_ID] },
+                user: { id: OWNER_ID },
                 deferUpdate: vi.fn().mockResolvedValue(undefined),
                 editReply: vi.fn().mockResolvedValue(undefined),
                 update: vi.fn().mockResolvedValue(undefined),

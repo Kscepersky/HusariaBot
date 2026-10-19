@@ -9,6 +9,16 @@ import type { NextFunction, Request, Response as ExpressResponse } from 'express
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EconomyConfig } from '../../economy/types.js';
 
+vi.mock('../../utils/role-access.js', () => ({
+    getProtectedStaffRoleIds: vi.fn(async () => new Set<string>()),
+}));
+
+vi.mock('../../permissions/access.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../permissions/access.js')>()),
+    isOwner: vi.fn(() => true),
+    resolveUserAccess: vi.fn(),
+}));
+
 vi.mock('../middleware/require-auth.js', () => ({
     requireAuth: (req: Request, _res: ExpressResponse, next: NextFunction): void => {
         const reqWithSession = req as unknown as {
@@ -68,10 +78,7 @@ vi.mock('../discord-api.js', () => ({
     addGuildMemberRole: vi.fn(),
     removeGuildMemberRole: vi.fn(),
     updateGuildMemberRoles: vi.fn(),
-    hasDevRole: vi.fn(() => true),
-    hasRequiredRole: vi.fn(() => true),
     hasG2StaffRole: vi.fn(() => false),
-    resolveDashboardRole: vi.fn(() => 'dev'),
     listGuildScheduledEvents: vi.fn(),
     searchGuildMembers: vi.fn(),
     listImages: vi.fn(),
@@ -144,10 +151,7 @@ import {
     DiscordRateLimitedError,
     getDiscordUserById,
     getGuildMember,
-    hasDevRole,
-    hasRequiredRole,
     removeGuildMemberRole,
-    resolveDashboardRole,
     sendDirectMessage,
     updateGuildMemberRoles,
 } from '../discord-api.js';
@@ -162,6 +166,9 @@ import {
 } from '../leaderboard-profile-cache-store.js';
 import { listDashboardLogs } from '../../utils/log-reader.js';
 import { apiRouter } from './api.js';
+import { applyTestRole } from './test-access.js';
+import { getProtectedStaffRoleIds } from '../../utils/role-access.js';
+import { resolveUserAccess } from '../../permissions/access.js';
 
 function buildConfig(overrides: Partial<EconomyConfig> = {}): EconomyConfig {
     return {
@@ -279,16 +286,11 @@ describe('api economy settings routes', () => {
     beforeEach(() => {
         vi.resetAllMocks();
         process.env.GUILD_ID = '123456789012345678';
-        process.env.ADMIN_ROLE_ID = '910000000000000001';
-        process.env.MODERATOR_ROLE_ID = '910000000000000002';
-        process.env.COMMUNITY_MANAGER_ROLE_ID = '910000000000000003';
-        process.env.DEV_ROLE_ID = '910000000000000004';
         process.env.SERVER_MUTE_ROLE_ID = '910000000000000005';
         vi.mocked(getGuildMember).mockResolvedValue({ roles: ['admin-role'] } as any);
         vi.mocked(getDiscordUserById).mockResolvedValue(null as any);
-        vi.mocked(hasDevRole).mockReturnValue(true);
-        vi.mocked(hasRequiredRole).mockReturnValue(true);
-        vi.mocked(resolveDashboardRole).mockReturnValue('dev');
+        applyTestRole('dev');
+        vi.mocked(getProtectedStaffRoleIds).mockResolvedValue(new Set<string>());
         vi.mocked(getStoredLeaderboardProfile).mockResolvedValue(null);
         vi.mocked(upsertStoredLeaderboardProfile).mockResolvedValue(undefined);
         vi.mocked(pruneStoredLeaderboardProfiles).mockResolvedValue(undefined);
@@ -365,8 +367,7 @@ describe('api economy settings routes', () => {
     });
 
     it('zwraca 403 dla logow systemowych gdy uzytkownik utracil role dev', async () => {
-        vi.mocked(hasDevRole).mockReturnValue(false);
-        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
+        applyTestRole('moderator');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/logs`);
@@ -664,8 +665,7 @@ describe('api economy settings routes', () => {
 
     it('zwraca 403 dla recznej mutacji gdy uzytkownik utracil role', async () => {
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
-        vi.mocked(hasDevRole).mockReturnValue(false);
-        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
+        applyTestRole('moderator');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/user-mutation`, {
@@ -743,8 +743,7 @@ describe('api economy settings routes', () => {
     it('zwraca 403 dla aktualizacji ekonomii gdy uzytkownik utracil role', async () => {
         const payload = buildConfig();
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
-        vi.mocked(hasDevRole).mockReturnValue(false);
-        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
+        applyTestRole('moderator');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/settings`, {
@@ -763,9 +762,9 @@ describe('api economy settings routes', () => {
         });
     });
 
-    it('zwraca 502 dla aktualizacji ekonomii gdy weryfikacja roli nie dziala', async () => {
+    it('zwraca 502 dla aktualizacji ekonomii gdy weryfikacja uprawnien nie dziala', async () => {
         const payload = buildConfig();
-        vi.mocked(getGuildMember).mockRejectedValue(new Error('discord unavailable'));
+        vi.mocked(resolveUserAccess).mockRejectedValue(new Error('permissions db unavailable'));
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/settings`, {
@@ -960,6 +959,8 @@ describe('api economy settings routes', () => {
     });
 
     it('odrzuca mapowanie levelowe dla roli staff', async () => {
+        vi.mocked(getProtectedStaffRoleIds).mockResolvedValue(new Set(['910000000000000001']));
+
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/level-roles`, {
                 method: 'PUT',
@@ -969,7 +970,7 @@ describe('api economy settings routes', () => {
                 body: JSON.stringify({
                     mappings: [
                         {
-                            roleId: process.env.ADMIN_ROLE_ID,
+                            roleId: '910000000000000001',
                             minLevel: 10,
                         },
                     ],
@@ -979,7 +980,7 @@ describe('api economy settings routes', () => {
             const body = await parseJsonResponse(response);
 
             expect(response.status).toBe(400);
-            expect(body.error).toBe('Mapowania leveli nie moga zawierac ról staff (Admin, Moderator, Community Manager, Dev).');
+            expect(body.error).toBe('Mapowania leveli nie moga zawierac ról staff (rola supportu ustawiona w panelu uprawnień).');
             expect(vi.mocked(replaceEconomyLevelRoleMappings)).not.toHaveBeenCalled();
         });
     });
@@ -1158,8 +1159,7 @@ describe('api economy settings routes', () => {
 
     it('zwraca 403 gdy uzytkownik utracil role dashboardu', async () => {
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
-        vi.mocked(hasDevRole).mockReturnValue(false);
-        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
+        applyTestRole('moderator');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/reset-users`, {
@@ -1351,8 +1351,7 @@ describe('api economy settings routes', () => {
 
     it('zwraca 403 dla leaderboardu gdy uzytkownik utracil role', async () => {
         vi.mocked(getGuildMember).mockResolvedValue({ roles: [] } as any);
-        vi.mocked(hasRequiredRole).mockReturnValue(false);
-        vi.mocked(resolveDashboardRole).mockReturnValue('member');
+        applyTestRole('member');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/leaderboard`);
@@ -1365,6 +1364,7 @@ describe('api economy settings routes', () => {
     });
 
     it('zwraca 502 dla leaderboardu gdy weryfikacja roli nie dziala', async () => {
+        applyTestRole('moderator');
         vi.mocked(getGuildMember).mockRejectedValue(new Error('discord unavailable'));
 
         await withServer(async (baseUrl) => {
@@ -1378,9 +1378,7 @@ describe('api economy settings routes', () => {
     });
 
     it('blokuje ustawienia ekonomii dla support role bez roli Dev', async () => {
-        vi.mocked(hasRequiredRole).mockReturnValue(true);
-        vi.mocked(hasDevRole).mockReturnValue(false);
-        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
+        applyTestRole('moderator');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/economy/settings`);
@@ -1393,9 +1391,7 @@ describe('api economy settings routes', () => {
     });
 
     it('pozwala support role pobrac leaderboard bez roli Dev', async () => {
-        vi.mocked(hasRequiredRole).mockReturnValue(true);
-        vi.mocked(hasDevRole).mockReturnValue(false);
-        vi.mocked(resolveDashboardRole).mockReturnValue('moderator');
+        applyTestRole('moderator');
         vi.mocked(getEconomyLeaderboardPage).mockResolvedValue({
             sortBy: 'xp',
             page: 1,
@@ -2413,8 +2409,7 @@ describe('api economy settings routes', () => {
     });
 
     it('zwraca 403 dla /api/images gdy uzytkownik nie ma wymaganej roli dashboardowej', async () => {
-        vi.mocked(hasRequiredRole).mockReturnValue(false);
-        vi.mocked(resolveDashboardRole).mockReturnValue('member');
+        applyTestRole('member');
 
         await withServer(async (baseUrl) => {
             const response = await fetch(`${baseUrl}/api/images`);
@@ -2815,9 +2810,7 @@ describe('api economy settings routes', () => {
 // faktycznie odmawia dostepu do sekcji spoza allowlisty g2staff.
 describe('rola g2staff - egzekwowanie allowlisty sekcji w API', () => {
     beforeEach(() => {
-        vi.mocked(resolveDashboardRole).mockReturnValue('g2staff');
-        vi.mocked(hasRequiredRole).mockReturnValue(true);
-        vi.mocked(hasDevRole).mockReturnValue(false);
+        applyTestRole('g2staff');
     });
 
     const deniedEndpoints: Array<{ section: string; method: string; path: string }> = [

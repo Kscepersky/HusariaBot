@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from 'discord.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
-import { ensureSupportRole } from '../utils/role-access.js';
+import { ensureSectionAccess } from '../utils/role-access.js';
 
 export const pingCommand = {
     data: new SlashCommandBuilder()
@@ -9,7 +9,7 @@ export const pingCommand = {
         .setDefaultMemberPermissions(null),
 
     async execute(interaction: ChatInputCommandInteraction) {
-        if (!(await ensureSupportRole(interaction))) {
+        if (!(await ensureSectionAccess(interaction, 'server-stats'))) {
             return;
         }
 

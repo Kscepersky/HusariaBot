@@ -4,6 +4,12 @@ import express from 'express';
 import type { NextFunction, Request, Response as ExpressResponse } from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../permissions/access.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../permissions/access.js')>()),
+    isOwner: vi.fn(() => true),
+    resolveUserAccess: vi.fn(),
+}));
+
 vi.mock('../middleware/require-auth.js', () => ({
     requireAuth: (req: Request, _res: ExpressResponse, next: NextFunction): void => {
         const reqWithSession = req as unknown as {
@@ -23,14 +29,11 @@ vi.mock('../discord-api.js', () => ({
     getGuildRoles: vi.fn(),
     getGuildEmojis: vi.fn(),
     getGuildMember: vi.fn(),
-    resolveDashboardRole: vi.fn(() => 'dev'),
     getDiscordUserById: vi.fn(),
     addGuildMemberRole: vi.fn(),
     removeGuildMemberRole: vi.fn(),
     updateGuildMemberRoles: vi.fn(),
     listGuildScheduledEvents: vi.fn(),
-    hasDevRole: vi.fn(() => true),
-    hasRequiredRole: vi.fn(() => true),
     searchGuildMembers: vi.fn(),
     listImages: vi.fn(),
     sendImageToChannel: vi.fn(),
@@ -170,12 +173,13 @@ import {
     getAllChannelStatsForExport,
     getAllMemberCountsForExport,
 } from '../../economy/stats-store.js';
-import { getGuildMember, hasRequiredRole, getGuildAllChannels } from '../discord-api.js';
+import { getGuildMember, getGuildAllChannels } from '../discord-api.js';
 import {
     upsertStoredLeaderboardProfile,
     pruneStoredLeaderboardProfiles,
 } from '../leaderboard-profile-cache-store.js';
 import { apiRouter } from './api.js';
+import { applyTestRole } from './test-access.js';
 
 const GUILD_ID = 'guild-123';
 const START = '2024-03-10';
@@ -184,8 +188,8 @@ const DATE_PARAMS = `startDate=${START}&endDate=${END}`;
 
 beforeEach(() => {
     process.env.GUILD_ID = GUILD_ID;
+    applyTestRole('dev');
     vi.mocked(getGuildMember).mockResolvedValue({ roles: ['admin-role'] } as never);
-    vi.mocked(hasRequiredRole).mockReturnValue(true);
     vi.mocked(getGuildAllChannels).mockResolvedValue([
         { id: 'ch-1', name: 'general', type: 0 },
         { id: 'vc-1', name: 'Voice 1', type: 2 },

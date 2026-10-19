@@ -12,5 +12,4 @@ export interface TemporaryVoiceChannelStoreData {
 export interface TemporaryVoiceConfig {
     triggerChannelId: string;
     categoryId: string;
-    managerRoleIds: readonly string[];
 }

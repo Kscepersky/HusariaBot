@@ -14,12 +14,8 @@ import {
     TextInputBuilder,
     TextInputStyle,
 } from 'discord.js';
-import {
-    DEV_ROLE_ID,
-    SUPPORT_ROLE_IDS,
-    SUPPORT_ACCESS_DENIED_MESSAGE,
-    ensureSupportRole,
-} from '../utils/role-access.js';
+import { ensureSectionAccess } from '../utils/role-access.js';
+import { resolveTicketStaffAccess } from './staff-access.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
 import { getGuildEmoji } from '../utils/guild-emojis.js';
 import { createLogger } from '../utils/logger.js';
@@ -243,7 +239,7 @@ export function buildTicketsConfigModal(): ModalBuilder {
 }
 
 export async function handleTicketsConfigModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
-    if (!(await ensureSupportRole(interaction))) {
+    if (!(await ensureSectionAccess(interaction, 'ticket-history'))) {
         return;
     }
 
@@ -315,6 +311,7 @@ export async function handleOpenTicketButton(interaction: ButtonInteraction): Pr
         const usernamePart = sanitizeTicketUsername(interaction.user.username);
         const channelName = `zgloszenie-${usernamePart}-${ticketNumber}`.slice(0, 100);
 
+        const staffAccess = await resolveTicketStaffAccess();
         const permissionOverwrites = [
             {
                 id: interaction.guild!.id,
@@ -330,28 +327,8 @@ export async function handleOpenTicketButton(interaction: ButtonInteraction): Pr
                     PermissionFlagsBits.EmbedLinks,
                 ],
             },
-            ...SUPPORT_ROLE_IDS.map((roleId) => ({
-                id: roleId,
-                allow: [
-                    PermissionFlagsBits.ViewChannel,
-                    PermissionFlagsBits.SendMessages,
-                    PermissionFlagsBits.ReadMessageHistory,
-                    PermissionFlagsBits.ManageMessages,
-                ],
-            })),
+            ...staffAccess.overwrites,
         ];
-
-        if (DEV_ROLE_ID && !SUPPORT_ROLE_IDS.includes(DEV_ROLE_ID)) {
-            permissionOverwrites.push({
-                id: DEV_ROLE_ID,
-                allow: [
-                    PermissionFlagsBits.ViewChannel,
-                    PermissionFlagsBits.SendMessages,
-                    PermissionFlagsBits.ReadMessageHistory,
-                    PermissionFlagsBits.ManageMessages,
-                ],
-            });
-        }
 
         const botMemberId = interaction.guild!.members.me?.id;
         if (botMemberId) {
@@ -385,14 +362,14 @@ export async function handleOpenTicketButton(interaction: ButtonInteraction): Pr
         const ticketEmbed = new EmbedBuilder()
             .setColor(HusariaColors.RED)
             .setDescription((() => {
-                const supportMentions = SUPPORT_ROLE_IDS.map((roleId) => `<@&${roleId}>`).join(' ');
+                const supportMentions = staffAccess.supportRoleIds.map((roleId) => `<@&${roleId}>`).join(' ');
                 const mentionSuffix = supportMentions.length > 0 ? `\n\n${supportMentions}` : '';
                 return `Witaj, **${interaction.user.username}**. Opisz swój problem, niedługo skontaktuje się z tobą zespół administracyjny.${mentionSuffix}`;
             })());
 
         await createdChannel.send({
             embeds: [ticketEmbed],
-            allowedMentions: { roles: SUPPORT_ROLE_IDS },
+            allowedMentions: { roles: staffAccess.supportRoleIds },
             components: [
                 new ActionRowBuilder<ButtonBuilder>().addComponents(
                     new ButtonBuilder()
@@ -589,7 +566,7 @@ export async function handleUserCloseTicketCancel(interaction: ButtonInteraction
 }
 
 export async function handleAdminCloseTicketButton(interaction: ButtonInteraction): Promise<void> {
-    if (!(await ensureSupportRole(interaction, SUPPORT_ACCESS_DENIED_MESSAGE))) {
+    if (!(await ensureSectionAccess(interaction, 'ticket-history'))) {
         return;
     }
 
@@ -617,7 +594,7 @@ export async function handleAdminCloseTicketButton(interaction: ButtonInteractio
 }
 
 export async function handleAdminCloseTicketConfirm(interaction: ButtonInteraction): Promise<void> {
-    if (!(await ensureSupportRole(interaction, SUPPORT_ACCESS_DENIED_MESSAGE))) {
+    if (!(await ensureSectionAccess(interaction, 'ticket-history'))) {
         return;
     }
 
@@ -645,7 +622,7 @@ export async function handleAdminCloseTicketConfirm(interaction: ButtonInteracti
 }
 
 export async function handleAdminCloseTicketCancel(interaction: ButtonInteraction): Promise<void> {
-    if (!(await ensureSupportRole(interaction, SUPPORT_ACCESS_DENIED_MESSAGE))) {
+    if (!(await ensureSectionAccess(interaction, 'ticket-history'))) {
         return;
     }
 
@@ -659,7 +636,7 @@ export async function handleAdminCloseTicketCancel(interaction: ButtonInteractio
 
 
 export async function handleAdminCloseReasonModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
-    if (!(await ensureSupportRole(interaction, SUPPORT_ACCESS_DENIED_MESSAGE))) {
+    if (!(await ensureSectionAccess(interaction, 'ticket-history'))) {
         return;
     }
 

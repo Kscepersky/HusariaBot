@@ -9,7 +9,7 @@ import { resetCoinsByAdmin, resetLevelByAdmin } from './repository.js';
 import { resolveEconomyGuildId } from './discord.js';
 import { logEconomyAdminMutation } from './admin-log.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
-import { ensureSupportRole } from '../utils/role-access.js';
+import { ensureSectionAccess } from '../utils/role-access.js';
 
 type EconomyResetAction = 'coins' | 'level';
 type EconomyResetDecision = 'confirm' | 'cancel';
@@ -91,7 +91,7 @@ export async function handleEconomyResetButton(interaction: ButtonInteraction): 
         return false;
     }
 
-    if (!(await ensureSupportRole(interaction))) {
+    if (!(await ensureSectionAccess(interaction, 'economy-leaderboard'))) {
         return true;
     }
 

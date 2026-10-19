@@ -11,7 +11,7 @@ import { HusariaColors } from '../utils/husaria-theme.js';
 import { createLogger } from '../utils/logger.js';
 import { sanitizeTicketUsername } from '../tickets/counter-store.js';
 import { SUPPORT_CATEGORY_ID } from '../tickets/constants.js';
-import { SUPPORT_ROLE_IDS, DEV_ROLE_ID } from '../utils/role-access.js';
+import { resolveTicketStaffAccess } from '../tickets/staff-access.js';
 import type { ShopOrder } from './types.js';
 
 const shopTicketLogger = createLogger('shop:ticket');
@@ -25,6 +25,7 @@ export async function createOrderTicket(
     const usernamePart = sanitizeTicketUsername(user.username);
     const channelName = `zamowienie-${usernamePart}-${order.id}`.slice(0, 100);
 
+    const staffAccess = await resolveTicketStaffAccess();
     const permissionOverwrites: {
         id: string;
         allow?: bigint[];
@@ -44,28 +45,8 @@ export async function createOrderTicket(
                 PermissionFlagsBits.EmbedLinks,
             ],
         },
-        ...SUPPORT_ROLE_IDS.map((roleId) => ({
-            id: roleId,
-            allow: [
-                PermissionFlagsBits.ViewChannel,
-                PermissionFlagsBits.SendMessages,
-                PermissionFlagsBits.ReadMessageHistory,
-                PermissionFlagsBits.ManageMessages,
-            ],
-        })),
+        ...staffAccess.overwrites,
     ];
-
-    if (DEV_ROLE_ID && !SUPPORT_ROLE_IDS.includes(DEV_ROLE_ID)) {
-        permissionOverwrites.push({
-            id: DEV_ROLE_ID,
-            allow: [
-                PermissionFlagsBits.ViewChannel,
-                PermissionFlagsBits.SendMessages,
-                PermissionFlagsBits.ReadMessageHistory,
-                PermissionFlagsBits.ManageMessages,
-            ],
-        });
-    }
 
     const botMemberId = guild.members.me?.id;
     if (botMemberId) {
@@ -94,7 +75,7 @@ export async function createOrderTicket(
             return null;
         }
 
-        const supportMentions = SUPPORT_ROLE_IDS.map((id) => `<@&${id}>`).join(' ');
+        const supportMentions = staffAccess.supportRoleIds.map((id) => `<@&${id}>`).join(' ');
 
         const embed = new EmbedBuilder()
             .setColor(HusariaColors.GOLD)
@@ -109,7 +90,7 @@ export async function createOrderTicket(
         await channel.send({
             content: supportMentions.length > 0 ? supportMentions : undefined,
             embeds: [embed],
-            allowedMentions: { users: [user.id], roles: SUPPORT_ROLE_IDS },
+            allowedMentions: { users: [user.id], roles: staffAccess.supportRoleIds },
         });
 
         shopTicketLogger.info('SHOP_ORDER_TICKET_CREATED', 'Utworzono kanał zamówienia.', {

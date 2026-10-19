@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { dodajCoinsyCommand } from './dodaj-coinsy.js';
 import { resetEconomyDatabaseForTests } from '../economy/database.js';
-import { ADMIN_ROLE_ID } from '../utils/role-access.js';
+
+const OWNER_ID = '100000000000000001';
+process.env.OWNER_ID = OWNER_ID;
+process.env.PERMISSIONS_DB_PATH = ':memory:';
 
 async function withTempEconomyDb(testFn: () => Promise<void>): Promise<void> {
     const directoryPath = await mkdtemp(join(tmpdir(), 'husaria-dodaj-coinsy-test-'));
@@ -40,8 +43,7 @@ describe('dodajCoinsyCommand', () => {
 
             const interaction = {
                 guildId: 'guild-1',
-                user: { id: 'admin-1' },
-                member: { roles: [ADMIN_ROLE_ID] },
+                user: { id: OWNER_ID },
                 options: {
                     getUser: () => ({ id: 'user-1' }),
                     getInteger: () => 200,

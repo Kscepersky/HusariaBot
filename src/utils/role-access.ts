@@ -1,102 +1,55 @@
-import { config } from 'dotenv';
 import {
-    BaseInteraction,
     ButtonInteraction,
     ChatInputCommandInteraction,
     MessageFlags,
     ModalSubmitInteraction,
 } from 'discord.js';
+import { canAccess, getOwnerId, resolveUserAccess } from '../permissions/access.js';
+import { getPermissionStore, isSnowflake } from '../permissions/permission-store.js';
+import type { DashboardSection } from '../dashboard/dashboard-sections.js';
+import { createLogger } from './logger.js';
 
-config();
-
-function requireEnv(name: string): string {
-    const value = process.env[name];
-    if (!value) {
-        throw new Error(`Brakująca zmienna środowiskowa: ${name}`);
-    }
-    return value;
-}
-
-function readOptionalEnv(name: string): string | null {
-    const value = process.env[name]?.trim();
-    return value && value.length > 0 ? value : null;
-}
-
-function toUniqueRoleIds(roleIds: Array<string | null | undefined>): string[] {
-    return [...new Set(roleIds.filter((roleId): roleId is string => typeof roleId === 'string' && roleId.length > 0))];
-}
-
-export const ADMIN_ROLE_ID = requireEnv('ADMIN_ROLE_ID');
-export const MODERATOR_ROLE_ID = requireEnv('MODERATOR_ROLE_ID');
-export const COMMUNITY_MANAGER_ROLE_ID = readOptionalEnv('COMMUNITY_MANAGER_ROLE_ID');
-export const DEV_ROLE_ID = readOptionalEnv('DEV_ROLE_ID');
-
-export const SUPPORT_ROLE_IDS = toUniqueRoleIds([
-    ADMIN_ROLE_ID,
-    MODERATOR_ROLE_ID,
-    COMMUNITY_MANAGER_ROLE_ID,
-]);
-
-export const SUPPORT_AND_DEV_ROLE_IDS = toUniqueRoleIds([
-    ...SUPPORT_ROLE_IDS,
-    DEV_ROLE_ID,
-]);
-
-export const SUPPORT_ACCESS_DENIED_MESSAGE =
-    '🚫 Ta funkcja jest dostępna tylko dla ról **Zarząd**, **Moderator**, **Community Manager** i **Dev**.';
+const accessLogger = createLogger('bot:access');
 
 export type SecuredInteraction =
     | ChatInputCommandInteraction
     | ModalSubmitInteraction
     | ButtonInteraction;
 
-export function hasSupportRoleIds(roleIds: readonly string[]): boolean {
-    return SUPPORT_ROLE_IDS.some((requiredRoleId) => roleIds.includes(requiredRoleId));
+export const SECTION_ACCESS_DENIED_MESSAGE =
+    '🚫 Nie masz uprawnień do tej funkcji. Poproś ownera bota o nadanie dostępu w panelu uprawnień.';
+
+/**
+ * Role Discorda uzywane wylacznie tam, gdzie sam Discord wymaga roli
+ * (widocznosc kanalow ticketow, pingi). Ustawiana przez ownera w panelu.
+ */
+export async function getSupportRoleIds(): Promise<string[]> {
+    const store = await getPermissionStore();
+    const roleId = await store.getSetting('support_role_id');
+    return roleId && isSnowflake(roleId) ? [roleId] : [];
 }
 
-export function hasRequiredRoleIds(roleIds: readonly string[]): boolean {
-    return SUPPORT_AND_DEV_ROLE_IDS.some((requiredRoleId) => roleIds.includes(requiredRoleId));
+/** Role staffu, ktorych nie wolno wiazac z progami leveli (automatyczne nadawanie/odbieranie). */
+export async function getProtectedStaffRoleIds(): Promise<Set<string>> {
+    return new Set(await getSupportRoleIds());
 }
 
-function extractRoleIds(member: unknown): string[] {
-    if (!member || typeof member !== 'object') {
-        return [];
-    }
+/**
+ * Uzytkownicy, ktorzy maja widziec kanaly ticketow niezaleznie od roli:
+ * owner oraz kazdy z uprawnieniem do historii ticketow.
+ */
+export async function getTicketStaffUserIds(): Promise<string[]> {
+    const store = await getPermissionStore();
+    const entries = await store.list();
+    const staffIds = entries
+        .filter((entry) => entry.sections.includes('ticket-history'))
+        .map((entry) => entry.userId);
 
-    const candidate = member as { roles?: unknown };
-    if (!candidate.roles) {
-        return [];
-    }
-
-    if (Array.isArray(candidate.roles)) {
-        return candidate.roles.filter((roleId): roleId is string => typeof roleId === 'string');
-    }
-
-    if (typeof candidate.roles === 'object' && candidate.roles !== null) {
-        const roleManager = candidate.roles as {
-            cache?: { keys: () => IterableIterator<string>; has?: (roleId: string) => boolean };
-            has?: (roleId: string) => boolean;
-        };
-
-        if (typeof roleManager.has === 'function') {
-            return SUPPORT_AND_DEV_ROLE_IDS.filter((roleId) => roleManager.has?.(roleId));
-        }
-
-        if (roleManager.cache && typeof roleManager.cache.has === 'function') {
-            return SUPPORT_AND_DEV_ROLE_IDS.filter((roleId) => roleManager.cache?.has?.(roleId));
-        }
-
-        if (roleManager.cache && typeof roleManager.cache.keys === 'function') {
-            return Array.from(roleManager.cache.keys());
-        }
-    }
-
-    return [];
+    return [...new Set([getOwnerId(), ...staffIds])];
 }
 
-export function interactionHasSupportRole(interaction: BaseInteraction): boolean {
-    const roleIds = extractRoleIds((interaction as { member?: unknown }).member);
-    return hasRequiredRoleIds(roleIds);
+export async function userHasSection(userId: string, section: DashboardSection): Promise<boolean> {
+    return canAccess(await resolveUserAccess(userId), section);
 }
 
 async function replyEphemeral(interaction: SecuredInteraction, content: string): Promise<void> {
@@ -108,14 +61,44 @@ async function replyEphemeral(interaction: SecuredInteraction, content: string):
     await interaction.reply({ content, flags: MessageFlags.Ephemeral });
 }
 
-export async function ensureSupportRole(
+async function ensureAccess(
     interaction: SecuredInteraction,
-    deniedMessage: string = SUPPORT_ACCESS_DENIED_MESSAGE,
+    isAllowed: (userId: string) => Promise<boolean>,
+    deniedMessage: string,
 ): Promise<boolean> {
-    if (interactionHasSupportRole(interaction)) {
+    let allowed = false;
+    try {
+        allowed = await isAllowed(interaction.user.id);
+    } catch (error) {
+        // Blad bazy uprawnien = odmowa (fail closed), nigdy dostep.
+        accessLogger.error('BOT_ACCESS_VERIFY_FAILED', 'Nie udalo sie zweryfikowac uprawnien uzytkownika.', { actorUserId: interaction.user.id }, error);
+    }
+
+    if (allowed) {
         return true;
     }
 
     await replyEphemeral(interaction, deniedMessage);
     return false;
+}
+
+/** Przepuszcza ownera i uzytkownikow z uprawnieniem do danej zakladki. */
+export function ensureSectionAccess(
+    interaction: SecuredInteraction,
+    section: DashboardSection,
+    deniedMessage: string = SECTION_ACCESS_DENIED_MESSAGE,
+): Promise<boolean> {
+    return ensureAccess(interaction, (userId) => userHasSection(userId, section), deniedMessage);
+}
+
+/** Przepuszcza kazdego, kto ma jakikolwiek dostep do dashboardu (owner lub staff). */
+export function ensureDashboardAccess(
+    interaction: SecuredInteraction,
+    deniedMessage: string = SECTION_ACCESS_DENIED_MESSAGE,
+): Promise<boolean> {
+    return ensureAccess(
+        interaction,
+        async (userId) => (await resolveUserAccess(userId)).role !== null,
+        deniedMessage,
+    );
 }

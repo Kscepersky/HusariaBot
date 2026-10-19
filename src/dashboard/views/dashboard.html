@@ -88,6 +88,10 @@
         <span class="sidebar-icon">👥</span>
         <span data-i18n="dashboard.aktywnosc_sesji">Aktywność sesji</span>
       </a>
+      <a href="#" class="sidebar-item" id="permissions-nav-item" data-section="permissions" style="display:none;">
+        <span class="sidebar-icon">🔐</span>
+        <span data-i18n="dashboard.uprawnienia">Uprawnienia</span>
+      </a>
     </nav>
   </aside>
   <div class="sidebar-overlay" id="sidebar-overlay"></div>
@@ -1292,7 +1296,7 @@
     <div id="section-session-activity" class="section-panel">
       <div class="section-header">
         <h2 data-i18n="sessionActivity.aktywnosc_sesji">👥 Aktywność sesji</h2>
-        <p data-i18n="sessionActivity.widok_tylko_dla_roli_dev">Widok tylko dla roli Dev. Kto jest teraz zalogowany oraz historia logowania i wylogowywania.</p>
+        <p data-i18n="sessionActivity.widok_tylko_dla_roli_dev">Widok tylko dla ownera. Kto jest teraz zalogowany oraz historia logowania i wylogowywania.</p>
       </div>
 
       <div class="creator-form-card">
@@ -1317,6 +1321,51 @@
             <button id="session-activity-next-btn" class="btn-secondary" type="button" data-i18n="sessionActivity.nastepna">Nastepna ➡</button>
           </div>
           <span class="preview-note" id="session-activity-count-label" data-i18n="sessionActivity.zdarzenia_0">Zdarzenia: 0</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="section-permissions" class="section-panel">
+      <div class="section-header">
+        <h2 data-i18n="permissions.uprawnienia">🔐 Uprawnienia</h2>
+        <p data-i18n="permissions.widok_tylko_dla_ownera">Widok tylko dla ownera. Nadawaj użytkownikom dostęp do wybranych zakładek dashboardu i komend bota.</p>
+      </div>
+
+      <div class="creator-form-card">
+        <h3 class="permissions-heading" data-i18n="permissions.dodaj_uzytkownika">Dodaj użytkownika</h3>
+        <div class="permissions-search-box">
+          <span class="permissions-search-icon" aria-hidden="true">🔎</span>
+          <input id="permissions-search" type="text" class="form-input" autocomplete="off" maxlength="64" placeholder="Szukaj użytkownika po nicku..." data-i18n-placeholder="permissions.szukaj_uzytkownika" aria-label="Szukaj użytkownika" data-i18n-aria-label="permissions.szukaj_uzytkownika">
+        </div>
+        <div id="permissions-search-results" class="permissions-results"></div>
+      </div>
+
+      <div class="creator-form-card">
+        <div class="scheduled-toolbar">
+          <h3 class="permissions-heading"><span data-i18n="permissions.uzytkownicy_z_dostepem">Użytkownicy z dostępem</span> <span id="permissions-count" class="permissions-count">0</span></h3>
+          <button id="permissions-refresh-btn" class="btn-secondary" type="button" data-i18n="permissions.odswiez">Odśwież</button>
+        </div>
+        <div id="permissions-list" class="permissions-list"></div>
+      </div>
+
+      <div class="creator-form-card">
+        <h3 class="permissions-heading" data-i18n="permissions.rola_supportu">Rola supportu</h3>
+        <p class="preview-note" data-i18n="permissions.rola_supportu_opis">Rola Discorda używana tam, gdzie wymaga jej sam Discord: widoczność i pingi w ticketach oraz zarządzanie kanałami głosowymi. Uprawnienia do zakładek i komend nadajesz powyżej.</p>
+        <div class="scheduled-toolbar">
+          <select id="permissions-support-role" class="form-select" aria-label="Rola supportu" data-i18n-aria-label="permissions.rola_supportu"></select>
+          <button id="permissions-support-role-save" class="btn-primary" type="button" data-i18n="permissions.zapisz">Zapisz</button>
+        </div>
+      </div>
+
+      <div class="creator-form-card">
+        <h3 class="permissions-heading" data-i18n="permissions.log_audytowy">Log audytowy</h3>
+        <div id="permissions-audit-list" class="permissions-audit"></div>
+        <div class="scheduled-toolbar">
+          <div class="image-pagination" id="permissions-audit-pagination" hidden>
+            <button id="permissions-audit-prev-btn" class="btn-secondary" type="button" data-i18n="sessionActivity.poprzednia">⬅ Poprzednia</button>
+            <span class="preview-note" id="permissions-audit-page-label"></span>
+            <button id="permissions-audit-next-btn" class="btn-secondary" type="button" data-i18n="sessionActivity.nastepna">Nastepna ➡</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1348,5 +1397,6 @@
 <script src="/public/js/editor/emoji-data.js"></script>
 <script src="/public/js/editor/emoji-search.js"></script>
 <script src="/public/js/app.js"></script>
+<script src="/public/js/permissions.js"></script>
 </body>
 </html>

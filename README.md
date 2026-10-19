@@ -160,12 +160,14 @@ DISCORD_TOKEN=              # Bot token — Discord Developer Portal → Bot →
 CLIENT_ID=                  # Application ID — Developer Portal → General Information
 GUILD_ID=                   # Your server ID (guild-scoped commands deploy instantly)
 
+# ── Owner ────────────────────────────────────────────────────────────────────
+# Discord user ID of the bot owner — right-click yourself → Copy User ID.
+# The bot and dashboard refuse to start without a valid ID. Everyone else gets
+# access through the dashboard's Permissions tab.
+OWNER_ID=
+
 # ── Role IDs ─────────────────────────────────────────────────────────────────
 # Right-click a role in Discord → Copy Role ID
-ADMIN_ROLE_ID=
-MODERATOR_ROLE_ID=
-COMMUNITY_MANAGER_ROLE_ID=
-DEV_ROLE_ID=
 SERVER_MUTE_ROLE_ID=        # Role assigned by /mute — must be below bot's highest role
 
 # ── Channel & Category IDs ────────────────────────────────────────────────────
@@ -244,7 +246,16 @@ BOT_DEV_LOGS=1
 
 ## Dashboard
 
-The dashboard is a separate Express web application secured by Discord OAuth2. Access is restricted to members holding one of the configured admin roles (Admin, Moderator, Community Manager, Dev).
+The dashboard is a separate Express web application secured by Discord OAuth2. Access is controlled by a single **owner** (`OWNER_ID` in `.env`) who grants other users access to individual tabs in the **Permissions** tab. Every API route re-checks access on the server, so hiding a tab in the UI is never the only protection.
+
+### Permissions (Owner only)
+
+- **Owner** — the Discord user ID in `OWNER_ID`. Always has full access, including the owner-only tabs; this can't be edited or revoked from the panel, and it is never stored in the database.
+- **Per-user tab access** — search for a server member and tick the tabs they may use (e.g. a moderator only gets the Post Creator). Changes apply immediately, no re-login needed. Users who left the server lose access automatically.
+- **Owner-only tabs** — Economy Settings, System Logs, Session Activity and Permissions can never be granted, nor can destructive actions (clearing ticket history/shop orders/stats, level role audit, session killswitch).
+- **Bot commands use the same permissions** — each command is tied to a tab: `/dodaj-xp`, `/dodaj-coinsy`, `/usun-coinsy`, `/resetuj-coinsy`, `/resetuj-level` → Economy Leaderboard; `/mute` → Timeouts; `/sendimg` → Post Creator; `/ticketyconfig` and closing tickets → Ticket History; `/ping` → Server Statistics; `/dashboard` → any dashboard access.
+- **Support role** — one Discord role, set in the panel, used only where Discord itself needs a role: ticket channel visibility and pings, managing temporary voice channels, and excluding it from level-role mappings. Owner and users with the Ticket History tab also get access to ticket channels.
+- **Audit log** — every grant, change and revocation (and support role change) is recorded with who did it, when, and the before/after state. Stored in `data/permissions.sqlite` (override with `PERMISSIONS_DB_PATH`).
 
 
 
@@ -314,7 +325,7 @@ A full-featured analytics panel with tabbed sections and per-tab date filtering:
 - Members joined vs. left per day for the selected period.
 - Net member change summary for the period.
 
-**Settings tab** *(Dev role only)*
+**Settings tab** *(Owner only)*
 - Toggle message and voice tracking on/off per channel.
 - Configure stat collection globally.
 
@@ -335,19 +346,19 @@ A full-featured analytics panel with tabbed sections and per-tab date filtering:
 
 The dashboard UI is available in Polish and English. The language can be switched from the dashboard UI and the choice is persisted.
 
-### System Logs (Dev only)
+### System Logs (Owner only)
 
 - Paginated log viewer showing all structured `.jsonl` entries from the last 30 days.
 - Filter by log level (trace / debug / info / warn / error / fatal) and free-text search.
 - Actor and target users are resolved to Discord avatar + display name when available, using an in-memory user profile cache populated at login.
 - Sensitive keys (`token`, `session`, `authorization`, etc.) are automatically redacted.
 
-### Session Activity (Dev only)
+### Session Activity (Owner only)
 
 - Real-time view of which dashboard users are currently logged in, with their Discord avatar, display name, Discord ID, IP address, and browser User-Agent.
 - Full login and logout event history for the last 30 days, stored in a dedicated SQLite database (`data/session-events.sqlite`).
 - Login events are recorded on every successful OAuth2 callback; logout events are recorded on explicit session destruction.
-- **Session killswitch** — a single button force-logs out all currently active dashboard users simultaneously, writes audit logout events for every affected session, and clears the underlying session store. Only accessible to users with the Dev role.
+- **Session killswitch** — a single button force-logs out all currently active dashboard users simultaneously, writes audit logout events for every affected session, and clears the underlying session store. Owner only.
 
 ---
 

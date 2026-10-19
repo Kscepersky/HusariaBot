@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { resetujLevelCommand } from './resetuj-level.js';
-import { ADMIN_ROLE_ID } from '../utils/role-access.js';
+
+const OWNER_ID = '100000000000000001';
+process.env.OWNER_ID = OWNER_ID;
+process.env.PERMISSIONS_DB_PATH = ':memory:';
 
 describe('resetujLevelCommand', () => {
     it('wyswietla potwierdzenie z przyciskami', async () => {
         const reply = vi.fn().mockResolvedValue(undefined);
         const interaction = {
-            member: { roles: [ADMIN_ROLE_ID] },
+            user: { id: OWNER_ID },
             options: {
                 getUser: () => ({ id: 'user-1' }),
             },

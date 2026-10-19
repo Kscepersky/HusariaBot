@@ -1,102 +1,58 @@
 import { describe, expect, it } from 'vitest';
 import {
-    DASHBOARD_ROLES,
+    ASSIGNABLE_SECTIONS,
     DASHBOARD_SECTIONS,
-    canAccessSection,
+    OWNER_ONLY_SECTIONS,
+    isAssignableSection,
     isDashboardLanguage,
-    resolveAllowedSections,
-    resolveDefaultLanguage,
-    type DashboardSection,
+    isDashboardSection,
+    normalizeSections,
 } from './dashboard-sections.js';
 
-const G2STAFF_ALLOWED: DashboardSection[] = [
-    'embed-creator',
-    'scheduled-posts',
-    'sent-posts',
-    'events',
-    'g2-matches',
-    'economy-leaderboard',
-    'image-library',
-    'server-stats',
-];
-
-const G2STAFF_DENIED: DashboardSection[] = [
-    'economy-settings',
-    'shop',
-    'timeouts-system',
-    'ticket-history',
-    'system-logs',
-    'session-activity',
-];
-
-describe('canAccessSection', () => {
-    it('rozstrzyga kazda pare rola x sekcja bez wyjatku', () => {
-        for (const role of DASHBOARD_ROLES) {
-            for (const section of DASHBOARD_SECTIONS) {
-                expect(typeof canAccessSection(role, section)).toBe('boolean');
-            }
-        }
+describe('podzial sekcji', () => {
+    it('owner-only i przydzielane sa rozlaczne i razem daja wszystkie sekcje', () => {
+        expect(ASSIGNABLE_SECTIONS.filter((section) => OWNER_ONLY_SECTIONS.includes(section))).toEqual([]);
+        expect([...ASSIGNABLE_SECTIONS, ...OWNER_ONLY_SECTIONS].sort()).toEqual([...DASHBOARD_SECTIONS].sort());
     });
 
-    it('dev widzi wszystkie sekcje', () => {
-        for (const section of DASHBOARD_SECTIONS) {
-            expect(canAccessSection('dev', section)).toBe(true);
-        }
+    it.each(['economy-settings', 'system-logs', 'session-activity', 'permissions'])('%s jest tylko dla ownera', (section) => {
+        expect(OWNER_ONLY_SECTIONS).toContain(section);
+        expect(isAssignableSection(section)).toBe(false);
     });
 
-    it.each(['admin', 'moderator', 'community_manager'] as const)('%s widzi wszystko poza sekcjami dev-only', (role) => {
-        expect(canAccessSection(role, 'economy-settings')).toBe(false);
-        expect(canAccessSection(role, 'system-logs')).toBe(false);
-        expect(canAccessSection(role, 'session-activity')).toBe(false);
-        expect(canAccessSection(role, 'shop')).toBe(true);
-        expect(canAccessSection(role, 'timeouts-system')).toBe(true);
-        expect(canAccessSection(role, 'ticket-history')).toBe(true);
-    });
-
-    it.each(G2STAFF_ALLOWED)('g2staff ma dostep do sekcji %s', (section) => {
-        expect(canAccessSection('g2staff', section)).toBe(true);
-    });
-
-    it.each(G2STAFF_DENIED)('g2staff nie ma dostepu do sekcji %s', (section) => {
-        expect(canAccessSection('g2staff', section)).toBe(false);
-    });
-
-    it('g2staff ma dokladnie 8 dozwolonych sekcji', () => {
-        expect([...resolveAllowedSections('g2staff')].sort()).toEqual([...G2STAFF_ALLOWED].sort());
-    });
-
-    it('member i nieznane role nie dostaja zadnej sekcji', () => {
-        for (const section of DASHBOARD_SECTIONS) {
-            expect(canAccessSection('member', section)).toBe(false);
-            expect(canAccessSection('nieznana-rola', section)).toBe(false);
-            expect(canAccessSection(undefined, section)).toBe(false);
-            expect(canAccessSection(null, section)).toBe(false);
-        }
+    it.each(['embed-creator', 'shop', 'timeouts-system', 'ticket-history', 'economy-leaderboard'])('%s mozna przydzielic', (section) => {
+        expect(isAssignableSection(section)).toBe(true);
     });
 });
 
-describe('resolveDefaultLanguage', () => {
-    it('zwraca angielski dla g2staff', () => {
-        expect(resolveDefaultLanguage('g2staff')).toBe('en');
+describe('walidatory', () => {
+    it('isDashboardSection odrzuca nieznane wartosci i nie-stringi', () => {
+        expect(isDashboardSection('shop')).toBe(true);
+        expect(isDashboardSection('nope')).toBe(false);
+        expect(isDashboardSection(null)).toBe(false);
+        expect(isDashboardSection(42)).toBe(false);
     });
 
-    it.each(['dev', 'admin', 'moderator', 'community_manager'] as const)('zwraca polski dla %s', (role) => {
-        expect(resolveDefaultLanguage(role)).toBe('pl');
+    it('isAssignableSection odrzuca nieznane wartosci', () => {
+        expect(isAssignableSection('__proto__')).toBe(false);
+        expect(isAssignableSection(undefined)).toBe(false);
     });
 
-    it('domyslnie zwraca polski dla nieznanej roli', () => {
-        expect(resolveDefaultLanguage('cokolwiek')).toBe('pl');
-    });
-});
-
-describe('isDashboardLanguage', () => {
-    it('akceptuje wylacznie pl i en', () => {
+    it('isDashboardLanguage przyjmuje tylko pl i en', () => {
         expect(isDashboardLanguage('pl')).toBe(true);
         expect(isDashboardLanguage('en')).toBe(true);
         expect(isDashboardLanguage('de')).toBe(false);
-        expect(isDashboardLanguage('')).toBe(false);
-        expect(isDashboardLanguage('PL')).toBe(false);
-        expect(isDashboardLanguage({})).toBe(false);
-        expect(isDashboardLanguage(null)).toBe(false);
+    });
+});
+
+describe('normalizeSections', () => {
+    it('sortuje wg kolejnosci dashboardu i usuwa duplikaty', () => {
+        expect(normalizeSections(['shop', 'embed-creator', 'shop'])).toEqual(['embed-creator', 'shop']);
+    });
+
+    it('nie mutuje wejscia', () => {
+        const input = Object.freeze(['shop', 'embed-creator'] as const);
+        expect(() => normalizeSections(input)).not.toThrow();
+        expect(input).toEqual(['shop', 'embed-creator']);
     });
 });

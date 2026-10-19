@@ -16,6 +16,7 @@ import { SQLiteSessionStore } from './session/sqlite-store.js';
 import { initializeDashboardScheduler } from './scheduler/service.js';
 import { probePandaScoreApiConnection } from './g2-matches/pandascore-client.js';
 import { probeDiscordBotApi } from './discord-api.js';
+import { getOwnerId } from '../permissions/access.js';
 import { createLogger } from '../utils/logger.js';
 
 config();
@@ -32,10 +33,7 @@ const REQUIRED_ENV = [
     'DISCORD_CLIENT_SECRET',
     'DISCORD_REDIRECT_URI',
     'GUILD_ID',
-    'ADMIN_ROLE_ID',
-    'MODERATOR_ROLE_ID',
-    'COMMUNITY_MANAGER_ROLE_ID',
-    'DEV_ROLE_ID',
+    'OWNER_ID',
     'DASHBOARD_SESSION_SECRET',
     'PANDASCORE_API_KEY',
 ];
@@ -131,6 +129,7 @@ async function runDashboardStartupDiagnostics(port: number): Promise<void> {
 
 export function createDashboardApp() {
     for (const key of REQUIRED_ENV) requireEnv(key);
+    getOwnerId();
 
     const { dir: sessionDir, db: sessionDbFile } = resolveSessionDbLocation();
     const sessionTtlHours = parsePositiveInt(process.env.DASHBOARD_SESSION_TTL_HOURS, DEFAULT_SESSION_TTL_HOURS);

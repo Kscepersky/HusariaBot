@@ -263,6 +263,7 @@ async function loadDashboardAccess() {
     currentDashboardRole = access.role ?? currentDashboardRole
 
     applyAllowedSectionsToNav()
+    showOwnerOnlyNavItems()
 
     // Recznie zapisany wybor uzytkownika ma pierwszenstwo nad domyslnym dla roli.
     const stored = window.I18n.readStoredLanguage()
@@ -271,6 +272,14 @@ async function loadDashboardAccess() {
   } catch (error) {
     console.error('Nie udalo sie pobrac uprawnien dashboardu:', error)
   }
+}
+
+/** Zakladki startujace jako ukryte, ktore serwer jawnie przyznal (np. panel uprawnien). */
+function showOwnerOnlyNavItems() {
+  if (!Array.isArray(allowedSections) || !allowedSections.includes('permissions')) return
+
+  const item = document.getElementById('permissions-nav-item')
+  if (item instanceof HTMLElement) item.style.display = ''
 }
 
 function isSectionAllowed(section) {
@@ -362,7 +371,7 @@ async function loadUserInfo() {
     await loadDashboardAccess()
 
     const settingsTabBtn = document.getElementById('stats-settings-tab-btn')
-    if (settingsTabBtn && currentDashboardRole !== 'dev') {
+    if (settingsTabBtn && currentDashboardRole !== 'owner') {
       settingsTabBtn.style.display = 'none'
     }
 
@@ -595,6 +604,10 @@ function switchSection(section) {
 
   if (section === 'session-activity') {
     void loadSessionActivity({ silent: false })
+  }
+
+  if (section === 'permissions' && typeof window.loadPermissionsSection === 'function') {
+    void window.loadPermissionsSection()
   }
 
   if (section === 'server-stats') {
@@ -1929,6 +1942,8 @@ function renderSessionActivity() {
 function buildDashboardRoleChipHtml(role) {
   if (!role) return ''
   const map = {
+    owner:             { label: 'Owner',              color: '#5865f2' },
+    staff:             { label: 'Staff',              color: '#f0a500' },
     dev:               { label: 'Dev',               color: '#5865f2' },
     admin:             { label: 'Admin',              color: '#dc143c' },
     moderator:         { label: 'Moderator',          color: '#f0a500' },
@@ -3170,7 +3185,7 @@ function bindEconomyLeaderboardSectionListeners() {
 
   const auditToolbar = document.getElementById('economy-role-audit-toolbar')
   if (auditToolbar) {
-    auditToolbar.hidden = currentDashboardRole !== 'dev'
+    auditToolbar.hidden = currentDashboardRole !== 'owner'
   }
   document.getElementById('economy-role-audit-btn')?.addEventListener('click', runEconomyRoleAudit)
 
@@ -7841,7 +7856,7 @@ function bindShopSectionListeners() {
 
   // Dev-only: show clear-history toolbar
   const shopOrdersDevToolbar = document.getElementById('shop-orders-dev-toolbar')
-  if (shopOrdersDevToolbar && currentDashboardRole === 'dev') {
+  if (shopOrdersDevToolbar && currentDashboardRole === 'owner') {
     shopOrdersDevToolbar.hidden = false
   }
   document.getElementById('shop-orders-clear-btn')?.addEventListener('click', () => void clearAllShopOrders())

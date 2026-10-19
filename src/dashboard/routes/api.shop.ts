@@ -21,12 +21,9 @@ import {
 import {
     getGuildMember,
     getGuildEmojis,
-    hasDevRole,
-    resolveDashboardRole,
     sendDirectMessage,
 } from '../discord-api.js';
-import { requireSectionAccess } from '../middleware/require-section-access.js';
-import { canAccessSection } from '../dashboard-sections.js';
+import { requireOwner, requireSectionAccess } from '../middleware/require-section-access.js';
 import { closeOrderTicketViaRest } from '../../shop/order-ticket-closer.js';
 import { createLogger } from '../../utils/logger.js';
 
@@ -46,41 +43,11 @@ function parsePositiveIntQuery(value: unknown, fallback: number): number {
 }
 
 /**
- * Dostep do sekcji "shop". Celowo NIE uzywa `hasRequiredRole` - ta funkcja
- * przepuszcza takze role g2staff, ktora sklepu widziec nie powinna.
+ * Dostep do sekcji "shop" nadawany w panelu uprawnien.
  */
 const requireShopAdminRole = requireSectionAccess('shop');
 
-async function requireShopDevRole(req: Request, res: Response, next: NextFunction): Promise<void> {
-    const guildId = process.env.GUILD_ID;
-    if (!guildId) {
-        res.status(500).json({ error: 'Brakuje GUILD_ID.' });
-        return;
-    }
-
-    const userId = req.session.user?.id;
-    if (!userId) {
-        res.status(401).json({ error: 'Brak autoryzacji.' });
-        return;
-    }
-
-    try {
-        const member = await getGuildMember(userId, guildId);
-        if (!member || !canAccessSection(resolveDashboardRole(member), 'shop')) {
-            res.status(403).json({ error: 'Brak uprawnień do zarządzania sklepem.' });
-            return;
-        }
-        if (!hasDevRole(member)) {
-            res.status(403).json({ error: 'Brak uprawnień deweloperskich.' });
-            return;
-        }
-
-        next();
-    } catch (error) {
-        shopApiLogger.error('SHOP_DEV_ROLE_VERIFY_FAILED', 'Nie udało się zweryfikować uprawnień dev.', { userId }, error);
-        res.status(502).json({ error: 'Nie udało się zweryfikować uprawnień użytkownika.' });
-    }
-}
+const requireShopOwner = [requireSectionAccess('shop'), requireOwner()];
 
 // GET /api/shop/items
 shopApiRouter.get('/items', requireAuth, requireShopAdminRole, async (req, res) => {
@@ -371,7 +338,7 @@ shopApiRouter.post('/orders/:id/cancel', requireAuth, requireShopAdminRole, asyn
 });
 
 // DELETE /api/shop/orders/all  — dev-only: wipe entire order history
-shopApiRouter.delete('/orders/all', requireAuth, requireShopDevRole, async (req, res) => {
+shopApiRouter.delete('/orders/all', requireAuth, ...requireShopOwner, async (req, res) => {
     const parsed = shopDeleteAllOrdersSchema.safeParse(req.body);
     if (!parsed.success) {
         res.status(400).json({ success: false, error: 'Wymagane potwierdzenie operacji.' });

@@ -56,6 +56,7 @@ import { zamowieniaCommand } from './commands/zamowienia.js';
 import { handleShopButton } from './shop/shop-buttons.js';
 import { createLogger } from './utils/logger.js';
 import { setBotClient } from './bot-client.js';
+import { getOwnerId } from './permissions/access.js';
 // Załaduj zmienne środowiskowe z .env
 config();
 
@@ -341,6 +342,13 @@ const discordToken = process.env.DISCORD_TOKEN?.trim();
 
 if (!discordToken) {
     botLogger.fatal('BOT_TOKEN_MISSING', 'Brakuje DISCORD_TOKEN. Bot nie moze wystartowac.');
+    process.exit(1);
+}
+
+try {
+    getOwnerId();
+} catch (error) {
+    botLogger.fatal('BOT_OWNER_ID_INVALID', 'Brakuje poprawnego OWNER_ID. Bot nie moze wystartowac.', {}, error);
     process.exit(1);
 }
 

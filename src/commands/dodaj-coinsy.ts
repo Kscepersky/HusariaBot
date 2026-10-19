@@ -8,7 +8,7 @@ import { addCoinsByAdmin } from '../economy/repository.js';
 import { logEconomyAdminMutation } from '../economy/admin-log.js';
 import { resolveEconomyGuildId } from '../economy/discord.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
-import { ensureSupportRole } from '../utils/role-access.js';
+import { ensureSectionAccess } from '../utils/role-access.js';
 
 const MAX_REASON_LENGTH = 200;
 
@@ -49,7 +49,7 @@ export const dodajCoinsyCommand = {
         }),
 
     async execute(interaction: ChatInputCommandInteraction) {
-        if (!(await ensureSupportRole(interaction))) {
+        if (!(await ensureSectionAccess(interaction, 'economy-leaderboard'))) {
             return;
         }
 

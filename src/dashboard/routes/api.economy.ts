@@ -1,6 +1,7 @@
+import { getProtectedStaffRoleIds } from '../../utils/role-access.js';
 import { Router,   } from 'express';
 import { config } from 'dotenv';
-import { requireDevRole, requireSectionAccess, } from '../middleware/require-section-access.js';
+import { requireOwner, requireSectionAccess, } from '../middleware/require-section-access.js';
 import {
     addGuildMemberRole,
     getGuildMember,
@@ -58,21 +59,6 @@ interface EconomyImportRoleSyncStats {
     updatedUsers: number;
     skippedUsers: number;
     failedUsers: number;
-}
-
-function resolveProtectedStaffRoleIds(): Set<string> {
-    const roleIds = [
-        process.env.ADMIN_ROLE_ID,
-        process.env.MODERATOR_ROLE_ID,
-        process.env.COMMUNITY_MANAGER_ROLE_ID,
-        process.env.DEV_ROLE_ID,
-    ];
-
-    return new Set(
-        roleIds
-            .map((roleId) => String(roleId ?? '').trim())
-            .filter((roleId) => /^\d{17,20}$/.test(roleId)),
-    );
 }
 
 function parseEconomyImportUserRows(csvContent: string): EconomyCsvImportedUserRow[] {
@@ -143,7 +129,7 @@ function hasSameRoles(currentRoles: string[], nextRoles: string[]): boolean {
 
 async function syncLevelRolesAfterCsvImport(guildId: string, csvContent: string): Promise<EconomyImportRoleSyncStats> {
     const mappings = await getEconomyLevelRoleMappings(guildId);
-    const protectedRoleIds = resolveProtectedStaffRoleIds();
+    const protectedRoleIds = await getProtectedStaffRoleIds();
     const automationSafeMappings = mappings.filter((mapping) => !protectedRoleIds.has(String(mapping.roleId)));
     const importedUsers = parseEconomyImportUserRows(csvContent);
 
@@ -380,11 +366,11 @@ economyRouter.put('/economy/level-roles', requireSectionAccess('economy-settings
         return;
     }
 
-    const protectedRoleIds = resolveProtectedStaffRoleIds();
+    const protectedRoleIds = await getProtectedStaffRoleIds();
     const hasProtectedRole = parsedBody.data.mappings.some((mapping) => protectedRoleIds.has(mapping.roleId));
     if (hasProtectedRole) {
         res.status(400).json({
-            error: 'Mapowania leveli nie moga zawierac ról staff (Admin, Moderator, Community Manager, Dev).',
+            error: 'Mapowania leveli nie moga zawierac ról staff (rola supportu ustawiona w panelu uprawnień).',
         });
         return;
     }
@@ -450,7 +436,7 @@ economyRouter.post('/economy/import-csv', requireSectionAccess('economy-settings
 });
 
 // POST /api/economy/level-roles/audit — read-only check of every user's level vs. threshold role (dev only)
-economyRouter.post('/economy/level-roles/audit', requireSectionAccess('economy-leaderboard'), requireDevRole(), async (_req, res) => {
+economyRouter.post('/economy/level-roles/audit', requireSectionAccess('economy-leaderboard'), requireOwner(), async (_req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) {
         res.status(500).json({ error: 'Brakuje GUILD_ID.' });
@@ -458,7 +444,7 @@ economyRouter.post('/economy/level-roles/audit', requireSectionAccess('economy-l
     }
 
     try {
-        const protectedRoleIds = resolveProtectedStaffRoleIds();
+        const protectedRoleIds = await getProtectedStaffRoleIds();
         const mappings = (await getEconomyLevelRoleMappings(guildId))
             .filter((mapping) => !protectedRoleIds.has(String(mapping.roleId)));
         const [users, members, guildRoles] = await Promise.all([
@@ -486,7 +472,7 @@ economyRouter.post('/economy/level-roles/audit', requireSectionAccess('economy-l
 });
 
 // POST /api/economy/level-roles/fix-user — correct threshold roles of a single user (dev only)
-economyRouter.post('/economy/level-roles/fix-user', requireSectionAccess('economy-leaderboard'), requireDevRole(), async (req, res) => {
+economyRouter.post('/economy/level-roles/fix-user', requireSectionAccess('economy-leaderboard'), requireOwner(), async (req, res) => {
     const targetUserId = normalizeTrimmedString(req.body?.targetUserId);
     if (!/^\d{17,20}$/.test(targetUserId)) {
         res.status(400).json({ error: 'Nieprawidłowe ID użytkownika.' });
@@ -500,7 +486,7 @@ economyRouter.post('/economy/level-roles/fix-user', requireSectionAccess('econom
     }
 
     try {
-        const protectedRoleIds = resolveProtectedStaffRoleIds();
+        const protectedRoleIds = await getProtectedStaffRoleIds();
         const mappings = (await getEconomyLevelRoleMappings(guildId))
             .filter((mapping) => !protectedRoleIds.has(String(mapping.roleId)));
         if (mappings.length === 0) {

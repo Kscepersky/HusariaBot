@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { parsePositiveIntQuery } from './query-utils.js';
 import { resolveLeaderboardProfilesWithLimit } from './leaderboard-profiles.js';
-import { requireDevRole, requireSectionAccess } from '../middleware/require-section-access.js';
+import { requireOwner, requireSectionAccess } from '../middleware/require-section-access.js';
 import {
     getGuildAllChannels,
 } from '../discord-api.js';
@@ -96,7 +96,7 @@ statsRouter.get('/stats/server/config', requireSectionAccess('server-stats'), as
 const MAX_EXCLUDED_CHANNELS = 500;
 
 // PUT /api/stats/server/config — update excluded channel IDs for stats
-statsRouter.put('/stats/server/config', requireSectionAccess('server-stats'), requireDevRole(), async (req, res) => {
+statsRouter.put('/stats/server/config', requireSectionAccess('server-stats'), requireOwner(), async (req, res) => {
     const body: unknown = req.body;
     if (
         typeof body !== 'object'
@@ -544,7 +544,7 @@ statsRouter.get('/stats/export/all', requireSectionAccess('server-stats'), async
 });
 
 // POST /api/stats/reset — usuwa wszystkie statystyki serwera
-statsRouter.post('/stats/reset', requireSectionAccess('server-stats'), requireDevRole(), async (_req, res) => {
+statsRouter.post('/stats/reset', requireSectionAccess('server-stats'), requireOwner(), async (_req, res) => {
     const guildId = process.env.GUILD_ID;
     if (!guildId) { res.status(500).json({ error: 'Brakuje GUILD_ID.' }); return; }
     try {

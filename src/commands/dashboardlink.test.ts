@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { dashboardLinkCommand } from './dashboardlink.js';
-import { ADMIN_ROLE_ID } from '../utils/role-access.js';
+
+const OWNER_ID = '100000000000000001';
+process.env.OWNER_ID = OWNER_ID;
+process.env.PERMISSIONS_DB_PATH = ':memory:';
 
 describe('dashboardLinkCommand', () => {
     const originalDashboardBaseUrl = process.env.DASHBOARD_BASE_URL;
@@ -14,9 +17,7 @@ describe('dashboardLinkCommand', () => {
 
         const reply = vi.fn().mockResolvedValue(undefined);
         const interaction = {
-            member: {
-                roles: [ADMIN_ROLE_ID],
-            },
+            user: { id: OWNER_ID },
             reply,
         } as any;
 
@@ -37,9 +38,7 @@ describe('dashboardLinkCommand', () => {
 
         const reply = vi.fn().mockResolvedValue(undefined);
         const interaction = {
-            member: {
-                roles: [ADMIN_ROLE_ID],
-            },
+            user: { id: OWNER_ID },
             reply,
         } as any;
 

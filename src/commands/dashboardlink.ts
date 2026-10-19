@@ -9,7 +9,7 @@ import {
 } from 'discord.js';
 import { config } from 'dotenv';
 import { HusariaColors } from '../utils/husaria-theme.js';
-import { ensureSupportRole } from '../utils/role-access.js';
+import { ensureDashboardAccess } from '../utils/role-access.js';
 
 config();
 
@@ -43,7 +43,7 @@ export const dashboardLinkCommand = {
         .setDefaultMemberPermissions(null),
 
     async execute(interaction: ChatInputCommandInteraction) {
-        if (!(await ensureSupportRole(interaction))) {
+        if (!(await ensureDashboardAccess(interaction))) {
             return;
         }
 

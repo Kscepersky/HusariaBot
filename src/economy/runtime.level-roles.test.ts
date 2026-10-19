@@ -23,6 +23,12 @@ vi.mock('../utils/logger.js', () => ({
 
 const getEconomyLevelRoleMappingsMock = vi.fn<(guildId: string) => Promise<EconomyLevelRoleMapping[]>>();
 
+const getProtectedStaffRoleIdsMock = vi.fn<() => Promise<Set<string>>>();
+
+vi.mock('../utils/role-access.js', () => ({
+    getProtectedStaffRoleIds: () => getProtectedStaffRoleIdsMock(),
+}));
+
 vi.mock('./repository.js', () => ({
     awardMessageXp: vi.fn(),
     awardVoiceXp: vi.fn(),
@@ -107,11 +113,8 @@ function actionsLogged(): string[] {
 beforeEach(() => {
     loggerCalls.length = 0;
     getEconomyLevelRoleMappingsMock.mockReset();
-    delete process.env.ADMIN_ROLE_ID;
-    delete process.env.MODERATOR_ROLE_ID;
-    delete process.env.COMMUNITY_MANAGER_ROLE_ID;
-    delete process.env.DEV_ROLE_ID;
-    delete process.env.G2STAFF_ROLE_ID;
+    getProtectedStaffRoleIdsMock.mockReset();
+    getProtectedStaffRoleIdsMock.mockResolvedValue(new Set());
     delete process.env.LEVEL_UP_ANNOUNCE_CHANNEL_ID;
 });
 
@@ -211,8 +214,8 @@ describe('applyNaturalLevelUpSideEffects', () => {
         expect(stub.addRole).not.toHaveBeenCalled();
     });
 
-    it('odfiltrowuje role chronione (w tym g2staff) z mapowan', async () => {
-        process.env.G2STAFF_ROLE_ID = TIER_20;
+    it('odfiltrowuje role chronione (rola supportu) z mapowan', async () => {
+        getProtectedStaffRoleIdsMock.mockResolvedValue(new Set([TIER_20]));
         const stub = createGuildStub([]);
         getEconomyLevelRoleMappingsMock.mockResolvedValue(createMappings());
 

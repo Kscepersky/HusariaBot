@@ -19,8 +19,15 @@ vi.mock('./constants.js', () => ({
     getTemporaryVoiceConfig: vi.fn(() => ({
         triggerChannelId: 'trigger-channel',
         categoryId: 'voice-category',
-        managerRoleIds: ['admin-role', 'moderator-role', 'community-manager-role', 'dev-role'],
     })),
+}));
+
+vi.mock('../utils/role-access.js', () => ({
+    getSupportRoleIds: vi.fn(async () => ['support-role']),
+}));
+
+vi.mock('../permissions/access.js', () => ({
+    getOwnerId: vi.fn(() => 'bot-owner'),
 }));
 
 vi.mock('./store.js', () => ({
@@ -113,29 +120,19 @@ describe('temporary voice service', () => {
             permissionOverwrites: { edit: ReturnType<typeof vi.fn> };
         };
         expect(createPayload.userLimit).toBeUndefined();
-        expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledTimes(5);
+        expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledTimes(3);
         expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
             'user-1',
             { ManageChannels: true },
             { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
         );
         expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
-            'admin-role',
+            'support-role',
             { ManageChannels: true },
             { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
         );
         expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
-            'moderator-role',
-            { ManageChannels: true },
-            { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
-        );
-        expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
-            'community-manager-role',
-            { ManageChannels: true },
-            { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
-        );
-        expect(createdChannel.permissionOverwrites.edit).toHaveBeenCalledWith(
-            'dev-role',
+            'bot-owner',
             { ManageChannels: true },
             { reason: 'Nadanie zarzadzania kanalem dla TestUser#0001' },
         );
@@ -176,8 +173,8 @@ describe('temporary voice service', () => {
         const deleteCreatedChannelMock = vi.fn(async () => undefined);
         const setChannelMock = vi.fn(async () => undefined);
         const editMock = vi.fn(async (targetId: string) => {
-            if (targetId === 'dev-role') {
-                throw new Error('Brak uprawnien dla roli dev');
+            if (targetId === 'support-role') {
+                throw new Error('Brak uprawnien dla roli supportu');
             }
         });
 

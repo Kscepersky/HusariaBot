@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { muteCommand } from './mute.js';
 import { resetEconomyDatabaseForTests } from '../economy/database.js';
 import { getActiveEconomyTimeoutForUser } from '../economy/repository.js';
-import { ADMIN_ROLE_ID } from '../utils/role-access.js';
+
+const OWNER_ID = '100000000000000001';
+process.env.OWNER_ID = OWNER_ID;
+process.env.PERMISSIONS_DB_PATH = ':memory:';
 
 async function withTempEconomyDb(testFn: () => Promise<void>): Promise<void> {
     const directoryPath = await mkdtemp(join(tmpdir(), 'husaria-mute-test-'));
@@ -46,8 +49,7 @@ describe('muteCommand', () => {
                     fetch: vi.fn(),
                 },
             },
-            user: { id: 'admin-1' },
-            member: { roles: [ADMIN_ROLE_ID] },
+            user: { id: OWNER_ID },
             options: {
                 getUser: () => ({ id: '111111111111111111', bot: false }),
                 getInteger: () => 1,
@@ -89,8 +91,7 @@ describe('muteCommand', () => {
                         }),
                     },
                 },
-                user: { id: 'admin-1' },
-                member: { roles: [ADMIN_ROLE_ID] },
+                user: { id: OWNER_ID },
                 options: {
                     getUser: () => ({ id: '111111111111111111', bot: false, send: sendDm }),
                     getInteger: () => 1,
@@ -123,7 +124,6 @@ describe('muteCommand', () => {
     it('naklada timeout dla czlonka staffu', async () => {
         await withTempEconomyDb(async () => {
             process.env.SERVER_MUTE_ROLE_ID = '999999999999999999';
-            process.env.ADMIN_ROLE_ID = '910000000000000001';
             const sendDm = vi.fn().mockResolvedValue(undefined);
 
             const deferReply = vi.fn().mockResolvedValue(undefined);
@@ -145,8 +145,7 @@ describe('muteCommand', () => {
                         }),
                     },
                 },
-                user: { id: 'admin-1' },
-                member: { roles: [ADMIN_ROLE_ID] },
+                user: { id: OWNER_ID },
                 options: {
                     getUser: () => ({ id: '111111111111111111', bot: false, send: sendDm }),
                     getInteger: () => 1,
@@ -191,8 +190,7 @@ describe('muteCommand', () => {
                         fetch: vi.fn(),
                     },
                 },
-                user: { id: 'admin-1' },
-                member: { roles: [ADMIN_ROLE_ID] },
+                user: { id: OWNER_ID },
                 options: {
                     getUser: () => ({ id: '111111111111111111', bot: false, send: vi.fn() }),
                     getInteger: () => 1,
@@ -248,8 +246,7 @@ describe('muteCommand', () => {
                         }),
                     },
                 },
-                user: { id: 'admin-1' },
-                member: { roles: [ADMIN_ROLE_ID] },
+                user: { id: OWNER_ID },
                 options: {
                     getUser: () => ({ id: '111111111111111111', bot: false, send: sendDm }),
                     getInteger: () => 1,

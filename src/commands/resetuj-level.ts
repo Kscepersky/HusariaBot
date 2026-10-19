@@ -4,7 +4,7 @@ import {
     MessageFlags,
     SlashCommandBuilder,
 } from 'discord.js';
-import { ensureSupportRole } from '../utils/role-access.js';
+import { ensureSectionAccess } from '../utils/role-access.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
 import { buildEconomyResetButtons } from '../economy/admin-reset-buttons.js';
 
@@ -22,7 +22,7 @@ export const resetujLevelCommand = {
         }),
 
     async execute(interaction: ChatInputCommandInteraction) {
-        if (!(await ensureSupportRole(interaction))) {
+        if (!(await ensureSectionAccess(interaction, 'economy-leaderboard'))) {
             return;
         }
 
