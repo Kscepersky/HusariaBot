@@ -14,6 +14,10 @@ import { resetujCoinsyCommand } from './commands/resetuj-coinsy.js';
 import { leaderboardXpCommand } from './commands/leaderboard-xp.js';
 import { stankontaCommand } from './commands/stankonta.js';
 import { levelCommand } from './commands/level.js';
+import { shipCommand } from './commands/ship.js';
+import { zeswatajCommand } from './commands/zeswataj.js';
+import { canvastestCommand } from './commands/canvastest.js';
+import { kulaCommand } from './commands/kula.js';
 import { muteCommand } from './commands/mute.js';
 import {
     handleAdminCloseReasonModalSubmit,
@@ -121,6 +125,10 @@ client.commands.set(resetujCoinsyCommand.data.name, resetujCoinsyCommand);
 client.commands.set(leaderboardXpCommand.data.name, leaderboardXpCommand);
 client.commands.set(stankontaCommand.data.name, stankontaCommand);
 client.commands.set(levelCommand.data.name, levelCommand);
+client.commands.set(shipCommand.data.name, shipCommand);
+client.commands.set(zeswatajCommand.data.name, zeswatajCommand);
+client.commands.set(canvastestCommand.data.name, canvastestCommand);
+client.commands.set(kulaCommand.data.name, kulaCommand);
 client.commands.set(muteCommand.data.name, muteCommand);
 client.commands.set(sklepCommand.data.name, sklepCommand);
 client.commands.set(kupCommand.data.name, kupCommand);

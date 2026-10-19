@@ -14,6 +14,10 @@ import { resetujCoinsyCommand } from './commands/resetuj-coinsy.js';
 import { leaderboardXpCommand } from './commands/leaderboard-xp.js';
 import { stankontaCommand } from './commands/stankonta.js';
 import { levelCommand } from './commands/level.js';
+import { shipCommand } from './commands/ship.js';
+import { zeswatajCommand } from './commands/zeswataj.js';
+import { canvastestCommand } from './commands/canvastest.js';
+import { kulaCommand } from './commands/kula.js';
 import { muteCommand } from './commands/mute.js';
 import { sklepCommand } from './commands/sklep.js';
 import { kupCommand } from './commands/kup.js';
@@ -50,6 +54,10 @@ const commands = [
     leaderboardXpCommand.data.toJSON(),
     stankontaCommand.data.toJSON(),
     levelCommand.data.toJSON(),
+    shipCommand.data.toJSON(),
+    zeswatajCommand.data.toJSON(),
+    canvastestCommand.data.toJSON(),
+    kulaCommand.data.toJSON(),
     muteCommand.data.toJSON(),
     sklepCommand.data.toJSON(),
     kupCommand.data.toJSON(),
