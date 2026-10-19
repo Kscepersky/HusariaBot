@@ -774,6 +774,8 @@ window.DASHBOARD_I18N.en = {
     "app.ui_potwierdz_anulowanie": "Are you sure you want to cancel order #{p1}? The user will be refunded their onion coins.",
     "app.ui_zamowienie_anulowane": "✅ Order #{p1} cancelled.",
     "app.ui_usun_ikona": "🗑️ Delete",
+    "dashboard.grupa_dostepne": "Available to team",
+    "dashboard.grupa_owner": "Owner only",
     "dashboard.uprawnienia": "Permissions",
     "permissions.uprawnienia": "🔐 Permissions",
     "permissions.widok_tylko_dla_ownera": "Owner only. Give users access to selected dashboard tabs and bot commands.",

@@ -264,6 +264,7 @@ async function loadDashboardAccess() {
 
     applyAllowedSectionsToNav()
     showOwnerOnlyNavItems()
+    syncOwnerNavGroup()
 
     // Recznie zapisany wybor uzytkownika ma pierwszenstwo nad domyslnym dla roli.
     const stored = window.I18n.readStoredLanguage()
@@ -280,6 +281,20 @@ function showOwnerOnlyNavItems() {
 
   const item = document.getElementById('permissions-nav-item')
   if (item instanceof HTMLElement) item.style.display = ''
+}
+
+/** Naglowek i grupa "Tylko owner" widoczne wylacznie, gdy zostala w niej jakakolwiek zakladka. */
+function syncOwnerNavGroup() {
+  const group = document.getElementById('sidebar-owner-group')
+  if (!group) return
+
+  const hasVisibleItem = Array.from(group.querySelectorAll('.sidebar-item'))
+    .some((item) => item.style.display !== 'none')
+  group.hidden = !hasVisibleItem
+
+  // Naglowek pierwszej grupy ma sens tylko wtedy, gdy jest co od czego oddzielac.
+  const teamTitle = document.getElementById('sidebar-team-title')
+  if (teamTitle) teamTitle.hidden = !hasVisibleItem
 }
 
 function isSectionAllowed(section) {
@@ -4007,6 +4022,8 @@ function applyEconomySettingsAccessState() {
   if (sessionActivityNavItem instanceof HTMLElement) {
     sessionActivityNavItem.style.display = isAccessDenied ? 'none' : ''
   }
+
+  syncOwnerNavGroup()
 
   if (isAccessDenied && currentSection === 'economy-settings') {
     switchSection('economy-leaderboard')

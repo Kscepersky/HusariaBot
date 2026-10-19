@@ -32,6 +32,7 @@
 <main class="main">
   <aside class="sidebar">
     <nav class="sidebar-nav">
+      <div class="sidebar-group-title" id="sidebar-team-title" hidden data-i18n="dashboard.grupa_dostepne">Dostępne dla zespołu</div>
       <a href="#" class="sidebar-item active" data-section="embed-creator">
         <span class="sidebar-icon">🎨</span>
         <span data-i18n="dashboard.kreator_publikacji">Kreator publikacji</span>
@@ -51,10 +52,6 @@
       <a href="#" class="sidebar-item" data-section="g2-matches">
         <span class="sidebar-icon">🏟️</span>
         <span data-i18n="dashboard.baza_meczow_g2">Baza meczów G2</span>
-      </a>
-      <a href="#" class="sidebar-item" id="economy-settings-nav-item" data-section="economy-settings" style="display:none;">
-        <span class="sidebar-icon">🧅</span>
-        <span data-i18n="dashboard.ustawienia_ekonomii">Ustawienia ekonomii</span>
       </a>
       <a href="#" class="sidebar-item" data-section="economy-leaderboard">
         <span class="sidebar-icon">🏆</span>
@@ -80,6 +77,12 @@
         <span class="sidebar-icon">📊</span>
         <span data-i18n="dashboard.statystyki_serwera">Statystyki Serwera</span>
       </a>
+      <div class="sidebar-group sidebar-group-owner" id="sidebar-owner-group" hidden>
+        <div class="sidebar-group-title" data-i18n="dashboard.grupa_owner">Tylko owner</div>
+      <a href="#" class="sidebar-item" id="economy-settings-nav-item" data-section="economy-settings" style="display:none;">
+        <span class="sidebar-icon">🧅</span>
+        <span data-i18n="dashboard.ustawienia_ekonomii">Ustawienia ekonomii</span>
+      </a>
       <a href="#" class="sidebar-item" id="system-logs-nav-item" data-section="system-logs" style="display:none;">
         <span class="sidebar-icon">🧾</span>
         <span data-i18n="dashboard.logi_systemowe">Logi systemowe</span>
@@ -92,6 +95,7 @@
         <span class="sidebar-icon">🔐</span>
         <span data-i18n="dashboard.uprawnienia">Uprawnienia</span>
       </a>
+      </div>
     </nav>
   </aside>
   <div class="sidebar-overlay" id="sidebar-overlay"></div>

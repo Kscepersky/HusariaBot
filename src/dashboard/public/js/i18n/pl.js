@@ -774,6 +774,8 @@ window.DASHBOARD_I18N.pl = {
     "app.ui_potwierdz_anulowanie": "Czy na pewno chcesz anulować zamówienie #{p1}? Użytkownik otrzyma zwrot cebulionów.",
     "app.ui_zamowienie_anulowane": "✅ Zamówienie #{p1} anulowane.",
     "app.ui_usun_ikona": "🗑 Usuń",
+    "dashboard.grupa_dostepne": "Dostępne dla zespołu",
+    "dashboard.grupa_owner": "Tylko owner",
     "dashboard.uprawnienia": "Uprawnienia",
     "permissions.uprawnienia": "🔐 Uprawnienia",
     "permissions.widok_tylko_dla_ownera": "Widok tylko dla ownera. Nadawaj użytkownikom dostęp do wybranych zakładek dashboardu i komend bota.",
