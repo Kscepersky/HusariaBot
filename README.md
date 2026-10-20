@@ -64,6 +64,16 @@ A fully configurable engagement system tracking XP, levels, and a server currenc
 - Each purchase opens a private order ticket; staff complete or cancel the order from the dashboard, and the ticket is closed automatically.
 - Items support price, stock, and a per-user purchase limit. Everything is managed from the dashboard Shop section.
 
+### Fun & Games
+
+Light-hearted commands, many of them rendering a Canvas image card in the same style as the level card:
+
+- **`/ship` and `/zeswataj`** — compatibility percentage between two members, with avatars and a progress bar. `/zeswataj` lets you match any two people.
+- **`/kula`** — crystal ball: ask a yes/no question and get a short animated "reading" before the answer.
+- **`/champion`** — assigns a League of Legends champion to the user. The pick is deterministic (hash of the user ID), so everyone always gets the same champion. The card shows the splash art, icon, title and official lore, loaded from [Data Dragon](https://developer.riotgames.com/docs/lol#data-dragon) (Polish locale, cached for 24 h). A few users have a champion pinned in `src/commands/champion-pick.ts`.
+- **Duels** — `/pkn` (rock-paper-scissors), `/kk` (tic-tac-toe) and `/rr` (Russian roulette) against a chosen member, played with buttons. `/pknranking` and `/kkranking` show win/loss/draw rankings.
+- **`/canvastest`** — owner-only preview of every card with sample data; a new card type is a single entry in `src/commands/canvas-previews.ts`.
+
 ### Temporary Voice Channels
 
 - Members joining the trigger channel immediately get their own private voice channel in the configured category.
@@ -95,6 +105,7 @@ A fully configurable engagement system tracking XP, levels, and a server currenc
 | Database | SQLite via `sqlite` + `sqlite3` |
 | Input validation | Zod v4 |
 | Image generation | Canvas |
+| External data | Riot Data Dragon (`/champion`), PandaScore (G2 matches) |
 | Sessions | express-session + SQLite store |
 | Rate limiting | express-rate-limit |
 | Testing | Vitest |
@@ -193,6 +204,9 @@ DASHBOARD_MUTATION_RATE_LIMIT_WINDOW_MS=60000   # 1 min window, 80 mutations max
 DASHBOARD_MUTATION_RATE_LIMIT_MAX=80
 DASHBOARD_AUTH_RATE_LIMIT_WINDOW_MS=900000      # 15 min window, 30 auth attempts max
 DASHBOARD_AUTH_RATE_LIMIT_MAX=30
+DASHBOARD_USER_RATE_LIMIT_MAX=3000              # Per-user request cap
+DASHBOARD_USER_MUTATION_RATE_LIMIT_MAX=240      # Per-user mutation cap
+DASHBOARD_SLOW_REQUEST_MS=1200                  # Requests slower than this are logged
 
 # ── External Integrations ─────────────────────────────────────────────────────
 PANDASCORE_API_KEY=        # PandaScore key (optional — powers the G2 match browser)
@@ -202,6 +216,10 @@ LOG_ALERT_WEBHOOK_URL=     # Discord webhook URL for error/fatal level log alert
 ECONOMY_DB_PATH=
 DASHBOARD_SESSION_DB_PATH=
 SESSION_EVENTS_DB_PATH=    # Path for session login/logout event log (default: data/session-events.sqlite)
+PERMISSIONS_DB_PATH=       # Path for permissions + audit log (default: data/permissions.sqlite)
+
+# ── Optional ──────────────────────────────────────────────────────────────────
+MUTE_DM_GUILD_NAME=        # Server name shown in the DM sent to a muted member
 
 # ── Development ───────────────────────────────────────────────────────────────
 DEV_LOGS=1
@@ -224,6 +242,15 @@ BOT_DEV_LOGS=1
 | `/sklep` | Browse the items available in the shop |
 | `/kup` | Buy an item from the shop |
 | `/zamowienia` | Check your shop orders |
+| `/ship` | Compatibility card with a chosen member |
+| `/zeswataj` | Match two chosen members and check their compatibility |
+| `/kula` | Ask the crystal ball a yes/no question |
+| `/champion` | Get your League of Legends champion card |
+| `/pkn` | Rock-paper-scissors duel |
+| `/kk` | Tic-tac-toe duel |
+| `/rr` | Russian roulette duel |
+| `/pknranking` | Rock-paper-scissors ranking |
+| `/kkranking` | Tic-tac-toe ranking |
 
 ### Administration Only
 
@@ -240,6 +267,7 @@ BOT_DEV_LOGS=1
 | `/ticketyconfig` | Publish the ticket panel embed to a specified channel |
 | `/sendimg` | Send an image from the `/img` library to a channel |
 | `/dashboard` | Send the admin dashboard link |
+| `/canvastest` | *(Owner only)* Preview canvas cards with sample data |
 | `/ping` | Check bot latency and Discord gateway connection status |
 
 ---
@@ -375,6 +403,9 @@ src/
 │   ├── leaderboard-xp.ts
 │   ├── mute.ts
 │   ├── ticketyconfig.ts
+│   ├── card-canvas.ts            # Shared canvas building blocks for image cards
+│   ├── *-card-renderer.ts        # Card renderers: level, ship, champion, pkn, kk, rr
+│   ├── canvas-previews.ts        # Registry of card previews for /canvastest
 │   └── ...
 │
 ├── economy/
@@ -385,6 +416,7 @@ src/
 │   ├── stats-store.ts            # Daily stats aggregation and time-series queries
 │   └── ...
 │
+├── permissions/                  # Owner/per-user tab access, audit log, bot command guards
 ├── voice-channels/               # Temporary private voice channel lifecycle
 ├── shop/                         # Shop repository, UI, order tickets
 ├── tickets/                      # Ticket panel, history store, monotonic counter
@@ -466,6 +498,8 @@ Test coverage includes:
 - **Economy logic** — XP award, leveling curve, daily claim, streak calculation, CSV import validation
 - **Repositories** — all SQL operations run against an in-memory SQLite database
 - **Slash command parsing** — argument extraction and validation for each command
+- **Game logic and canvas cards** — duel rules, ship score, champion pick/Data Dragon client, card renderers
+- **Permissions** — access rules, bot command guards, permission store
 - **Voice channel module** — store, flow, and service layer tested in isolation
 - **Dashboard embed handlers** — payload building, validation edge cases
 - **PandaScore client** — API response parsing and error handling
