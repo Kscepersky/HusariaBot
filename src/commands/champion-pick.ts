@@ -25,8 +25,11 @@ export interface ChampionPick {
     special: boolean;
 }
 
+/** Zmiana wartosci losuje wszystkim uzytkownikom nowe postacie (nadal deterministycznie). */
+const PICK_SEED = 'v2';
+
 function hashToInt(input: string): number {
-    return createHash('sha256').update(input).digest().readUInt32BE(0);
+    return createHash('sha256').update(`${PICK_SEED}:${input}`).digest().readUInt32BE(0);
 }
 
 /** Deterministycznie dobiera postac do uzytkownika; lista jest sortowana po ID, wiec kolejnosc wejscia nie ma znaczenia. */
