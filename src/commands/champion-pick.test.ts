@@ -32,6 +32,14 @@ describe('pickChampion', () => {
         expect(SPECIAL_USERS[VEX_USER_ID]?.championId).toBe('Vex');
     });
 
+    it('daje Volibeara z podpisem stable dla drugiego specjalnego uzytkownika', () => {
+        const result = pickChampion('553684841808527360', [...CHAMPIONS, champ('Volibear', ['Fighter'])]);
+
+        expect(result.champion.id).toBe('Volibear');
+        expect(result.caption).toBe('stable');
+        expect(result.special).toBe(true);
+    });
+
     it('wybiera rozne postacie dla roznych uzytkownikow', () => {
         const picked = new Set<string>();
         for (let index = 0; index < 200; index += 1) {

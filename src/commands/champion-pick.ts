@@ -12,6 +12,10 @@ export const SPECIAL_USERS: Readonly<Record<string, SpecialChampionUser>> = {
         championId: 'Vex',
         caption: 'Ty to wiesz, ja to wiem, wszyscy to wiedzą',
     },
+    '553684841808527360': {
+        championId: 'Volibear',
+        caption: 'stable',
+    },
 };
 
 export interface ChampionPick {
