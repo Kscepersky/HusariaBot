@@ -106,6 +106,23 @@ export const CANVAS_PREVIEWS: readonly CanvasPreview[] = [
             });
         },
     },
+    {
+        key: 'champion',
+        label: 'Champion (/champion)',
+        async render({ user }) {
+            const { renderChampionCard } = await import('./champion-card-renderer.js');
+            return renderChampionCard({
+                championName: 'Vex',
+                championTitle: 'Mroczna Żałoba',
+                blurb: 'Yordle o ponurym usposobieniu, który żyje w cieniu własnego smutku.',
+                caption: 'Ty to wiesz, ja to wiem, wszyscy to wiedzą',
+                username: name(user),
+                avatarUrl: avatar(user),
+                splashUrl: 'https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Vex_0.jpg',
+                iconUrl: 'https://ddragon.leagueoflegends.com/cdn/16.1.1/img/champion/Vex.png',
+            });
+        },
+    },
 ];
 
 export function findCanvasPreview(key: string): CanvasPreview | undefined {
