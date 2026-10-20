@@ -19,6 +19,7 @@ import { zeswatajCommand } from './commands/zeswataj.js';
 import { canvastestCommand } from './commands/canvastest.js';
 import { kulaCommand } from './commands/kula.js';
 import { championCommand } from './commands/champion.js';
+import { statylolCommand } from './commands/statylol.js';
 import { pknCommand } from './commands/pkn.js';
 import { pknrankingCommand } from './commands/pknranking.js';
 import { kkCommand } from './commands/kk.js';
@@ -65,6 +66,7 @@ const commands = [
     canvastestCommand.data.toJSON(),
     kulaCommand.data.toJSON(),
     championCommand.data.toJSON(),
+    statylolCommand.data.toJSON(),
     pknCommand.data.toJSON(),
     pknrankingCommand.data.toJSON(),
     kkCommand.data.toJSON(),

@@ -6,6 +6,7 @@ import { HusariaColors } from '../utils/husaria-theme.js';
 /** Wspolne klocki kart renderowanych na canvasie (/level, /ship). */
 
 const AVATAR_LOAD_TIMEOUT_MS = 1200;
+const REMOTE_IMAGE_TIMEOUT_MS = 5000;
 const FONT_DIR = join(__dirname, '..', '..', 'fonts');
 const FONT_FAMILY_BASE = 'Husaria Sans';
 const FONT_FAMILY_EMOJI = 'Husaria Emoji';
@@ -143,6 +144,24 @@ export async function loadAvatarImageWithTimeout(avatarUrl: string): Promise<Ima
         throw error;
     } finally {
         clearTimeout(timeoutId);
+    }
+}
+
+/** Pobiera obraz z URL-a z timeoutem; przy dowolnym bledzie zwraca null (wywolujacy rysuje placeholder). */
+export async function tryFetchImage(url: string | undefined): Promise<Image | null> {
+    if (!url) {
+        return null;
+    }
+
+    try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(REMOTE_IMAGE_TIMEOUT_MS) });
+        if (!response.ok) {
+            return null;
+        }
+
+        return await loadImage(Buffer.from(await response.arrayBuffer()));
+    } catch {
+        return null;
     }
 }
 

@@ -71,6 +71,7 @@ Light-hearted commands, many of them rendering a Canvas image card in the same s
 - **`/ship` and `/zeswataj`** — compatibility percentage between two members, with avatars and a progress bar. `/zeswataj` lets you match any two people.
 - **`/kula`** — crystal ball: ask a yes/no question and get a short animated "reading" before the answer.
 - **`/champion`** — assigns a League of Legends champion to the user. The pick is deterministic (hash of the user ID), so everyone always gets the same champion. The card shows the splash art, icon, title and official lore, loaded from [Data Dragon](https://developer.riotgames.com/docs/lol#data-dragon) (Polish locale, cached for 24 h). A few users have a champion pinned in `src/commands/champion-pick.ts`.
+- **`/statylol`** — `/statylol riottag:Nick#TAG [region]` renders a player card with level, Solo/Duo rank and win rate, top 3 mastery champions and the last 5 matches (result, KDA, CS, duration, queue). Data comes from the Riot API (account, summoner, league, champion-mastery and match-v5), results are cached for 5 minutes to stay within key rate limits. Requires `RIOT_API_KEY`.
 - **Duels** — `/pkn` (rock-paper-scissors), `/kk` (tic-tac-toe) and `/rr` (Russian roulette) against a chosen member, played with buttons. `/pknranking` and `/kkranking` show win/loss/draw rankings.
 - **`/canvastest`** — owner-only preview of every card with sample data; a new card type is a single entry in `src/commands/canvas-previews.ts`.
 
@@ -105,7 +106,7 @@ Light-hearted commands, many of them rendering a Canvas image card in the same s
 | Database | SQLite via `sqlite` + `sqlite3` |
 | Input validation | Zod v4 |
 | Image generation | Canvas |
-| External data | Riot Data Dragon (`/champion`), PandaScore (G2 matches) |
+| External data | Riot Data Dragon + Riot API (`/champion`, `/statylol`), PandaScore (G2 matches) |
 | Sessions | express-session + SQLite store |
 | Rate limiting | express-rate-limit |
 | Testing | Vitest |
@@ -218,6 +219,9 @@ DASHBOARD_SESSION_DB_PATH=
 SESSION_EVENTS_DB_PATH=    # Path for session login/logout event log (default: data/session-events.sqlite)
 PERMISSIONS_DB_PATH=       # Path for permissions + audit log (default: data/permissions.sqlite)
 
+RIOT_API_KEY=              # Riot API key (developer.riotgames.com) — required for /statylol. A dev key expires every 24 h
+RIOT_DEFAULT_REGION=eune   # Default /statylol region: eune, euw, na, kr or tr
+
 # ── Optional ──────────────────────────────────────────────────────────────────
 MUTE_DM_GUILD_NAME=        # Server name shown in the DM sent to a muted member
 
@@ -246,6 +250,7 @@ BOT_DEV_LOGS=1
 | `/zeswataj` | Match two chosen members and check their compatibility |
 | `/kula` | Ask the crystal ball a yes/no question |
 | `/champion` | Get your League of Legends champion card |
+| `/statylol` | League of Legends player card: rank, top mastery champions and last 5 matches |
 | `/pkn` | Rock-paper-scissors duel |
 | `/kk` | Tic-tac-toe duel |
 | `/rr` | Russian roulette duel |

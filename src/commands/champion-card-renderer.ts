@@ -1,4 +1,4 @@
-import { createCanvas, loadImage, type CanvasRenderingContext2D, type Image } from 'canvas';
+import { createCanvas, type CanvasRenderingContext2D, type Image } from 'canvas';
 import { HusariaColors } from '../utils/husaria-theme.js';
 import {
     FONT_STACK,
@@ -6,12 +6,12 @@ import {
     registerFontsOnce,
     roundedRectPath,
     toHexColor,
+    tryFetchImage,
 } from './card-canvas.js';
 
 const CARD_WIDTH = 1200;
 const CARD_HEIGHT = 400;
 const CARD_RADIUS = 18;
-const IMAGE_LOAD_TIMEOUT_MS = 5000;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const TEXT_X = 56;
 const TEXT_MAX_WIDTH = 560;
@@ -33,27 +33,6 @@ export interface ChampionCardRenderInput {
     splashUrl?: string;
     iconUrl?: string;
     avatarUrl?: string;
-}
-
-async function fetchImage(url: string): Promise<Image> {
-    const response = await fetch(url, { signal: AbortSignal.timeout(IMAGE_LOAD_TIMEOUT_MS) });
-    if (!response.ok) {
-        throw new Error(`Image request failed with status ${response.status}.`);
-    }
-
-    return loadImage(Buffer.from(await response.arrayBuffer()));
-}
-
-async function tryFetchImage(url: string | undefined): Promise<Image | null> {
-    if (!url) {
-        return null;
-    }
-
-    try {
-        return await fetchImage(url);
-    } catch {
-        return null;
-    }
 }
 
 function truncate(text: string, maxLength: number): string {

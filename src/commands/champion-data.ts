@@ -7,6 +7,8 @@ const REQUEST_TIMEOUT_MS = 6000;
 
 export interface ChampionInfo {
     id: string;
+    /** Numeryczne ID postaci w API Riotu (jako tekst), np. "234" dla Viego. */
+    key?: string | undefined;
     name: string;
     title: string;
     blurb: string;
@@ -24,6 +26,7 @@ const championsSchema = z.object({
         z.string(),
         z.object({
             id: z.string(),
+            key: z.string().optional(),
             name: z.string(),
             title: z.string(),
             blurb: z.string(),

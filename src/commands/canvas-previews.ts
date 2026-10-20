@@ -123,6 +123,36 @@ export const CANVAS_PREVIEWS: readonly CanvasPreview[] = [
             });
         },
     },
+    {
+        key: 'statylol',
+        label: 'Statystyki LoL (/statylol)',
+        async render() {
+            const { renderStatyLolCard } = await import('./statylol-card-renderer.js');
+            const version = '16.1.1';
+            const icon = (id: string) => `https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${id}.png`;
+            const game = (championName: string, id: string, win: boolean, kills: number, deaths: number, assists: number) => ({
+                championName, iconUrl: icon(id), win, remake: false, kills, deaths, assists,
+                cs: 190, durationSec: 1840, queueLabel: 'Solo/Duo',
+            });
+            return renderStatyLolCard({
+                gameName: 'Przykład', tagLine: 'EUNE', regionLabel: 'EUNE', level: 412,
+                profileIconUrl: `https://ddragon.leagueoflegends.com/cdn/${version}/img/profileicon/29.png`,
+                rank: { tier: 'EMERALD', division: 'III', lp: 54, wins: 112, losses: 98 },
+                mains: [
+                    { name: 'Viego', iconUrl: icon('Viego'), level: 7, points: 312450 },
+                    { name: 'Vex', iconUrl: icon('Vex'), level: 7, points: 120300 },
+                    { name: 'Volibear', iconUrl: icon('Volibear'), level: 6, points: 98000 },
+                ],
+                matches: [
+                    game('Viego', 'Viego', true, 12, 3, 8),
+                    game('Vex', 'Vex', false, 4, 9, 5),
+                    game('Volibear', 'Volibear', true, 7, 2, 14),
+                    game('Garen', 'Garen', false, 3, 6, 2),
+                    game('Ahri', 'Ahri', true, 9, 1, 11),
+                ],
+            });
+        },
+    },
 ];
 
 export function findCanvasPreview(key: string): CanvasPreview | undefined {
