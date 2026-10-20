@@ -17,7 +17,15 @@ import { levelCommand } from './commands/level.js';
 import { shipCommand } from './commands/ship.js';
 import { zeswatajCommand } from './commands/zeswataj.js';
 import { canvastestCommand } from './commands/canvastest.js';
+import { handlePknButton } from './commands/pkn-game.js';
+import { handleTttButton } from './commands/ttt-game.js';
+import { handleRrButton } from './commands/rr-game.js';
 import { kulaCommand } from './commands/kula.js';
+import { pknCommand } from './commands/pkn.js';
+import { pknrankingCommand } from './commands/pknranking.js';
+import { kkCommand } from './commands/kk.js';
+import { kkrankingCommand } from './commands/kkranking.js';
+import { rrCommand } from './commands/rr.js';
 import { muteCommand } from './commands/mute.js';
 import {
     handleAdminCloseReasonModalSubmit,
@@ -129,6 +137,11 @@ client.commands.set(shipCommand.data.name, shipCommand);
 client.commands.set(zeswatajCommand.data.name, zeswatajCommand);
 client.commands.set(canvastestCommand.data.name, canvastestCommand);
 client.commands.set(kulaCommand.data.name, kulaCommand);
+client.commands.set(pknCommand.data.name, pknCommand);
+client.commands.set(pknrankingCommand.data.name, pknrankingCommand);
+client.commands.set(kkCommand.data.name, kkCommand);
+client.commands.set(kkrankingCommand.data.name, kkrankingCommand);
+client.commands.set(rrCommand.data.name, rrCommand);
 client.commands.set(muteCommand.data.name, muteCommand);
 client.commands.set(sklepCommand.data.name, sklepCommand);
 client.commands.set(kupCommand.data.name, kupCommand);
@@ -272,6 +285,18 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             if (await handleShopButton(interaction)) {
+                return;
+            }
+
+            if (await handlePknButton(interaction)) {
+                return;
+            }
+
+            if (await handleTttButton(interaction)) {
+                return;
+            }
+
+            if (await handleRrButton(interaction)) {
                 return;
             }
 

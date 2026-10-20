@@ -1,4 +1,5 @@
 import type { User } from 'discord.js';
+import { getResult } from './ttt-logic.js';
 
 export interface CanvasPreviewContext {
     /** Osoba uruchamiajaca podglad - jej nick i awatar trafiaja na karty. */
@@ -54,6 +55,54 @@ export const CANVAS_PREVIEWS: readonly CanvasPreview[] = [
                 firstAvatarUrl: avatar(user),
                 secondAvatarUrl: avatar(partner),
                 percent: 73,
+            });
+        },
+    },
+    {
+        key: 'pkn',
+        label: 'Papier kamien nozyce (/pkn)',
+        async render({ user, partner }) {
+            const { renderPknCard } = await import('./pkn-card-renderer.js');
+            return renderPknCard({
+                firstName: name(user),
+                secondName: name(partner),
+                firstAvatarUrl: avatar(user),
+                secondAvatarUrl: avatar(partner),
+                firstMove: 'paper',
+                secondMove: 'rock',
+                outcome: 'first',
+            });
+        },
+    },
+    {
+        key: 'ttt',
+        label: 'Kolko i krzyzyk (/kk)',
+        async render({ user, partner }) {
+            const { renderTttCard } = await import('./ttt-card-renderer.js');
+            const board = ['X', 'O', 'X', 'O', 'X', 'O', null, null, 'X'] as const;
+            return renderTttCard({
+                xName: name(user),
+                oName: name(partner),
+                xAvatarUrl: avatar(user),
+                oAvatarUrl: avatar(partner),
+                board,
+                result: getResult(board),
+            });
+        },
+    },
+    {
+        key: 'rr',
+        label: 'Rosyjska ruletka (/rr)',
+        async render({ user, partner }) {
+            const { renderRrCard } = await import('./rr-card-renderer.js');
+            return renderRrCard({
+                names: [name(user), name(partner)],
+                avatarUrls: [avatar(user), avatar(partner)],
+                activeIndex: 1,
+                firedChambers: 3,
+                rotation: 2,
+                event: 'click',
+                spinsLeft: [1, 0],
             });
         },
     },

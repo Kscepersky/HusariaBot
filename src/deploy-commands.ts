@@ -18,6 +18,11 @@ import { shipCommand } from './commands/ship.js';
 import { zeswatajCommand } from './commands/zeswataj.js';
 import { canvastestCommand } from './commands/canvastest.js';
 import { kulaCommand } from './commands/kula.js';
+import { pknCommand } from './commands/pkn.js';
+import { pknrankingCommand } from './commands/pknranking.js';
+import { kkCommand } from './commands/kk.js';
+import { kkrankingCommand } from './commands/kkranking.js';
+import { rrCommand } from './commands/rr.js';
 import { muteCommand } from './commands/mute.js';
 import { sklepCommand } from './commands/sklep.js';
 import { kupCommand } from './commands/kup.js';
@@ -58,6 +63,11 @@ const commands = [
     zeswatajCommand.data.toJSON(),
     canvastestCommand.data.toJSON(),
     kulaCommand.data.toJSON(),
+    pknCommand.data.toJSON(),
+    pknrankingCommand.data.toJSON(),
+    kkCommand.data.toJSON(),
+    kkrankingCommand.data.toJSON(),
+    rrCommand.data.toJSON(),
     muteCommand.data.toJSON(),
     sklepCommand.data.toJSON(),
     kupCommand.data.toJSON(),

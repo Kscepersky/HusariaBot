@@ -7,7 +7,13 @@ process.env.PERMISSIONS_DB_PATH = ':memory:';
 const renderLevelCard = vi.hoisted(() => vi.fn());
 const renderShipCard = vi.hoisted(() => vi.fn());
 vi.mock('./level-card-renderer.js', () => ({ renderLevelCard }));
+const renderPknCard = vi.hoisted(() => vi.fn());
 vi.mock('./ship-card-renderer.js', () => ({ renderShipCard }));
+const renderTttCard = vi.hoisted(() => vi.fn());
+vi.mock('./pkn-card-renderer.js', () => ({ renderPknCard }));
+const renderRrCard = vi.hoisted(() => vi.fn());
+vi.mock('./ttt-card-renderer.js', () => ({ renderTttCard }));
+vi.mock('./rr-card-renderer.js', () => ({ renderRrCard }));
 
 import { canvastestCommand } from './canvastest.js';
 import { CANVAS_PREVIEWS } from './canvas-previews.js';
@@ -35,6 +41,9 @@ function buildInteraction(userId: string, card: string | null = null) {
 beforeEach(() => {
     renderLevelCard.mockReset().mockResolvedValue(Buffer.from('level'));
     renderShipCard.mockReset().mockResolvedValue(Buffer.from('ship'));
+    renderPknCard.mockReset().mockResolvedValue(Buffer.from('pkn'));
+    renderTttCard.mockReset().mockResolvedValue(Buffer.from('ttt'));
+    renderRrCard.mockReset().mockResolvedValue(Buffer.from('rr'));
 });
 
 describe('canvastestCommand', () => {
@@ -62,6 +71,9 @@ describe('canvastestCommand', () => {
         expect(payload.files).toHaveLength(CANVAS_PREVIEWS.length);
         expect(renderLevelCard).toHaveBeenCalledTimes(1);
         expect(renderShipCard).toHaveBeenCalledTimes(1);
+        expect(renderPknCard).toHaveBeenCalledTimes(1);
+        expect(renderTttCard).toHaveBeenCalledTimes(1);
+        expect(renderRrCard).toHaveBeenCalledTimes(1);
     });
 
     it('z argumentem renderuje tylko wybrana karte', async () => {

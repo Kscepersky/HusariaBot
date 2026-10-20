@@ -337,6 +337,30 @@ async function initializeSchema(db: Database): Promise<void> {
             CHECK (joins >= 0),
             CHECK (leaves >= 0)
         );
+
+        CREATE TABLE IF NOT EXISTS pkn_stats (
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            wins INTEGER NOT NULL DEFAULT 0,
+            losses INTEGER NOT NULL DEFAULT 0,
+            draws INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id),
+            CHECK (wins >= 0),
+            CHECK (losses >= 0),
+            CHECK (draws >= 0)
+        );
+
+        CREATE TABLE IF NOT EXISTS ttt_stats (
+            guild_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            wins INTEGER NOT NULL DEFAULT 0,
+            losses INTEGER NOT NULL DEFAULT 0,
+            draws INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id),
+            CHECK (wins >= 0),
+            CHECK (losses >= 0),
+            CHECK (draws >= 0)
+        );
     `);
 
     await ensureEconomyConfigColumns(db);

@@ -171,3 +171,43 @@ export async function drawBackground(context: CanvasRenderingContext2D, layout: 
 
     drawPanel(context, layout);
 }
+
+/** Okragly awatar z obwodka; przy bledzie pobierania rysuje szary placeholder. */
+export async function drawRingedAvatar(
+    context: CanvasRenderingContext2D,
+    options: { centerX: number; top: number; size: number; ringWidth: number; ringColor: string; avatarUrl?: string },
+): Promise<void> {
+    const { centerX, top, size, ringWidth, ringColor, avatarUrl } = options;
+    const radius = size / 2;
+    const centerY = top + radius;
+
+    context.beginPath();
+    context.arc(centerX, centerY, radius + ringWidth, 0, Math.PI * 2);
+    context.closePath();
+    context.fillStyle = ringColor;
+    context.fill();
+
+    context.save();
+    context.beginPath();
+    context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    context.closePath();
+    context.clip();
+
+    let drawn = false;
+    if (avatarUrl) {
+        try {
+            const image = await loadAvatarImageWithTimeout(avatarUrl);
+            context.drawImage(image, centerX - radius, top, size, size);
+            drawn = true;
+        } catch {
+            // Placeholder ponizej.
+        }
+    }
+
+    if (!drawn) {
+        context.fillStyle = '#31353F';
+        context.fillRect(centerX - radius, top, size, size);
+    }
+
+    context.restore();
+}
