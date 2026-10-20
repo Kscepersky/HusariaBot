@@ -41,10 +41,10 @@ describe('pickChampion', () => {
         expect(picked.size).toBeGreaterThan(3);
     });
 
-    it('dobiera podpis do tagow postaci i nie jest pusty', () => {
+    it('nie generuje podpisu dla zwyklych uzytkownikow', () => {
         const result = pickChampion('42', [champ('Garen', ['Fighter'])]);
 
-        expect(result.caption.length).toBeGreaterThan(0);
+        expect(result.caption).toBe('');
     });
 
     it('rzuca bledem dla pustej listy', () => {

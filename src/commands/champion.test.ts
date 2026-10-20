@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loadChampionCatalog = vi.fn();
 const renderChampionCard = vi.fn();
+const loadChampionLore = vi.fn();
 
 vi.mock('./champion-data.js', async (importOriginal) => ({
     ...(await importOriginal<typeof import('./champion-data.js')>()),
     loadChampionCatalog: (...args: unknown[]) => loadChampionCatalog(...args),
+    loadChampionLore: (...args: unknown[]) => loadChampionLore(...args),
 }));
 vi.mock('./champion-card-renderer.js', () => ({
     renderChampionCard: (...args: unknown[]) => renderChampionCard(...args),
@@ -46,6 +48,7 @@ beforeEach(() => {
     vi.useFakeTimers();
     loadChampionCatalog.mockResolvedValue(CATALOG);
     renderChampionCard.mockResolvedValue(Buffer.from('png'));
+    loadChampionLore.mockResolvedValue('Oficjalne lore postaci. Drugie zdanie.');
 });
 
 afterEach(() => {
@@ -88,6 +91,25 @@ describe('championCommand', () => {
         expect(rendered.championName).toBe('Vex');
         expect(rendered.caption).toBe('Ty to wiesz, ja to wiem, wszyscy to wiedzą');
         expect(rendered.splashUrl).toContain('/splash/Vex_0.jpg');
+    });
+
+    it('uzywa oficjalnego lore, a bez podpisu dla zwyklego uzytkownika', async () => {
+        const interaction = buildInteraction('1');
+
+        await runCommand(interaction);
+
+        const rendered = renderChampionCard.mock.calls[0]![0];
+        expect(rendered.blurb).toBe('Oficjalne lore postaci. Drugie zdanie.');
+        expect(rendered.caption).toBe('');
+    });
+
+    it('wraca do blurba gdy lore sie nie pobierze', async () => {
+        loadChampionLore.mockResolvedValue(null);
+        const interaction = buildInteraction('682670238223040673');
+
+        await runCommand(interaction);
+
+        expect(renderChampionCard.mock.calls[0]![0].blurb).toBe('Opis Vex');
     });
 
     it('wraca do samego embeda gdy render sie nie uda', async () => {

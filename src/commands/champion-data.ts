@@ -91,3 +91,51 @@ export async function loadChampionCatalog(
         throw error;
     }
 }
+
+const loreSchema = z.object({
+    data: z.record(z.string(), z.object({ lore: z.string() })),
+});
+
+/** Zamienia znaczniki HTML z ddragona (<br>) na spacje i zbija biale znaki. */
+export function cleanLore(lore: string): string {
+    return lore.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Skraca tekst do pelnych zdan mieszczacych sie w limicie; gdy pierwsze zdanie jest za dlugie, tnie po slowie. */
+export function trimToSentences(text: string, maxLength: number): string {
+    if (text.length <= maxLength) {
+        return text;
+    }
+
+    const sentences = text.match(/[^.!?]+[.!?]+(?:\s|$)/g) ?? [];
+    let result = '';
+    for (const sentence of sentences) {
+        if ((result + sentence).trim().length > maxLength) {
+            break;
+        }
+        result += sentence;
+    }
+    if (result.trim()) {
+        return result.trim();
+    }
+
+    return `${text.slice(0, maxLength - 3).replace(/\s+\S*$/, '').replace(/[.,;:!?]+$/, '')}...`;
+}
+
+/** Oficjalne lore postaci z Data Dragona; przy bledzie zwraca null (wywolujacy uzywa blurba). */
+export async function loadChampionLore(
+    version: string,
+    championId: string,
+    fetchFn: typeof fetch = fetch,
+): Promise<string | null> {
+    try {
+        const parsed = loreSchema.parse(
+            await fetchJson(fetchFn, `${DDRAGON_BASE_URL}/cdn/${version}/data/${DDRAGON_LOCALE}/champion/${championId}.json`),
+        );
+        const lore = cleanLore(parsed.data[championId]?.lore ?? '');
+        return lore || null;
+    } catch (error) {
+        console.warn(`⚠️ Nie udalo sie pobrac lore postaci ${championId}:`, error);
+        return null;
+    }
+}

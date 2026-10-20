@@ -19,7 +19,8 @@ const ICON_SIZE = 84;
 const MAX_NAME_LENGTH = 22;
 const MAX_USERNAME_LENGTH = 18;
 const MAX_BLURB_LENGTH = 400;
-const BLURB_MAX_LINES = 3;
+const BLURB_LINES_WITH_CAPTION = 3;
+const BLURB_LINES_WITHOUT_CAPTION = 5;
 const BLURB_LINE_HEIGHT = 28;
 const AVATAR_SIZE = 56;
 
@@ -27,7 +28,7 @@ export interface ChampionCardRenderInput {
     championName: string;
     championTitle: string;
     blurb: string;
-    caption: string;
+    caption?: string;
     username: string;
     splashUrl?: string;
     iconUrl?: string;
@@ -158,8 +159,12 @@ function drawDescription(context: CanvasRenderingContext2D, input: ChampionCardR
 
     context.fillStyle = 'rgba(255, 255, 255, 0.86)';
     context.font = `400 20px ${FONT_STACK}`;
-    const lines = wrapText(context, truncate(input.blurb, MAX_BLURB_LENGTH), TEXT_MAX_WIDTH, BLURB_MAX_LINES);
+    const lines = wrapText(context, truncate(input.blurb, MAX_BLURB_LENGTH), TEXT_MAX_WIDTH, input.caption ? BLURB_LINES_WITH_CAPTION : BLURB_LINES_WITHOUT_CAPTION);
     lines.forEach((line, index) => context.fillText(line, TEXT_X, 214 + index * BLURB_LINE_HEIGHT));
+
+    if (!input.caption) {
+        return;
+    }
 
     context.fillStyle = '#FF5A78';
     context.font = `italic 600 22px ${FONT_STACK}`;

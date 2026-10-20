@@ -6,9 +6,18 @@ import {
     SlashCommandBuilder,
 } from 'discord.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
-import { championIconUrl, championSplashUrl, loadChampionCatalog } from './champion-data.js';
+import {
+    championIconUrl,
+    championSplashUrl,
+    loadChampionCatalog,
+    loadChampionLore,
+    trimToSentences,
+} from './champion-data.js';
 import { pickChampion } from './champion-pick.js';
 
+const MAX_LORE_LENGTH = 330;
+/** Karta z podpisem ma mniej miejsca na opis. */
+const MAX_LORE_LENGTH_WITH_CAPTION = 200;
 const CARD_FILE_NAME = 'champion.png';
 const STEP_DELAY_MS = 1500;
 const ANIMATION_MESSAGES: readonly string[] = [
@@ -61,12 +70,17 @@ export const championCommand = {
 
             const { version, champions } = await catalogPromise;
             const { champion, caption } = pickChampion(interaction.user.id, champions);
+            const lore = await loadChampionLore(version, champion.id);
+            const description = trimToSentences(
+                lore ?? champion.blurb,
+                caption ? MAX_LORE_LENGTH_WITH_CAPTION : MAX_LORE_LENGTH,
+            );
             const userName = displayName(interaction);
 
             const embed = new EmbedBuilder()
                 .setColor(HusariaColors.RED)
                 .setTitle(`⚔️ ${userName}, Twoja postać to ${champion.name}`)
-                .setDescription(`**${champion.title}**\n${caption}`)
+                .setDescription(caption ? `**${champion.title}**\n${caption}` : `**${champion.title}**`)
                 .setFooter({ text: `Zapytał(a): ${userName}` })
                 .setTimestamp();
 
@@ -75,7 +89,7 @@ export const championCommand = {
                 const cardBuffer = await renderChampionCard({
                     championName: champion.name,
                     championTitle: champion.title,
-                    blurb: champion.blurb,
+                    blurb: description,
                     caption,
                     username: userName,
                     splashUrl: championSplashUrl(champion.id),

@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     championIconUrl,
     championSplashUrl,
+    cleanLore,
     clearChampionCatalogCache,
+    loadChampionLore,
+    trimToSentences,
     loadChampionCatalog,
 } from './champion-data.js';
 
@@ -73,5 +76,40 @@ describe('champion-data', () => {
             String(url).endsWith('versions.json') ? jsonResponse(VERSIONS) : jsonResponse({ data: {} }));
 
         await expect(loadChampionCatalog(fetchFn as unknown as typeof fetch)).rejects.toThrow();
+    });
+
+    it('czysci znaczniki HTML z lore', () => {
+        expect(cleanLore('Pierwsze.<br><br>Drugie   zdanie.')).toBe('Pierwsze. Drugie zdanie.');
+    });
+
+    it('skraca lore do pelnych zdan', () => {
+        const text = 'Pierwsze zdanie. Drugie zdanie! Trzecie zdanie jest znacznie dluzsze od pozostalych.';
+
+        expect(trimToSentences(text, 40)).toBe('Pierwsze zdanie. Drugie zdanie!');
+        expect(trimToSentences(text, 500)).toBe(text);
+    });
+
+    it('tnie po slowie gdy pierwsze zdanie przekracza limit', () => {
+        const result = trimToSentences('Bardzo dlugie zdanie bez zadnej kropki w srodku tekstu', 25);
+
+        expect(result.endsWith('...')).toBe(true);
+        expect(result.length).toBeLessThanOrEqual(25);
+    });
+
+    it('pobiera lore postaci z ddragona', async () => {
+        const fetchFn = vi.fn(async (_url: string | URL | Request) =>
+            jsonResponse({ data: { Vex: { lore: 'Lore Vex.<br>Dalej.' } } }));
+
+        const lore = await loadChampionLore('16.1.1', 'Vex', fetchFn as unknown as typeof fetch);
+
+        expect(lore).toBe('Lore Vex. Dalej.');
+        expect(String(fetchFn.mock.calls[0]![0])).toContain('/cdn/16.1.1/data/pl_PL/champion/Vex.json');
+    });
+
+    it('zwraca null gdy lore nie da sie pobrac', async () => {
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        const failing = vi.fn(async () => jsonResponse({}, false));
+
+        expect(await loadChampionLore('16.1.1', 'Vex', failing as unknown as typeof fetch)).toBeNull();
     });
 });
