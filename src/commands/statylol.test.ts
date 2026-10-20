@@ -10,6 +10,7 @@ vi.mock('./champion-data.js', async (importOriginal) => ({
     loadChampionCatalog: (...args: unknown[]) => loadChampionCatalog(...args),
 }));
 vi.mock('./lol-profile.js', () => ({
+    NO_LOL_PROFILE_MESSAGE: 'NO_LOL_PROFILE',
     buildLolProfile: (...args: unknown[]) => buildLolProfile(...args),
 }));
 vi.mock('./statylol-card-renderer.js', () => ({
@@ -107,8 +108,8 @@ describe('statylolCommand', () => {
     });
 
     it('zwraca czytelny komunikat dla 404, 403 i 429', async () => {
-        for (const [status, fragment] of [[404, 'Nie znaleziono'], [403, 'klucz'], [429, 'limit']] as const) {
-            buildLolProfile.mockRejectedValueOnce(new RiotApiError(status, 'x'));
+        for (const [status, fragment] of [[404, 'Nie znaleziono'], [404, 'nie ma profilu'], [403, 'klucz'], [429, 'limit']] as const) {
+            buildLolProfile.mockRejectedValueOnce(new RiotApiError(status, fragment === 'nie ma profilu' ? 'NO_LOL_PROFILE' : 'x'));
             const interaction = buildInteraction();
 
             await statylolCommand.execute(interaction);

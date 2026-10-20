@@ -1,12 +1,22 @@
 import type { ChampionCatalog } from './champion-data.js';
 import { championIconUrl } from './champion-data.js';
-import { REGIONS, type LolRegion, type RiotClient, type RiotMatch } from './riot-api.js';
+import {
+    REGIONS,
+    RiotApiError,
+    type LolRegion,
+    type RiotClient,
+    type RiotMatch,
+    type RiotSummoner,
+} from './riot-api.js';
 
 const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
 const MATCH_CACHE_LIMIT = 500;
 const MATCH_COUNT = 5;
 const MASTERY_COUNT = 3;
 const SOLO_QUEUE = 'RANKED_SOLO_5x5';
+/** Komunikat RiotApiError 404, gdy konto Riot istnieje, ale nie ma profilu LoL na zadnym serwerze. */
+export const NO_LOL_PROFILE_MESSAGE = 'NO_LOL_PROFILE';
+const REGION_PROBE_ORDER: readonly LolRegion[] = ['eune', 'euw', 'tr', 'na', 'kr'];
 const DDRAGON_BASE_URL = 'https://ddragon.leagueoflegends.com';
 
 const QUEUE_LABELS: Readonly<Record<number, string>> = {
@@ -108,6 +118,27 @@ function summarizeMatch(match: RiotMatch, puuid: string, catalog: ChampionCatalo
     };
 }
 
+/** Konto Riot jest globalne, a profil LoL zyje na jednym serwerze - szukamy go zaczynajac od wybranego. */
+async function findSummoner(
+    client: RiotClient,
+    puuid: string,
+    preferred: LolRegion,
+): Promise<{ region: LolRegion; summoner: RiotSummoner }> {
+    const order = [preferred, ...REGION_PROBE_ORDER.filter((region) => region !== preferred)];
+
+    for (const region of order) {
+        try {
+            return { region, summoner: await client.getSummoner(REGIONS[region].platform, puuid) };
+        } catch (error) {
+            if (!(error instanceof RiotApiError) || error.status !== 404) {
+                throw error;
+            }
+        }
+    }
+
+    throw new RiotApiError(404, NO_LOL_PROFILE_MESSAGE);
+}
+
 /** Sklada profil gracza z kilku endpointow Riotu; wynik jest cache'owany na 5 minut (limity dev key). */
 export async function buildLolProfile(
     client: RiotClient,
@@ -122,11 +153,11 @@ export async function buildLolProfile(
         return cached.profile;
     }
 
-    const { platform, routing, label } = REGIONS[region];
-    const account = await client.getAccount(routing, riotId.gameName, riotId.tagLine);
+    const account = await client.getAccount(REGIONS[region].routing, riotId.gameName, riotId.tagLine);
+    const { region: foundRegion, summoner } = await findSummoner(client, account.puuid, region);
+    const { platform, routing, label } = REGIONS[foundRegion];
 
-    const [summoner, entries, mastery, matchIds] = await Promise.all([
-        client.getSummoner(platform, account.puuid),
+    const [entries, mastery, matchIds] = await Promise.all([
         client.getRankedEntries(platform, account.puuid),
         client.getTopMastery(platform, account.puuid, MASTERY_COUNT),
         client.getMatchIds(routing, account.puuid, MATCH_COUNT),

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildLolProfile, clearLolProfileCache, queueLabel } from './lol-profile.js';
+import { NO_LOL_PROFILE_MESSAGE, buildLolProfile, clearLolProfileCache, queueLabel } from './lol-profile.js';
 import type { ChampionCatalog } from './champion-data.js';
 import { RiotApiError, type RiotClient } from './riot-api.js';
 
@@ -91,6 +91,43 @@ describe('buildLolProfile', () => {
 
         const failing = buildClient({ getAccount: vi.fn(async () => { throw new RiotApiError(404, 'nope'); }) });
         await expect(buildLolProfile(failing, CATALOG, { gameName: 'Inny', tagLine: 'X' }, 'eune')).rejects.toMatchObject({ status: 404 });
+    });
+});
+
+describe('wykrywanie serwera', () => {
+    const riotId = { gameName: 'Nick', tagLine: 'EUNE' };
+
+    it('szuka profilu na innych serwerach gdy wybrany zwroci 404', async () => {
+        const getSummoner = vi.fn(async (platform: string) => {
+            if (platform !== 'euw1') {
+                throw new RiotApiError(404, 'nope');
+            }
+            return { profileIconId: 1, summonerLevel: 50 };
+        });
+        const client = buildClient({ getSummoner });
+
+        const profile = await buildLolProfile(client, CATALOG, riotId, 'eune');
+
+        expect(profile.regionLabel).toBe('EUW');
+        expect(getSummoner.mock.calls.map(([platform]) => platform)).toEqual(['eun1', 'euw1']);
+        expect(client.getMatchIds).toHaveBeenCalledWith('europe', 'p1', 5);
+        expect(client.getRankedEntries).toHaveBeenCalledWith('euw1', 'p1');
+    });
+
+    it('rzuca NO_LOL_PROFILE gdy konto nie ma profilu na zadnym serwerze', async () => {
+        const client = buildClient({ getSummoner: vi.fn(async () => { throw new RiotApiError(404, 'nope'); }) });
+
+        await expect(buildLolProfile(client, CATALOG, riotId, 'eune')).rejects.toMatchObject({
+            status: 404,
+            message: NO_LOL_PROFILE_MESSAGE,
+        });
+    });
+
+    it('nie probuje innych serwerow przy bledzie innym niz 404', async () => {
+        const getSummoner = vi.fn(async () => { throw new RiotApiError(403, 'forbidden'); });
+
+        await expect(buildLolProfile(buildClient({ getSummoner }), CATALOG, riotId, 'eune')).rejects.toMatchObject({ status: 403 });
+        expect(getSummoner).toHaveBeenCalledTimes(1);
     });
 });
 

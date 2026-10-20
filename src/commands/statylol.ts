@@ -7,7 +7,7 @@ import {
 } from 'discord.js';
 import { HusariaColors } from '../utils/husaria-theme.js';
 import { loadChampionCatalog } from './champion-data.js';
-import { buildLolProfile, type LolProfile } from './lol-profile.js';
+import { NO_LOL_PROFILE_MESSAGE, buildLolProfile, type LolProfile } from './lol-profile.js';
 import { REGIONS, RiotApiError, createRiotClient, parseRiotId, type LolRegion } from './riot-api.js';
 
 const CARD_FILE_NAME = 'statylol.png';
@@ -30,7 +30,9 @@ function resolveRegion(selected: string | null): LolRegion {
 function describeRiotError(error: RiotApiError): string {
     switch (error.status) {
         case 404:
-            return '❌ Nie znaleziono takiego gracza. Sprawdź Riot ID (Nick#TAG) i wybrany region.';
+            return error.message === NO_LOL_PROFILE_MESSAGE
+                ? '❌ To konto Riot istnieje, ale nie ma profilu League of Legends na żadnym ze znanych serwerów.'
+                : '❌ Nie znaleziono takiego Riot ID. Sprawdź nick i tag (Nick#TAG).';
         case 401:
         case 403:
             return '❌ Klucz Riot API jest nieprawidłowy lub wygasł. Daj znać administratorowi bota.';
@@ -69,7 +71,7 @@ export const statylolCommand = {
         .addStringOption((option) =>
             option
                 .setName('region')
-                .setDescription('Serwer gry (domyślnie EUNE)')
+                .setDescription('Serwer gry (opcjonalnie; bot sam znajdzie profil na innych)')
                 .addChoices(
                     ...(Object.entries(REGIONS) as Array<[LolRegion, (typeof REGIONS)[LolRegion]]>).map(
                         ([value, info]) => ({ name: info.label, value }),
