@@ -10,31 +10,9 @@ import {
 import { config } from 'dotenv';
 import { HusariaColors } from '../utils/husaria-theme.js';
 import { ensureDashboardAccess } from '../utils/role-access.js';
+import { resolveDashboardUrl } from '../utils/dashboard-url.js';
 
 config();
-
-function isValidDashboardUrl(value: string): boolean {
-    try {
-        const parsed = new URL(value);
-        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-    } catch {
-        return false;
-    }
-}
-
-function resolveDashboardUrl(): string | null {
-    const configuredUrl = process.env.DASHBOARD_BASE_URL?.trim() ?? '';
-    if (configuredUrl) {
-        return isValidDashboardUrl(configuredUrl) ? configuredUrl : null;
-    }
-
-    if (process.env.NODE_ENV === 'production') {
-        return null;
-    }
-
-    const port = process.env.DASHBOARD_PORT?.trim() || '3000';
-    return `http://localhost:${port}`;
-}
 
 export const dashboardLinkCommand = {
     data: new SlashCommandBuilder()

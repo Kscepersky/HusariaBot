@@ -11,12 +11,14 @@ import { g2MatchesRouter } from './routes/g2-matches.js';
 import { shopApiRouter } from './routes/api.shop.js';
 import { pagesRouter } from './routes/pages.js';
 import { ensureCsrfTokenForSession, requireCsrfToken } from './middleware/csrf.js';
+import { requireImageAccess } from './middleware/protect-images.js';
 import { authRateLimiter, globalRateLimiter, mutationRateLimiter } from './middleware/rate-limit.js';
 import { SQLiteSessionStore } from './session/sqlite-store.js';
 import { initializeDashboardScheduler } from './scheduler/service.js';
 import { probePandaScoreApiConnection } from './g2-matches/pandascore-client.js';
 import { probeDiscordBotApi } from './discord-api.js';
 import { getOwnerId } from '../permissions/access.js';
+import { startTaskBoard } from '../tasks/board.js';
 import { createLogger } from '../utils/logger.js';
 
 config();
@@ -40,7 +42,7 @@ const REQUIRED_ENV = [
 
 const DASHBOARD_BODY_LIMIT = '32mb';
 const DEFAULT_BODY_LIMIT = '256kb';
-const LARGE_BODY_PATHS = ['/api/images/upload', '/api/embed', '/api/scheduled', '/api/economy/import-csv'];
+const LARGE_BODY_PATHS = ['/api/images/upload', '/api/embed', '/api/scheduled', '/api/economy/import-csv', '/api/tasks'];
 const DEFAULT_SESSION_TTL_HOURS = 24;
 const dashboardLogger = createLogger('dashboard:server');
 
@@ -241,6 +243,8 @@ export function createDashboardApp() {
     });
 
     app.use('/public', express.static(join(__dirname, 'public')));
+    // Tylko logo ze strony logowania jest publiczne; reszta biblioteki grafik wymaga sesji.
+    app.use('/img', requireImageAccess);
     app.use('/img', (req, res, next) => {
         // SVG z biblioteki mieszka na origin dashboardu - izolujemy go, zeby nie mogl byc stroną z formularzem/skryptem.
         if (req.path.toLowerCase().endsWith('.svg')) {
@@ -281,6 +285,8 @@ export function startDashboard(): void {
     void initializeDashboardScheduler().catch((error) => {
         dashboardLogger.error('DASHBOARD_SCHEDULER_START_FAILED', 'Nie udalo sie uruchomic schedulera dashboardu.', {}, error);
     });
+
+    startTaskBoard();
 
     const server = app.listen(port, () => {
         dashboardLogger.info('DASHBOARD_STARTED', 'Dashboard uruchomiony.', {

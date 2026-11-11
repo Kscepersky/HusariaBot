@@ -1,5 +1,6 @@
 import type { User } from 'discord.js';
 import { getResult } from './ttt-logic.js';
+import { CHANNEL_CANVASES } from './channel-canvases.js';
 
 export interface CanvasPreviewContext {
     /** Osoba uruchamiajaca podglad - jej nick i awatar trafiaja na karty. */
@@ -153,6 +154,12 @@ export const CANVAS_PREVIEWS: readonly CanvasPreview[] = [
             });
         },
     },
+    // Banery z /wyslijcanvas - nowy wpis w CHANNEL_CANVASES pojawia sie tu sam.
+    ...CHANNEL_CANVASES.map((canvas): CanvasPreview => ({
+        key: canvas.key,
+        label: `${canvas.label} (/wyslijcanvas)`,
+        render: () => canvas.render(),
+    })),
 ];
 
 export function findCanvasPreview(key: string): CanvasPreview | undefined {

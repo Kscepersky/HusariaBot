@@ -44,7 +44,7 @@ const guildEmojisCache = new Map<string, SimpleCacheEntry<DiscordEmoji[]>>();
 const guildMemberCache = new Map<string, SimpleCacheEntry<DiscordGuildMember | null>>();
 const guildMemberInFlight = new Map<string, Promise<DiscordGuildMember | null>>();
 
-class DiscordRequestError extends Error {
+export class DiscordRequestError extends Error {
     status: number;
     payload: unknown;
 
@@ -201,6 +201,7 @@ export interface DiscordMessage {
 export interface DiscordMessagePayload {
     content?: string;
     embeds?: object[];
+    attachments?: object[];
     allowed_mentions?: {
         parse: string[];
         roles?: string[];
@@ -881,7 +882,7 @@ export async function sendMessageToChannel(channelId: string, payload: DiscordMe
 export async function sendDirectMessage(
     userId: string,
     content: string,
-    options?: { allowedMentions?: { parse?: string[]; users?: string[] } },
+    options?: { allowedMentions?: { parse?: string[]; users?: string[] }; components?: object[] },
 ): Promise<void> {
     if (!isValidDiscordId(userId)) {
         throw new Error('Invalid user ID format.');
@@ -898,7 +899,7 @@ export async function sendDirectMessage(
 
     if (!openDmChannelResponse.ok) {
         const errPayload = await openDmChannelResponse.json().catch(() => ({}));
-        throw new Error(`Failed to open DM channel: ${openDmChannelResponse.status} — ${JSON.stringify(errPayload)}`);
+        throw new DiscordRequestError('open DM channel', openDmChannelResponse.status, errPayload);
     }
 
     const safeContent = content.slice(0, 2000);
@@ -912,12 +913,13 @@ export async function sendDirectMessage(
         body: JSON.stringify({
             content: safeContent,
             allowed_mentions: options?.allowedMentions ?? { parse: [] },
+            ...(options?.components ? { components: options.components } : {}),
         }),
     });
 
     if (!sendMessageResponse.ok) {
         const errPayload = await sendMessageResponse.json().catch(() => ({}));
-        throw new Error(`Failed to send DM: ${sendMessageResponse.status} — ${JSON.stringify(errPayload)}`);
+        throw new DiscordRequestError('send DM', sendMessageResponse.status, errPayload);
     }
 }
 
@@ -955,7 +957,60 @@ export async function editChannelMessage(
 
     if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
-        throw new Error(`Failed to edit message: ${resp.status} — ${JSON.stringify(err)}`);
+        throw new DiscordRequestError('edit message', resp.status, err);
+    }
+}
+
+export interface DiscordFileUpload {
+    filename: string;
+    contentType: string;
+    data: Buffer;
+}
+
+function buildMessageWithFileBody(payload: DiscordMessagePayload, file: DiscordFileUpload): FormData {
+    const form = new FormData();
+    form.append('payload_json', JSON.stringify(payload));
+    form.append('files[0]', new Blob([new Uint8Array(file.data)], { type: file.contentType }), file.filename);
+    return form;
+}
+
+/** Wysyla wiadomosc z jednym plikiem (np. obrazek referencjonowany w embedzie przez attachment://). */
+export async function sendMessageWithFile(
+    channelId: string,
+    payload: DiscordMessagePayload,
+    file: DiscordFileUpload,
+): Promise<string> {
+    const resp = await fetch(`${DISCORD_API}/channels/${channelId}/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+        body: buildMessageWithFileBody(payload, file),
+    });
+
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new DiscordRequestError('send message with file', resp.status, err);
+    }
+
+    const msg = await resp.json() as { id: string };
+    return msg.id;
+}
+
+/** Edytuje wiadomosc i podmienia jej zalacznik (stare zalaczniki znikaja, bo nie ma ich w `payload.attachments`). */
+export async function editChannelMessageWithFile(
+    channelId: string,
+    messageId: string,
+    payload: DiscordMessagePayload,
+    file: DiscordFileUpload,
+): Promise<void> {
+    const resp = await fetch(`${DISCORD_API}/channels/${channelId}/messages/${messageId}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bot ${requireEnv('DISCORD_TOKEN')}` },
+        body: buildMessageWithFileBody(payload, file),
+    });
+
+    if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new DiscordRequestError('edit message with file', resp.status, err);
     }
 }
 

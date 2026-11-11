@@ -29,6 +29,8 @@ import { muteCommand } from './commands/mute.js';
 import { sklepCommand } from './commands/sklep.js';
 import { kupCommand } from './commands/kup.js';
 import { zamowieniaCommand } from './commands/zamowienia.js';
+import { mojeTaskiCommand } from './commands/mojetaski.js';
+import { wyslijCanvasCommand } from './commands/wyslijcanvas.js';
 
 config();
 
@@ -76,6 +78,8 @@ const commands = [
     sklepCommand.data.toJSON(),
     kupCommand.data.toJSON(),
     zamowieniaCommand.data.toJSON(),
+    mojeTaskiCommand.data.toJSON(),
+    wyslijCanvasCommand.data.toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(token);

@@ -90,6 +90,43 @@ describe('katalogi tlumaczen', () => {
     });
 });
 
+describe('klucze uzywane w skryptach', () => {
+    it('kazdy staly klucz t(...) z tasks.js istnieje w obu katalogach', () => {
+        const { catalogs } = loadI18n();
+        const source = readFileSync(join(PUBLIC_JS, 'tasks.js'), 'utf8');
+        const keys = new Set<string>();
+        // Pomijamy poczatki kluczy skladanych dynamicznie (t('tasks.x_' + zmienna)) - te sprawdzamy nizej.
+        for (const match of source.matchAll(/\bt\('([a-zA-Z0-9_.]+)'(?!\s*\+)/g)) {
+            keys.add(match[1]!);
+        }
+        // Klucze skladane dynamicznie (t('tasks.priorytet_' + ...)) - sprawdzamy kazdy wariant.
+        for (const priority of ['high', 'normal', 'low']) keys.add(`tasks.priorytet_${priority}`);
+        for (const type of ['created', 'edited', 'completed', 'deleted']) keys.add(`tasks.zdarzenie_${type}`);
+
+        expect(keys.size).toBeGreaterThan(40);
+        for (const key of keys) {
+            expect(key in catalogs.pl, `brak ${key} w pl`).toBe(true);
+            expect(key in catalogs.en, `brak ${key} w en`).toBe(true);
+        }
+    });
+});
+
+describe('licznik znakow w edytorze', () => {
+    it('ma wszystkie tlumaczenia uzywane w app.js', () => {
+        const { catalogs } = loadI18n();
+        const source = readFileSync(join(PUBLIC_JS, 'app.js'), 'utf8');
+        const keys = [...source.matchAll(/\bt\('(app\.licznik_[a-z_]+)'/g)].map((match) => match[1]!);
+
+        expect(new Set(keys)).toEqual(new Set(['app.licznik_embed_opis', 'app.licznik_wiadomosc_opis', 'app.licznik_za_dlugo']));
+        for (const key of keys) {
+            expect(key in catalogs.pl, `brak ${key} w pl`).toBe(true);
+            expect(key in catalogs.en, `brak ${key} w en`).toBe(true);
+        }
+        expect(catalogs.pl['app.licznik_za_dlugo']).toContain('{count}');
+        expect(catalogs.en['app.licznik_za_dlugo']).toContain('{count}');
+    });
+});
+
 describe('runtime i18n', () => {
     it('tlumaczy klucz w wybranym jezyku', () => {
         const { api } = loadI18n();

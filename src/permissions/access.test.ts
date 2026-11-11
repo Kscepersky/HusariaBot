@@ -63,13 +63,20 @@ describe('access', () => {
             expect(access.sections).toEqual(DASHBOARD_SECTIONS);
         });
 
-        it('staff dostaje dokladnie nadane sekcje', async () => {
+        it('staff dostaje dokladnie nadane sekcje plus sekcje domyslne (taski)', async () => {
             await store.setSections(STAFF, ['embed-creator', 'shop'], OWNER);
             const access = await resolveUserAccess(STAFF, store);
             expect(access.role).toBe('staff');
-            expect(access.sections).toEqual(['embed-creator', 'shop']);
+            expect(access.sections).toEqual(['tasks', 'embed-creator', 'shop']);
             expect(canAccess(access, 'shop')).toBe(true);
+            expect(canAccess(access, 'tasks')).toBe(true);
             expect(canAccess(access, 'events')).toBe(false);
+        });
+
+        it('sekcja domyslna nie daje dostepu komus bez nadanych sekcji', async () => {
+            const access = await resolveUserAccess(STAFF, store);
+            expect(access).toEqual({ role: null, sections: [] });
+            expect(canAccess(access, 'tasks')).toBe(false);
         });
 
         it('uzytkownik bez wpisu nie ma roli ani sekcji', async () => {

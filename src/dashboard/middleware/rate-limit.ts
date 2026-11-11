@@ -129,6 +129,37 @@ const userMutationLimiter = rateLimit({
     },
 });
 
+// Zapisy taskow wysylaja DM-y i edytuja wiadomosc na Discordzie - osobny, ciasniejszy sufit,
+// zeby jedno konto nie zalalo nikogo powiadomieniami ani nie zapchalo dysku zalacznikami.
+const taskWriteLimiter = rateLimit({
+    windowMs: parsePositiveInt(process.env.DASHBOARD_TASK_WRITE_RATE_LIMIT_WINDOW_MS, 10 * 60 * 1000),
+    max: parsePositiveInt(process.env.DASHBOARD_TASK_WRITE_RATE_LIMIT_MAX, 60),
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: userKeyGenerator,
+    skip: () => isRateLimitDisabled(),
+    handler: (req, res) => {
+        rateLimitLogger.warn('DASHBOARD_RATE_LIMIT_HIT', 'Rate limit task writes hit.', {
+            requestId: req.requestId,
+            limiter: 'task-write',
+            userId: getSessionUserId(req),
+            ip: req.ip,
+            method: req.method,
+            path: req.path,
+        });
+        res.status(429).json({ error: 'Zbyt wiele zmian w taskach. Poczekaj chwilę.' });
+    },
+});
+
+export function taskWriteRateLimiter(req: Request, res: Response, next: NextFunction): void {
+    if (!MUTATING_METHODS.has(req.method.toUpperCase())) {
+        next();
+        return;
+    }
+
+    void taskWriteLimiter(req, res, next);
+}
+
 export function globalRateLimiter(req: Request, res: Response, next: NextFunction): void {
     void (getSessionUserId(req) ? userGlobalLimiter : globalLimiter)(req, res, next);
 }

@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireOwner } from '../middleware/require-section-access.js';
-import { getDiscordUserById, getGuildMember, getGuildRoles, searchGuildMembers } from '../discord-api.js';
+import { getGuildMember, getGuildRoles, searchGuildMembers } from '../discord-api.js';
+import { describeUsers } from '../user-summaries.js';
 import { ASSIGNABLE_SECTIONS, isAssignableSection, type DashboardSection } from '../dashboard-sections.js';
 import { isOwner } from '../../permissions/access.js';
 import { getPermissionStore, isSnowflake, type AuditEntry } from '../../permissions/permission-store.js';
@@ -17,8 +18,6 @@ const AUDIT_PAGE_SIZE_DEFAULT = 25;
 const AUDIT_PAGE_SIZE_MAX = 100;
 const MEMBER_SEARCH_LIMIT = 10;
 const MEMBER_SEARCH_MIN_LENGTH = 2;
-const USER_INFO_TTL_MS = 5 * 60 * 1000;
-
 const updateSectionsSchema = z.object({
     sections: z.array(z.string()).max(ASSIGNABLE_SECTIONS.length),
 }).strip();
@@ -26,43 +25,6 @@ const updateSectionsSchema = z.object({
 const supportRoleSchema = z.object({
     roleId: z.string().nullable(),
 }).strip();
-
-interface UserSummary {
-    id: string;
-    username: string | null;
-    globalName: string | null;
-    avatar: string | null;
-}
-
-const userInfoCache = new Map<string, { value: UserSummary; fetchedAt: number }>();
-
-async function describeUser(userId: string): Promise<UserSummary> {
-    const cached = userInfoCache.get(userId);
-    if (cached && Date.now() - cached.fetchedAt < USER_INFO_TTL_MS) {
-        return cached.value;
-    }
-
-    let value: UserSummary = { id: userId, username: null, globalName: null, avatar: null };
-    try {
-        const user = await getDiscordUserById(userId);
-        if (user) {
-            value = { id: userId, username: user.username, globalName: user.global_name ?? null, avatar: user.avatar ?? null };
-        }
-    } catch (error) {
-        // Brak nazwy nie moze blokowac panelu - pokazemy samo ID.
-        permissionsLogger.warn('PERMISSIONS_USER_LOOKUP_FAILED', 'Nie udalo sie pobrac danych uzytkownika.', { targetUserId: userId }, error);
-        return value;
-    }
-
-    userInfoCache.set(userId, { value, fetchedAt: Date.now() });
-    return value;
-}
-
-async function describeUsers(userIds: readonly string[]): Promise<Record<string, UserSummary>> {
-    const uniqueIds = [...new Set(userIds)].filter(isSnowflake);
-    const summaries = await Promise.all(uniqueIds.map(describeUser));
-    return Object.fromEntries(summaries.map((summary) => [summary.id, summary]));
-}
 
 function auditUserIds(entries: readonly AuditEntry[]): string[] {
     return entries.flatMap((entry) => [entry.actorId, ...(entry.action === 'setting' ? [] : [entry.targetId])]);

@@ -77,6 +77,10 @@
         <span class="sidebar-icon">📊</span>
         <span data-i18n="dashboard.statystyki_serwera">Statystyki Serwera</span>
       </a>
+      <a href="#" class="sidebar-item" data-section="tasks">
+        <span class="sidebar-icon">✅</span>
+        <span data-i18n="dashboard.taski">Taski</span>
+      </a>
       <div class="sidebar-group sidebar-group-owner" id="sidebar-owner-group" hidden>
         <div class="sidebar-group-title" data-i18n="dashboard.grupa_owner">Tylko owner</div>
       <a href="#" class="sidebar-item" id="economy-settings-nav-item" data-section="economy-settings" style="display:none;">
@@ -130,6 +134,25 @@
                 <button type="button" class="toolbar-btn" data-prefix="### " title="Nagłówek H3" data-i18n-title="embedCreator.nagowek_h3">H3</button>
                 <button type="button" class="toolbar-btn" data-prefix="> " title="Cytat">❝</button>
                 <button type="button" class="toolbar-btn" data-wrap="`" title="Kod inline" data-i18n-title="embedCreator.kod_inline">&lt;/&gt;</button>
+                <button type="button" class="toolbar-btn" id="link-toolbar-btn" data-action="link" title="Hiperłącze" data-i18n-title="embedCreator.hiperlacze" aria-label="Hiperłącze" data-i18n-aria-label="embedCreator.hiperlacze" aria-haspopup="true" aria-expanded="false" aria-controls="link-popover">🔗</button>
+              </div>
+
+              <div class="link-popover" id="link-popover" role="group" aria-label="Wstaw hiperłącze" data-i18n-aria-label="embedCreator.wstaw_hiperlacze" hidden>
+                <div class="link-popover-fields">
+                  <label class="link-popover-field">
+                    <span data-i18n="embedCreator.link_tekst">Tekst linku</span>
+                    <input type="text" id="link-text-input" class="form-input" maxlength="200" autocomplete="off" placeholder="np. nasz regulamin" data-i18n-placeholder="embedCreator.link_tekst_placeholder">
+                  </label>
+                  <label class="link-popover-field">
+                    <span data-i18n="embedCreator.link_adres">Adres URL</span>
+                    <input type="text" id="link-url-input" class="form-input" maxlength="1000" autocomplete="off" inputmode="url" placeholder="https://..." data-i18n-placeholder="embedCreator.link_adres_placeholder">
+                  </label>
+                </div>
+                <p class="link-popover-error" id="link-popover-error" role="alert" hidden></p>
+                <div class="link-popover-actions">
+                  <button type="button" class="btn-secondary" id="link-cancel-btn" data-i18n="embedCreator.link_anuluj">Anuluj</button>
+                  <button type="button" class="btn-primary" id="link-insert-btn" data-i18n="embedCreator.link_wstaw">Wstaw link</button>
+                </div>
               </div>
 
               <div class="editor-popovers">
@@ -243,7 +266,11 @@
 
           <div class="form-group">
             <label class="form-label" for="content-textarea" data-i18n="embedCreator.tresc">Treść</label>
-            <textarea id="content-textarea" name="content" class="form-textarea" rows="5" placeholder="Wpisz treść publikacji..." data-i18n-placeholder="embedCreator.wpisz_tresc_publikacji"></textarea>
+            <textarea id="content-textarea" name="content" class="form-textarea" rows="5" placeholder="Wpisz treść publikacji..." data-i18n-placeholder="embedCreator.wpisz_tresc_publikacji" aria-describedby="content-char-counter"></textarea>
+            <div class="char-counter" id="content-char-counter" aria-live="polite">
+              <span class="char-counter-hint" id="content-char-hint"></span>
+              <span class="char-counter-value" id="content-char-count">0 / 4096</span>
+            </div>
           </div>
 
           <details class="form-group form-disclosure" id="ping-role-group">
@@ -1374,6 +1401,69 @@
       </div>
     </div>
 
+    <div id="section-tasks" class="section-panel">
+      <div class="tasks-hero">
+        <div class="section-header">
+          <h2 data-i18n="tasks.naglowek">✅ Taski</h2>
+          <p data-i18n="tasks.opis_sekcji">Zadania dla administracji. Dodaj task, przypisz go do osoby lub do wszystkich, a po wykonaniu oznacz jako ukończony z krótką notatką.</p>
+        </div>
+        <button id="tasks-new-btn" class="btn-primary tasks-new-btn" type="button" data-i18n="tasks.nowy_task_przycisk">➕ Nowy task</button>
+      </div>
+
+      <div class="tasks-stats">
+        <button type="button" class="tasks-stat" data-tasks-scope="mine">
+          <span class="tasks-stat-value" id="tasks-count-mine">0</span>
+          <span class="tasks-stat-label" data-i18n="tasks.statystyka_moje">Moje otwarte</span>
+        </button>
+        <button type="button" class="tasks-stat" data-tasks-scope="open">
+          <span class="tasks-stat-value" id="tasks-count-open">0</span>
+          <span class="tasks-stat-label" data-i18n="tasks.statystyka_otwarte">Wszystkie otwarte</span>
+        </button>
+        <button type="button" class="tasks-stat is-danger" id="tasks-stat-overdue">
+          <span class="tasks-stat-value" id="tasks-count-overdue">0</span>
+          <span class="tasks-stat-label" data-i18n="tasks.statystyka_po_terminie">Po terminie</span>
+        </button>
+      </div>
+
+      <div class="creator-form-card tasks-panel">
+        <div class="tasks-toolbar">
+          <div class="tasks-tabs" role="tablist">
+            <button type="button" class="tasks-tab is-active" role="tab" aria-selected="true" data-tasks-scope="mine" data-i18n="tasks.zakladka_moje">Moje</button>
+            <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-tasks-scope="open" data-i18n="tasks.zakladka_otwarte">Wszystkie otwarte</button>
+            <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-tasks-scope="history" data-i18n="tasks.zakladka_historia">Historia</button>
+          </div>
+          <button id="tasks-refresh-btn" class="tasks-icon-btn" type="button" title="Odśwież" data-i18n-title="tasks.odswiez" aria-label="Odśwież" data-i18n-aria-label="tasks.odswiez">↻</button>
+        </div>
+
+        <div class="tasks-filters">
+          <div class="tasks-search">
+            <span class="tasks-search-icon" aria-hidden="true">🔎</span>
+            <input id="tasks-search" type="search" class="form-input" maxlength="100" autocomplete="off" placeholder="Szukaj w tytule i opisie..." data-i18n-placeholder="tasks.szukaj" aria-label="Szukaj" data-i18n-aria-label="tasks.szukaj">
+          </div>
+          <select id="tasks-filter-assignee" class="form-select" aria-label="Osoba" data-i18n-aria-label="tasks.pole_osoba" hidden></select>
+          <select id="tasks-filter-status" class="form-select" aria-label="Status" data-i18n-aria-label="tasks.pole_status" hidden>
+            <option value="done" data-i18n="tasks.status_done">Ukończone</option>
+            <option value="deleted" data-owner-only data-i18n="tasks.status_deleted">Usunięte</option>
+            <option value="all" data-owner-only data-i18n="tasks.status_all">Wszystkie</option>
+          </select>
+          <div class="tasks-chips" id="tasks-priority-chips" role="group" aria-label="Priorytet" data-i18n-aria-label="tasks.pole_priorytet">
+            <button type="button" class="tasks-chip-btn is-active" data-tasks-priority="all" data-i18n="tasks.filtr_wszystkie">Wszystkie</button>
+            <button type="button" class="tasks-chip-btn" data-tasks-priority="high">🔴</button>
+            <button type="button" class="tasks-chip-btn" data-tasks-priority="normal">🟡</button>
+            <button type="button" class="tasks-chip-btn" data-tasks-priority="low">🟢</button>
+          </div>
+        </div>
+
+        <div id="tasks-list" class="tasks-list" aria-live="polite"></div>
+
+        <div class="image-pagination" id="tasks-pagination" hidden>
+          <button id="tasks-prev-btn" class="btn-secondary" type="button" data-i18n="sessionActivity.poprzednia">⬅ Poprzednia</button>
+          <span class="preview-note" id="tasks-page-label"></span>
+          <button id="tasks-next-btn" class="btn-secondary" type="button" data-i18n="sessionActivity.nastepna">Nastepna ➡</button>
+        </div>
+      </div>
+    </div>
+
     <footer class="dashboard-footer">
       &copy; 2026 HusariaBot - created by <a href="https://github.com/Kscepersky" target="_blank" rel="noopener" class="dashboard-footer-link">@Kscepersky</a>
     </footer>
@@ -1383,6 +1473,105 @@
 </main>
 
 <div id="toast-container"></div>
+
+<dialog id="task-form-dialog" class="tasks-dialog" aria-labelledby="task-form-heading">
+  <form id="task-form" class="tasks-dialog-body" novalidate>
+    <div class="tasks-dialog-head">
+      <h3 id="task-form-heading" data-i18n="tasks.nowy_task">Nowy task</h3>
+      <button type="button" class="tasks-dialog-close" data-close-dialog="task-form-dialog" aria-label="Zamknij" data-i18n-aria-label="tasks.zamknij">&times;</button>
+    </div>
+    <div class="form-group">
+      <div class="tasks-label-row">
+        <label class="form-label" for="task-form-title" data-i18n="tasks.pole_tytul">Tytuł</label>
+        <span class="tasks-counter" id="task-form-title-counter">0/100</span>
+      </div>
+      <input id="task-form-title" type="text" class="form-input" maxlength="100" required autocomplete="off" placeholder="Co trzeba zrobić?" data-i18n-placeholder="tasks.tytul_placeholder">
+    </div>
+    <div class="form-group">
+      <div class="tasks-label-row">
+        <label class="form-label" for="task-form-description" data-i18n="tasks.pole_opis">Opis</label>
+        <span class="tasks-counter" id="task-form-description-counter">0/2000</span>
+      </div>
+      <textarea id="task-form-description" class="form-textarea" rows="5" maxlength="2000" placeholder="Szczegóły, linki, kontekst..." data-i18n-placeholder="tasks.opis_placeholder"></textarea>
+    </div>
+    <div class="tasks-form-grid">
+      <div class="form-group">
+        <label class="form-label" for="task-form-assignee" data-i18n="tasks.pole_osoba">Dla kogo</label>
+        <select id="task-form-assignee" class="form-select"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="task-form-due" data-i18n="tasks.pole_termin_opcjonalny">Termin (opcjonalnie)</label>
+        <input id="task-form-due" type="datetime-local" class="form-input">
+      </div>
+    </div>
+    <div class="form-group">
+      <span class="form-label" data-i18n="tasks.pole_priorytet">Priorytet</span>
+      <div class="tasks-segment" role="radiogroup" aria-label="Priorytet" data-i18n-aria-label="tasks.pole_priorytet">
+        <label class="tasks-segment-item is-high"><input type="radio" name="task-priority" value="high"><span data-i18n="tasks.opcja_wysoki">🔴 Wysoki</span></label>
+        <label class="tasks-segment-item is-normal"><input type="radio" name="task-priority" value="normal" checked><span data-i18n="tasks.opcja_normalny">🟡 Normalny</span></label>
+        <label class="tasks-segment-item is-low"><input type="radio" name="task-priority" value="low"><span data-i18n="tasks.opcja_niski">🟢 Niski</span></label>
+      </div>
+    </div>
+    <div class="form-group" id="task-form-attachments">
+      <span class="form-label" data-i18n="tasks.zrzuty_ekranu">Zrzuty ekranu</span>
+      <div id="task-form-dropzone" class="tasks-dropzone" role="button" tabindex="0">
+        <span class="tasks-dropzone-icon" aria-hidden="true">🖼️</span>
+        <span data-i18n="tasks.dropzone">Przeciągnij obrazek, wklej (Ctrl+V) albo kliknij, aby wybrać. PNG, JPG, GIF, WebP do 8 MB.</span>
+      </div>
+      <input id="task-form-files" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+      <div id="task-form-thumbs" class="tasks-thumbs"></div>
+    </div>
+    <div class="tasks-dialog-actions">
+      <button type="button" class="btn-secondary" data-close-dialog="task-form-dialog" data-i18n="tasks.anuluj">Anuluj</button>
+      <button type="submit" class="btn-primary" id="task-form-submit" data-i18n="tasks.zapisz">Zapisz</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="task-complete-dialog" class="tasks-dialog" aria-labelledby="task-complete-heading">
+  <form id="task-complete-form" class="tasks-dialog-body" novalidate>
+    <div class="tasks-dialog-head">
+      <h3 id="task-complete-heading" data-i18n="tasks.ukoncz_task">✅ Ukończ task</h3>
+      <button type="button" class="tasks-dialog-close" data-close-dialog="task-complete-dialog" aria-label="Zamknij" data-i18n-aria-label="tasks.zamknij">&times;</button>
+    </div>
+    <p class="tasks-complete-subject" id="task-complete-subject"></p>
+    <div class="form-group">
+      <div class="tasks-label-row">
+        <label class="form-label" for="task-complete-note" data-i18n="tasks.co_zrobiono">Co zostało zrobione?</label>
+        <span class="tasks-counter" id="task-complete-note-counter">0/1000</span>
+      </div>
+      <textarea id="task-complete-note" class="form-textarea" rows="4" maxlength="1000" required placeholder="Krótko opisz wykonaną pracę..." data-i18n-placeholder="tasks.notatka_placeholder"></textarea>
+    </div>
+    <div class="form-group">
+      <span class="form-label" data-i18n="tasks.zrzuty_opcjonalne">Zrzuty ekranu (opcjonalnie)</span>
+      <div id="task-complete-dropzone" class="tasks-dropzone" role="button" tabindex="0">
+        <span class="tasks-dropzone-icon" aria-hidden="true">🖼️</span>
+        <span data-i18n="tasks.dropzone">Przeciągnij obrazek, wklej (Ctrl+V) albo kliknij, aby wybrać. PNG, JPG, GIF, WebP do 8 MB.</span>
+      </div>
+      <input id="task-complete-files" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+      <div id="task-complete-thumbs" class="tasks-thumbs"></div>
+    </div>
+    <div class="tasks-dialog-actions">
+      <button type="button" class="btn-secondary" data-close-dialog="task-complete-dialog" data-i18n="tasks.anuluj">Anuluj</button>
+      <button type="submit" class="btn-primary" id="task-complete-submit" data-i18n="tasks.oznacz_ukonczony">Oznacz jako ukończony</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="task-detail-dialog" class="tasks-dialog tasks-dialog-wide" aria-label="Szczegóły taska" data-i18n-aria-label="tasks.szczegoly">
+  <div class="tasks-dialog-body">
+    <div class="tasks-dialog-head">
+      <span class="tasks-dialog-kicker" data-i18n="tasks.szczegoly">Szczegóły</span>
+      <button type="button" class="tasks-dialog-close" data-close-dialog="task-detail-dialog" aria-label="Zamknij" data-i18n-aria-label="tasks.zamknij">&times;</button>
+    </div>
+    <div id="task-detail-content"></div>
+    <div class="tasks-dialog-actions" id="task-detail-actions"></div>
+  </div>
+</dialog>
+
+<dialog id="task-image-dialog" class="tasks-image-dialog" aria-label="Podgląd zdjęcia" data-i18n-aria-label="tasks.powieksz">
+  <img id="task-image-dialog-img" src="" alt="">
+</dialog>
 
 <div class="image-preview-modal" id="image-preview-modal" role="dialog" aria-modal="true" aria-label="Podglad grafiki" data-i18n-aria-label="sessionActivity.podglad_grafiki">
   <div class="image-preview-modal-inner" id="image-preview-modal-inner">
@@ -1402,5 +1591,6 @@
 <script src="/public/js/editor/emoji-search.js"></script>
 <script src="/public/js/app.js"></script>
 <script src="/public/js/permissions.js"></script>
+<script src="/public/js/tasks.js"></script>
 </body>
 </html>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     ASSIGNABLE_SECTIONS,
     DASHBOARD_SECTIONS,
+    IMPLICIT_SECTIONS,
     OWNER_ONLY_SECTIONS,
     isAssignableSection,
     isDashboardLanguage,
@@ -10,9 +11,15 @@ import {
 } from './dashboard-sections.js';
 
 describe('podzial sekcji', () => {
-    it('owner-only i przydzielane sa rozlaczne i razem daja wszystkie sekcje', () => {
+    it('owner-only, domyslne i przydzielane sa rozlaczne i razem daja wszystkie sekcje', () => {
         expect(ASSIGNABLE_SECTIONS.filter((section) => OWNER_ONLY_SECTIONS.includes(section))).toEqual([]);
-        expect([...ASSIGNABLE_SECTIONS, ...OWNER_ONLY_SECTIONS].sort()).toEqual([...DASHBOARD_SECTIONS].sort());
+        expect(ASSIGNABLE_SECTIONS.filter((section) => IMPLICIT_SECTIONS.includes(section))).toEqual([]);
+        expect([...ASSIGNABLE_SECTIONS, ...OWNER_ONLY_SECTIONS, ...IMPLICIT_SECTIONS].sort()).toEqual([...DASHBOARD_SECTIONS].sort());
+    });
+
+    it('taski sa sekcja domyslna, ktorej nie da sie przydzielic', () => {
+        expect(IMPLICIT_SECTIONS).toContain('tasks');
+        expect(isAssignableSection('tasks')).toBe(false);
     });
 
     it.each(['economy-settings', 'system-logs', 'session-activity', 'permissions'])('%s jest tylko dla ownera', (section) => {

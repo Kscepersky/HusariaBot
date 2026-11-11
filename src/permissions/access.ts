@@ -1,5 +1,7 @@
 import {
     DASHBOARD_SECTIONS,
+    IMPLICIT_SECTIONS,
+    normalizeSections,
     type DashboardRole,
     type DashboardSection,
 } from '../dashboard/dashboard-sections.js';
@@ -47,7 +49,10 @@ export async function resolveUserAccess(
     }
 
     const sections = await (store ?? await getPermissionStore()).getSections(userId);
-    return sections.length > 0 ? { role: 'staff', sections } : NO_ACCESS;
+    // Sekcje domyslne dochodza dopiero do nadanych - same nie daja dostepu do panelu.
+    return sections.length > 0
+        ? { role: 'staff', sections: normalizeSections([...sections, ...IMPLICIT_SECTIONS]) }
+        : NO_ACCESS;
 }
 
 export function canAccess(access: UserAccess, section: DashboardSection): boolean {

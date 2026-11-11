@@ -8,6 +8,7 @@
  */
 
 export const DASHBOARD_SECTIONS = [
+    'tasks',
     'embed-creator',
     'scheduled-posts',
     'sent-posts',
@@ -42,9 +43,15 @@ export const OWNER_ONLY_SECTIONS: readonly DashboardSection[] = [
     'permissions',
 ];
 
+/**
+ * Sekcje dostepne automatycznie dla kazdego, kto ma jakikolwiek dostep do
+ * dashboardu (owner lub staff). Nie da sie ich nadac ani odebrac osobno.
+ */
+export const IMPLICIT_SECTIONS: readonly DashboardSection[] = ['tasks'];
+
 /** Sekcje, ktore owner moze przydzielac innym uzytkownikom. */
 export const ASSIGNABLE_SECTIONS: readonly DashboardSection[] = DASHBOARD_SECTIONS
-    .filter((section) => !OWNER_ONLY_SECTIONS.includes(section));
+    .filter((section) => !OWNER_ONLY_SECTIONS.includes(section) && !IMPLICIT_SECTIONS.includes(section));
 
 /** Domyslny jezyk dashboardu, gdy uzytkownik nie wybral wlasnego. */
 export const DEFAULT_DASHBOARD_LANGUAGE: DashboardLanguage = 'pl';

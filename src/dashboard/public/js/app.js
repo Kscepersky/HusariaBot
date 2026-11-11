@@ -225,6 +225,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   initHamburger()
   initLanguageSwitcher()
   applyEconomySettingsAccessState()
+
+  // Link do taska (np. z DM-a) otwieramy od razu. Dalsze inicjalizacje pobieraja kanaly, role,
+  // emotki, mecze G2 itd. jedna po drugiej i potrafia trwac kilkanascie sekund.
+  const deepLinkSection = typeof window.consumeTaskDeepLink === 'function' ? window.consumeTaskDeepLink() : null
+  const openedFromDeepLink = Boolean(deepLinkSection) && isSectionAllowed(deepLinkSection)
+  if (openedFromDeepLink) switchSection(deepLinkSection)
+
   await initEmbedSection()
   await initScheduledSection()
   await initSentSection()
@@ -239,7 +246,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initSessionActivitySection()
   bindImagePreviewModalListeners()
   await loadG2Matches({ silent: true })
-  switchSection(resolveFirstAllowedSection() ?? 'embed-creator')
+  if (!openedFromDeepLink) switchSection(resolveFirstAllowedSection() ?? 'embed-creator')
 })
 
 // ─── Dostep do sekcji i jezyk dashboardu ──────────────────────────────────────
@@ -625,6 +632,10 @@ function switchSection(section) {
     void window.loadPermissionsSection()
   }
 
+  if (section === 'tasks' && typeof window.loadTasksSection === 'function') {
+    void window.loadTasksSection()
+  }
+
   if (section === 'server-stats') {
     initStatsSectionIfNeeded()
     void loadActiveStatsTab()
@@ -905,6 +916,11 @@ function bindEmbedSectionListeners() {
     const button = event.target.closest('.toolbar-btn')
     if (!button) return
 
+    if (button.dataset.action === 'link') {
+      toggleLinkPopover()
+      return
+    }
+
     const wrap = button.dataset.wrap
     const prefix = button.dataset.prefix
 
@@ -917,6 +933,8 @@ function bindEmbedSectionListeners() {
       prefixSelectionLines(prefix)
     }
   })
+
+  bindLinkPopover()
 
   recentUnicodeEmojis = window.HusariaEmojiSearch?.loadRecent(window.localStorage) ?? []
 
@@ -6158,8 +6176,56 @@ function updateImagePanels() {
   }
 }
 
+// Limity Discorda: opis embeda 4096 znakow, zwykla wiadomosc 2000. Dluzsza tresc serwer odrzuca.
+const POST_LENGTH_LIMITS = { embedded: 4096, message: 2000 }
+const POST_LENGTH_WARNING_RATIO = 0.9
+// <@ + 19 cyfr + > - najdluzsza mozliwa wzmianka autora w dopisku "Opublikowal".
+const PUBLISHER_MENTION_MAX_LENGTH = 22
+
+/**
+ * Dlugosc tego, co faktycznie trafi do Discorda - liczona tak samo jak po stronie serwera:
+ * embed = naglowek tytulu + tresc, wiadomosc = tresc + dopisek "Opublikowal". Liczymy
+ * jednostki UTF-16 (`length`), bo na tym opiera sie walidacja (emoji to 2 znaki).
+ */
+function getPostLengthStatus(mode, title, content) {
+  const body = String(content ?? '').trim()
+  const heading = String(title ?? '').trim()
+  const isEmbed = mode !== 'message'
+
+  const length = isEmbed
+    ? (heading ? `# **${heading}**\n${body}` : body).length
+    : `${body}\n\n*Opublikowa\u0142*: `.length + PUBLISHER_MENTION_MAX_LENGTH
+  const limit = isEmbed ? POST_LENGTH_LIMITS.embedded : POST_LENGTH_LIMITS.message
+
+  return {
+    length,
+    limit,
+    over: length > limit,
+    warning: length <= limit && length >= limit * POST_LENGTH_WARNING_RATIO,
+    excess: Math.max(0, length - limit),
+    isEmbed,
+  }
+}
+
+function updateContentCounter(data) {
+  const counter = document.getElementById('content-char-counter')
+  const value = document.getElementById('content-char-count')
+  const hint = document.getElementById('content-char-hint')
+  if (!counter || !value || !hint) return
+
+  const status = getPostLengthStatus(data.mode, data.title, data.content)
+  value.textContent = `${status.length} / ${status.limit}`
+  counter.classList.toggle('is-over', status.over)
+  counter.classList.toggle('is-warning', status.warning)
+  counter.title = status.isEmbed ? t('app.licznik_embed_opis') : t('app.licznik_wiadomosc_opis')
+  hint.textContent = status.over
+    ? t('app.licznik_za_dlugo', { count: status.excess })
+    : (status.isEmbed ? t('app.licznik_embed_opis') : t('app.licznik_wiadomosc_opis'))
+}
+
 function updatePreview() {
   const data = collectFormDataSync()
+  updateContentCounter(data)
   const embedContainer = document.getElementById('embed-preview-container')
   const messageContainer = document.getElementById('message-preview-container')
   const previewDescription = document.getElementById('preview-description')
@@ -6740,6 +6806,167 @@ function bindAnsiControls() {
   })
 }
 
+const BARE_HOST_WITH_PORT_PATTERN = /^[^/:\s]+:\d+(?:[/?#]|$)/
+
+/**
+ * Sprowadza wpisany adres do bezpiecznego http(s) albo zwraca null. Adres bez schematu
+ * (np. "g2esports.com") dostaje https://. Nawiasy sa kodowane, bo inaczej zamknelyby
+ * skladnie [tekst](adres) w Discordzie.
+ */
+function normalizeLinkUrl(raw) {
+  const value = String(raw ?? '').trim()
+  if (!value) return null
+
+  let candidate = value
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+    // "javascript:", "data:", "mailto:" itp. odpadaja; "host:8080/x" to adres z portem.
+    if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !BARE_HOST_WITH_PORT_PATTERN.test(value)) return null
+    candidate = `https://${value}`
+  }
+
+  let parsed
+  try {
+    parsed = new URL(candidate)
+  } catch {
+    return null
+  }
+
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+  if (!parsed.hostname.includes('.') && parsed.hostname !== 'localhost') return null
+
+  return parsed.href.replace(/\(/g, '%28').replace(/\)/g, '%29')
+}
+
+/** Sklada `[tekst](adres)`; pusty tekst = sam adres. Zwraca null dla niepoprawnego adresu. */
+function buildMarkdownLink(text, url) {
+  const href = normalizeLinkUrl(url)
+  if (!href) return null
+
+  const label = String(text ?? '').replace(/\s+/g, ' ').trim() || href
+  return `[${label.replace(/([[\]\\])/g, '\\$1')}](${href})`
+}
+
+let linkSelectionRange = null
+
+function getLinkPopoverElements() {
+  return {
+    popover: document.getElementById('link-popover'),
+    toggle: document.getElementById('link-toolbar-btn'),
+    editor: document.getElementById('content-textarea'),
+    textInput: document.getElementById('link-text-input'),
+    urlInput: document.getElementById('link-url-input'),
+    error: document.getElementById('link-popover-error'),
+  }
+}
+
+function setLinkPopoverError(message) {
+  const { error, urlInput } = getLinkPopoverElements()
+  if (!error) return
+
+  error.hidden = !message
+  error.textContent = message ?? ''
+  urlInput?.setAttribute('aria-invalid', message ? 'true' : 'false')
+}
+
+function closeLinkPopover() {
+  const { popover, toggle } = getLinkPopoverElements()
+  if (!popover) return
+
+  popover.hidden = true
+  toggle?.setAttribute('aria-expanded', 'false')
+  setLinkPopoverError(null)
+}
+
+function openLinkPopover() {
+  const { popover, toggle, editor, textInput, urlInput } = getLinkPopoverElements()
+  if (!popover || !editor || !textInput || !urlInput) return
+
+  // Hiperlacza dzialaja w tresci posta; Discord nie renderuje ich w tytule embeda.
+  if (activeEditorId === 'title') {
+    showToast(t('embedCreator.hiperlacze_tylko_tresc'), 'info')
+  }
+
+  const value = editor.value ?? ''
+  const start = Math.min(editor.selectionStart ?? value.length, value.length)
+  const end = Math.min(editor.selectionEnd ?? value.length, value.length)
+  linkSelectionRange = { start, end }
+
+  const selected = value.slice(start, end).trim()
+  const selectionIsUrl = /^(https?:\/\/|www\.)\S+$/i.test(selected) && normalizeLinkUrl(selected) !== null
+  textInput.value = selectionIsUrl ? '' : selected
+  urlInput.value = selectionIsUrl ? selected : ''
+
+  setLinkPopoverError(null)
+  popover.hidden = false
+  toggle?.setAttribute('aria-expanded', 'true')
+  ;(textInput.value ? urlInput : textInput).focus()
+}
+
+function toggleLinkPopover() {
+  const { popover } = getLinkPopoverElements()
+  if (!popover) return
+
+  if (popover.hidden) {
+    openLinkPopover()
+  } else {
+    closeLinkPopover()
+  }
+}
+
+function insertLinkFromPopover() {
+  const { editor, textInput, urlInput } = getLinkPopoverElements()
+  if (!editor || !textInput || !urlInput) return
+
+  const markdown = buildMarkdownLink(textInput.value, urlInput.value)
+  if (!markdown) {
+    setLinkPopoverError(t('embedCreator.link_blad'))
+    urlInput.focus()
+    return
+  }
+
+  const value = editor.value ?? ''
+  const range = linkSelectionRange ?? { start: value.length, end: value.length }
+  const start = Math.min(range.start, value.length)
+  const end = Math.min(Math.max(range.end, start), value.length)
+
+  editor.value = `${value.slice(0, start)}${markdown}${value.slice(end)}`
+  const caret = start + markdown.length
+  editor.setSelectionRange(caret, caret)
+  activeEditorId = 'content-textarea'
+  editor.dispatchEvent(new Event('input', { bubbles: true }))
+
+  closeLinkPopover()
+  editor.focus({ preventScroll: true })
+}
+
+function bindLinkPopover() {
+  const { popover, textInput, urlInput } = getLinkPopoverElements()
+  if (!popover) return
+
+  document.getElementById('link-insert-btn')?.addEventListener('click', insertLinkFromPopover)
+  document.getElementById('link-cancel-btn')?.addEventListener('click', () => {
+    closeLinkPopover()
+    document.getElementById('link-toolbar-btn')?.focus()
+  })
+
+  popover.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeLinkPopover()
+      document.getElementById('link-toolbar-btn')?.focus()
+      return
+    }
+
+    if (event.key === 'Enter' && event.target instanceof HTMLInputElement) {
+      event.preventDefault()
+      insertLinkFromPopover()
+    }
+  })
+
+  urlInput?.addEventListener('input', () => setLinkPopoverError(null))
+  textInput?.addEventListener('input', () => setLinkPopoverError(null))
+}
+
 function wrapSelection(token) {
   const target = getActiveEditor()
   if (!target) {
@@ -6805,6 +7032,15 @@ function renderMarkdown(text) {
     return `@@CODEBLOCK_${index}@@`
   })
 
+  // Linki [tekst](https://adres). Adres chowamy w tablicy (nie przechodzi przez regexy formatowania,
+  // wiec _ i * w URL-u nic nie psuja), a w atrybut trafia dopiero na samym koncu. Tylko http(s).
+  const linkUrls = []
+  html = html.replace(/\[((?:\\[[\]\\]|[^\]\n\\])+)\]\((https?:\/\/[^\s)]+)\)/g, (_match, label, url) => {
+    const index = linkUrls.push(url) - 1
+    const text = label.replace(/\\([[\]\\])/g, '$1')
+    return `<a class="md-link" href="@@LINKURL${index}@@" target="_blank" rel="noopener noreferrer nofollow">${text}</a>`
+  })
+
   html = html.replace(/^###\s+(.+)$/gm, '<span class="md-h3">$1</span>')
   html = html.replace(/^##\s+(.+)$/gm, '<span class="md-h2">$1</span>')
   html = html.replace(/^#\s+(.+)$/gm, '<span class="md-h1-alt">$1</span>')
@@ -6824,6 +7060,7 @@ function renderMarkdown(text) {
 
   html = html.replace(/\n/g, '<br>')
   html = html.replace(/@@CODEBLOCK_(\d+)@@/g, (_match, index) => codeBlocks[Number(index)] ?? '')
+  html = html.replace(/@@LINKURL(\d+)@@/g, (_match, index) => linkUrls[Number(index)] ?? '#')
 
   return html
 }

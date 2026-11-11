@@ -208,6 +208,11 @@ DASHBOARD_AUTH_RATE_LIMIT_MAX=30
 DASHBOARD_USER_RATE_LIMIT_MAX=3000              # Per-user request cap
 DASHBOARD_USER_MUTATION_RATE_LIMIT_MAX=240      # Per-user mutation cap
 DASHBOARD_SLOW_REQUEST_MS=1200                  # Requests slower than this are logged
+DASHBOARD_TASK_WRITE_RATE_LIMIT_WINDOW_MS=600000 # 10 min window for task changes
+DASHBOARD_TASK_WRITE_RATE_LIMIT_MAX=60           # Per-user cap on task create/edit/complete/delete
+
+# ── Tasks ─────────────────────────────────────────────────────────────────────
+TASKS_CHANNEL_ID=          # Channel for the live task board (optional — board is off when empty). Keep it staff-only!
 
 # ── External Integrations ─────────────────────────────────────────────────────
 PANDASCORE_API_KEY=        # PandaScore key (optional — powers the G2 match browser)
@@ -218,6 +223,9 @@ ECONOMY_DB_PATH=
 DASHBOARD_SESSION_DB_PATH=
 SESSION_EVENTS_DB_PATH=    # Path for session login/logout event log (default: data/session-events.sqlite)
 PERMISSIONS_DB_PATH=       # Path for permissions + audit log (default: data/permissions.sqlite)
+TASKS_DB_PATH=             # Path for tasks, history and board state (default: data/tasks.sqlite)
+TASKS_ATTACHMENTS_DIR=     # Task screenshots, served only through the authenticated API (default: data/task-attachments)
+TASKS_ATTACHMENTS_MAX_MB=  # Total storage cap for task screenshots in MB (default: 2048)
 
 RIOT_API_KEY=              # Riot API key (developer.riotgames.com) — required for /statylol. A dev key expires every 24 h
 RIOT_DEFAULT_REGION=eune   # Default /statylol region: eune, euw, na, kr or tr
@@ -271,7 +279,9 @@ BOT_DEV_LOGS=1
 | `/mute` | Assign a timed mute via the Server Mute role |
 | `/ticketyconfig` | Publish the ticket panel embed to a specified channel |
 | `/sendimg` | Send an image from the `/img` library to a channel |
+| `/wyslijcanvas` | Render a card in the same style as `/level` (background, ringed emblem, bar) with the text **REGULAMIN** and post it in the channel where the command is used; the confirmation is visible only to you. New banners are one entry in `CHANNEL_CANVASES` and also show up in `/canvastest` |
 | `/dashboard` | Send the admin dashboard link |
+| `/mojetaski` | Show your open tasks (titles, priority and due dates only — the reply is public) |
 | `/canvastest` | *(Owner only)* Preview canvas cards with sample data |
 | `/ping` | Check bot latency and Discord gateway connection status |
 
@@ -286,11 +296,23 @@ The dashboard is a separate Express web application secured by Discord OAuth2. A
 - **Owner** — the Discord user ID in `OWNER_ID`. Always has full access, including the owner-only tabs; this can't be edited or revoked from the panel, and it is never stored in the database.
 - **Per-user tab access** — search for a server member and tick the tabs they may use (e.g. a moderator only gets the Post Creator). Changes apply immediately, no re-login needed. Users who left the server lose access automatically.
 - **Owner-only tabs** — Economy Settings, System Logs, Session Activity and Permissions can never be granted, nor can destructive actions (clearing ticket history/shop orders/stats, level role audit, session killswitch).
-- **Bot commands use the same permissions** — each command is tied to a tab: `/dodaj-xp`, `/dodaj-coinsy`, `/usun-coinsy`, `/resetuj-coinsy`, `/resetuj-level` → Economy Leaderboard; `/mute` → Timeouts; `/sendimg` → Post Creator; `/ticketyconfig` and closing tickets → Ticket History; `/ping` → Server Statistics; `/dashboard` → any dashboard access.
+- **Bot commands use the same permissions** — each command is tied to a tab: `/dodaj-xp`, `/dodaj-coinsy`, `/usun-coinsy`, `/resetuj-coinsy`, `/resetuj-level` → Economy Leaderboard; `/mute` → Timeouts; `/sendimg` and `/wyslijcanvas` → Post Creator; `/ticketyconfig` and closing tickets → Ticket History; `/ping` → Server Statistics; `/dashboard` and `/mojetaski` → any dashboard access.
+- **Tasks tab for everyone** — the Tasks tab is granted automatically to every user who has any dashboard access; it can't be assigned or revoked separately.
+- **What is reachable without logging in** — only the login page and OAuth endpoints (`/auth/*`), the frontend assets in `/public`, and the logo `/img/DNA.png`. Every other file in the image library requires a live session with dashboard access (checked on each request, `Cache-Control: private`), so uploaded graphics are never public. `src/dashboard/routes/public-surface.test.ts` boots the real app and fails if a new public route or file appears.
 - **Support role** — one Discord role, set in the panel, used only where Discord itself needs a role: ticket channel visibility and pings, managing temporary voice channels, and excluding it from level-role mappings. Owner and users with the Ticket History tab also get access to ticket channels.
 - **Audit log** — every grant, change and revocation (and support role change) is recorded with who did it, when, and the before/after state. Stored in `data/permissions.sqlite` (override with `PERMISSIONS_DB_PATH`).
 
 
+
+### Tasks
+
+- **Assign work to the team** — anyone with dashboard access can create a task (title, description, priority, optional due date, up to 5 screenshots) and assign it to one person or to everyone. Screenshots can be pasted with Ctrl+V, dragged in or picked from disk.
+- **Mine / All open / History** — summary tiles (mine, all open, overdue), your tasks (including those for everyone), all open tasks grouped by person, and a searchable, paginated history of completed tasks with notes, screenshots and a timeline of changes. Open lists can be filtered by text, priority, assignee and overdue; cards show relative due dates ("Tomorrow, 13.11 10:00", "3 d overdue") and open the full details on click.
+- **Completion requires a note** — the assignee (anyone, for tasks assigned to everyone) clicks *Done* and must describe what was done; screenshots are optional. Completion is atomic, so a task can't be closed twice.
+- **Who can do what** — the author or the owner can edit and delete a task; deleting is a soft delete and deleted tasks (with their screenshots) are visible to the owner only.
+- **Discord DM on assignment** — the assignee gets a DM from the bot with the author, title, priority and an *Open task* button that deep-links to the task in the dashboard (the link survives the Discord login). Task descriptions never leave the dashboard. To prevent DM spam, one person can trigger at most 10 task DMs to the same recipient per 10 minutes.
+- **Live task board** — a single message on `TASKS_CHANNEL_ID` shows the open tasks as a rendered card (same style as `/level` and `/statylol`): grouped by assignee with avatars, priority colours and relative due dates, plus a short text summary and full alt text for accessibility. It is refreshed every hour and a few seconds after every change, and re-created if someone deletes it. If rendering ever fails it falls back to a plain-text embed. The dashboard logs a warning if that channel looks visible to `@everyone`.
+- **Security** — every `/api/tasks` route re-checks access on each request; screenshots are stored outside every public directory, validated by content (PNG/JPG/GIF/WebP only, no SVG, 8 MB each) and served only through the authenticated API with `no-store` and `nosniff`.
 
 ### Post Creator
 
@@ -302,6 +324,8 @@ A full-featured publishing tool that targets any text or announcement channel on
 - **Image attach** — Attach from the server image library or upload a file (PNG, JPG, GIF, WebP — max 20 MB). SVG uploads go through a strict allowlist check and are served from `/img` with a sandboxing CSP.
 - **ANSI colors** — The editor toolbar has an **ANSI** picker: select text, pick a foreground/background color, bold or underline, and the creator wraps it in a Discord ```ansi block automatically. The live preview renders the same colors. The server only accepts the SGR codes Discord understands (reset, bold, underline, 30–37, 40–47) and strips every other control sequence. Note: some older mobile Discord clients do not render ANSI.
 - **Emoji picker** — Two tabs: the server's custom emojis (fetched live) and the standard Unicode emoji set, searchable in Polish and English, grouped by category, with a "recently used" row. The Unicode data is bundled locally (`public/js/editor/emoji-data.js`, generated from [emojibase-data](https://github.com/milesj/emojibase), MIT), so the dashboard's strict CSP needs no external scripts.
+- **Hyperlinks** — The 🔗 button in the editor toolbar opens a small form (link text + URL) and inserts `[text](url)` at the cursor; selected text becomes the link text, a selected URL becomes the address. Only `http(s)` addresses are accepted (a bare `example.org` gets `https://`), parentheses in URLs are encoded so they can't break the syntax, and `javascript:`/`data:` links are rejected. Links work in the post body, not in the embed title (Discord doesn't render them there). The live preview renders them as real links opening in a new tab.
+- **Character counter** — Under the content field a counter shows how much of Discord's limit the post uses, counted exactly like the server does: embed description = title heading + content (limit 4096), plain message = content + the "Published by" line (limit 2000). It turns yellow at 90% and red over the limit, with the number of characters to cut. Emoji count as 2 characters, as in Discord's own validation.
 - **Live preview** — WYSIWYG preview that re-renders on every keystroke.
 
 ### Scheduler
@@ -426,6 +450,7 @@ src/
 ├── shop/                         # Shop repository, UI, order tickets
 ├── tickets/                      # Ticket panel, history store, monotonic counter
 ├── timeouts/                     # Timed mute with SQLite-persisted auto-release
+├── tasks/                        # Staff tasks: SQLite store, screenshots, Discord board and DMs
 │
 ├── utils/
 │   ├── logger.ts                 # Structured logger — .jsonl + .log + Discord webhook

@@ -14,6 +14,8 @@ vi.mock('./pkn-card-renderer.js', () => ({ renderPknCard }));
 const renderRrCard = vi.hoisted(() => vi.fn());
 vi.mock('./ttt-card-renderer.js', () => ({ renderTttCard }));
 vi.mock('./rr-card-renderer.js', () => ({ renderRrCard }));
+const renderTitleCard = vi.hoisted(() => vi.fn());
+vi.mock('./title-card-renderer.js', () => ({ renderTitleCard }));
 
 import { canvastestCommand } from './canvastest.js';
 import { CANVAS_PREVIEWS } from './canvas-previews.js';
@@ -44,6 +46,7 @@ beforeEach(() => {
     renderPknCard.mockReset().mockResolvedValue(Buffer.from('pkn'));
     renderTttCard.mockReset().mockResolvedValue(Buffer.from('ttt'));
     renderRrCard.mockReset().mockResolvedValue(Buffer.from('rr'));
+    renderTitleCard.mockReset().mockResolvedValue(Buffer.from('title'));
 });
 
 describe('canvastestCommand', () => {
@@ -74,6 +77,17 @@ describe('canvastestCommand', () => {
         expect(renderPknCard).toHaveBeenCalledTimes(1);
         expect(renderTttCard).toHaveBeenCalledTimes(1);
         expect(renderRrCard).toHaveBeenCalledTimes(1);
+        expect(renderTitleCard).toHaveBeenCalledTimes(1);
+    });
+
+    it('karta REGULAMIN z /wyslijcanvas jest dostepna w podgladzie', async () => {
+        expect(CANVAS_PREVIEWS.map((preview) => preview.key)).toContain('regulamin');
+        const interaction = buildInteraction(OWNER_ID, 'regulamin');
+
+        await canvastestCommand.execute(interaction);
+
+        expect(renderTitleCard).toHaveBeenCalledWith({ title: 'REGULAMIN' });
+        expect(interaction.editReply.mock.calls[0][0].files).toHaveLength(1);
     });
 
     it('z argumentem renderuje tylko wybrana karte', async () => {
