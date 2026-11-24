@@ -99,6 +99,14 @@ Light-hearted commands, many of them rendering a Canvas image card in the same s
 - **Verify** removes the role; **Reject and ban** (with confirmation) bans the user. Both archive the transcript to ticket history and close the channel. Only the admin roles, the owner or Administrators can decide — never the person being verified.
 - If the person leaves before a decision, the channel is archived and removed.
 
+### Husariada (Kahoot-style quiz)
+
+- Runs on `HUSARIADA_CHANNEL_ID`. Between events the channel shows a "no event" embed with the rules.
+- Admins build question sets (quizzes) in the dashboard's **Husariada** tab — 4 answers per question, one correct, optional image — and start, pause, resume, skip or end the event live.
+- Each question has 4 Kahoot-coloured buttons and a countdown (15 s by default). Answers are stored per Discord user ID, one per question. Scoring works like Kahoot: up to 400 points for an instant correct answer, falling to half at the buzzer; a wrong or missing answer gets 0. Response time is measured with Discord's own timestamps, so bot lag doesn't cost players points.
+- After each question the correct answer, the answer distribution and the fastest player are revealed. Every 5 questions a TOP 3 podium image is shown for 10 s. At the end the bot posts the winner and the full ranking.
+- The dashboard queues commands in SQLite and the bot runs them within about a second. If the bot restarts mid-event, the interrupted question is revealed and the event is paused until an admin resumes it.
+
 ### Timeouts (Mute)
 
 - `/mute` command with configurable duration (minutes / hours / days) and a mandatory reason.
@@ -235,6 +243,11 @@ ADMIN_ROLE_1_ID=           # Up to 4 admin roles: pinged in verification tickets
 ADMIN_ROLE_2_ID=           # and never banned by the honeypot
 ADMIN_ROLE_3_ID=
 ADMIN_ROLE_4_ID=
+
+# ── Husariada (Kahoot-style quiz) ─────────────────────────────────────────────
+HUSARIADA_CHANNEL_ID=      # #husariada channel (optional — the quiz is off when empty)
+HUSARIADA_DB_PATH=         # Default: data/husariada.sqlite (shared by bot and dashboard)
+HUSARIADA_IMAGES_DIR=      # Default: data/husariada-images (question images)
 
 # ── External Integrations ─────────────────────────────────────────────────────
 PANDASCORE_API_KEY=        # PandaScore key (optional — powers the G2 match browser)

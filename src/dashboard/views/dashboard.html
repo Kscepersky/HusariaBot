@@ -77,6 +77,10 @@
         <span class="sidebar-icon">📊</span>
         <span data-i18n="dashboard.statystyki_serwera">Statystyki Serwera</span>
       </a>
+      <a href="#" class="sidebar-item" data-section="husariada">
+        <span class="sidebar-icon">⚔️</span>
+        <span data-i18n="dashboard.husariada">Husariada</span>
+      </a>
       <a href="#" class="sidebar-item" data-section="tasks">
         <span class="sidebar-icon">✅</span>
         <span data-i18n="dashboard.taski">Taski</span>
@@ -1464,6 +1468,139 @@
       </div>
     </div>
 
+    <div id="section-husariada" class="section-panel">
+      <div class="tasks-hero">
+        <div class="section-header">
+          <h2 data-i18n="husariada.naglowek">⚔️ Husariada</h2>
+          <p data-i18n="husariada.opis_sekcji">Quiz w stylu Kahoot na kanale #husariada. Twórz zestawy pytań, uruchamiaj event i steruj nim na żywo.</p>
+        </div>
+      </div>
+
+      <div class="hus-status-grid">
+        <div class="hus-status-card">
+          <span class="hus-status-label" data-i18n="husariada.status_bot">Bot</span>
+          <span class="hus-status-value" id="hus-bot-status">—</span>
+        </div>
+        <div class="hus-status-card">
+          <span class="hus-status-label" data-i18n="husariada.status_event">Event</span>
+          <span class="hus-status-value" id="hus-event-status">—</span>
+        </div>
+        <div class="hus-status-card">
+          <span class="hus-status-label" data-i18n="husariada.status_pytanie">Pytanie</span>
+          <span class="hus-status-value" id="hus-question-status">—</span>
+        </div>
+        <div class="hus-status-card">
+          <span class="hus-status-label" data-i18n="husariada.status_gracze">Gracze</span>
+          <span class="hus-status-value" id="hus-players-status">0</span>
+        </div>
+      </div>
+
+      <div class="creator-form-card tasks-panel">
+        <div class="tasks-toolbar">
+          <div class="tasks-tabs" role="tablist">
+            <button type="button" class="tasks-tab is-active" role="tab" aria-selected="true" data-hus-tab="control" data-i18n="husariada.zakladka_sterowanie">Sterowanie</button>
+            <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-hus-tab="quizzes" data-i18n="husariada.zakladka_quizy">Quizy</button>
+            <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-hus-tab="settings" data-i18n="husariada.zakladka_ustawienia">Ustawienia</button>
+            <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-hus-tab="history" data-i18n="husariada.zakladka_historia">Historia</button>
+          </div>
+          <button id="hus-refresh-btn" class="tasks-icon-btn" type="button" title="Odśwież" data-i18n-title="husariada.odswiez" aria-label="Odśwież" data-i18n-aria-label="husariada.odswiez">↻</button>
+        </div>
+
+        <div class="hus-panel" data-hus-panel="control">
+          <div id="hus-warning" class="hus-warning" hidden></div>
+
+          <div id="hus-start-form" class="hus-start" hidden>
+            <h3 class="hus-heading" data-i18n="husariada.nowy_event">🚀 Nowy event</h3>
+            <div class="tasks-form-grid">
+              <div class="form-group">
+                <label class="form-label" for="hus-start-quiz" data-i18n="husariada.pole_quiz">Quiz</label>
+                <select id="hus-start-quiz" class="form-select"></select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="hus-start-count" data-i18n="husariada.pole_liczba_pytan">Liczba pytań (puste = wszystkie)</label>
+                <input id="hus-start-count" type="number" class="form-input" min="1" max="100" step="1" inputmode="numeric">
+              </div>
+            </div>
+            <label class="hus-checkbox"><input id="hus-start-shuffle" type="checkbox"> <span data-i18n="husariada.losowa_kolejnosc">Losowa kolejność pytań</span></label>
+            <div class="hus-actions">
+              <button id="hus-start-btn" class="btn-primary" type="button" data-i18n="husariada.rozpocznij">🚀 Rozpocznij Husariadę</button>
+            </div>
+          </div>
+
+          <div id="hus-live" class="hus-live" hidden>
+            <div class="hus-live-head">
+              <div>
+                <span class="tasks-dialog-kicker" data-i18n="husariada.trwa_event">Trwa event</span>
+                <h3 id="hus-live-title" class="hus-heading"></h3>
+                <span id="hus-live-phase" class="hus-badge"></span>
+              </div>
+              <div class="hus-actions">
+                <button id="hus-pause-btn" class="btn-secondary" type="button" data-hus-command="pause" data-i18n="husariada.pauza">⏸️ Pauza</button>
+                <button id="hus-resume-btn" class="btn-secondary" type="button" data-hus-command="resume" data-i18n="husariada.wznow">▶️ Wznów</button>
+                <button id="hus-skip-btn" class="btn-secondary" type="button" data-hus-command="skip" data-i18n="husariada.pomin">⏭️ Pomiń</button>
+                <button id="hus-stop-btn" class="btn-danger" type="button" data-hus-command="stop" data-i18n="husariada.zakoncz">⏹️ Zakończ</button>
+              </div>
+            </div>
+            <div class="hus-progress" aria-hidden="true"><div id="hus-progress-bar" class="hus-progress-bar"></div></div>
+            <p id="hus-live-answers" class="preview-note"></p>
+            <h4 class="hus-subheading" data-i18n="husariada.ranking_na_zywo">Ranking na żywo</h4>
+            <ol id="hus-live-standings" class="hus-standings"></ol>
+          </div>
+
+          <div id="hus-commands" class="hus-commands"></div>
+        </div>
+
+        <div class="hus-panel" data-hus-panel="quizzes" hidden>
+          <div class="hus-quiz-layout">
+            <aside class="hus-quiz-list-col">
+              <button id="hus-new-quiz-btn" class="btn-primary hus-block-btn" type="button" data-i18n="husariada.nowy_quiz">➕ Nowy quiz</button>
+              <div id="hus-quiz-list" class="hus-quiz-list"></div>
+            </aside>
+            <div id="hus-quiz-editor" class="hus-quiz-editor"></div>
+          </div>
+        </div>
+
+        <div class="hus-panel" data-hus-panel="settings" hidden>
+          <form id="hus-settings-form" class="hus-settings" novalidate>
+            <div class="tasks-form-grid">
+              <div class="form-group">
+                <label class="form-label" for="hus-set-timeLimitSec" data-i18n="husariada.ust_czas">Czas na odpowiedź (s)</label>
+                <input id="hus-set-timeLimitSec" name="timeLimitSec" type="number" class="form-input" step="1" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="hus-set-maxPoints" data-i18n="husariada.ust_punkty">Punkty za najszybszą poprawną odpowiedź</label>
+                <input id="hus-set-maxPoints" name="maxPoints" type="number" class="form-input" step="1" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="hus-set-leaderboardEvery" data-i18n="husariada.ust_ranking_co">TOP 3 co ile pytań (0 = wyłączone)</label>
+                <input id="hus-set-leaderboardEvery" name="leaderboardEvery" type="number" class="form-input" step="1" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="hus-set-leaderboardSeconds" data-i18n="husariada.ust_ranking_czas">Czas wyświetlania TOP 3 (s)</label>
+                <input id="hus-set-leaderboardSeconds" name="leaderboardSeconds" type="number" class="form-input" step="1" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="hus-set-revealSeconds" data-i18n="husariada.ust_odsloniecie">Czas pokazania poprawnej odpowiedzi (s)</label>
+                <input id="hus-set-revealSeconds" name="revealSeconds" type="number" class="form-input" step="1" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="hus-set-introSeconds" data-i18n="husariada.ust_intro">Odliczanie przed startem (s)</label>
+                <input id="hus-set-introSeconds" name="introSeconds" type="number" class="form-input" step="1" required>
+              </div>
+            </div>
+            <p class="preview-note" data-i18n="husariada.ust_opis_punktacji">Punktacja jak w Kahoot: natychmiastowa poprawna odpowiedź daje pełną pulę, w ostatniej chwili połowę. Błędna lub brak odpowiedzi = 0. Zmiany obowiązują od następnego eventu.</p>
+            <div class="hus-actions">
+              <button id="hus-settings-save" class="btn-primary" type="submit" data-i18n="husariada.zapisz">Zapisz</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="hus-panel" data-hus-panel="history" hidden>
+          <div id="hus-history-list" class="hus-history"></div>
+        </div>
+      </div>
+    </div>
+
     <footer class="dashboard-footer">
       &copy; 2026 HusariaBot - created by <a href="https://github.com/Kscepersky" target="_blank" rel="noopener" class="dashboard-footer-link">@Kscepersky</a>
     </footer>
@@ -1473,6 +1610,46 @@
 </main>
 
 <div id="toast-container"></div>
+
+<dialog id="hus-question-dialog" class="tasks-dialog" aria-labelledby="hus-question-heading">
+  <form id="hus-question-form" class="tasks-dialog-body" novalidate>
+    <div class="tasks-dialog-head">
+      <h3 id="hus-question-heading" data-i18n="husariada.nowe_pytanie">Nowe pytanie</h3>
+      <button type="button" class="tasks-dialog-close" data-close-dialog="hus-question-dialog" aria-label="Zamknij" data-i18n-aria-label="husariada.zamknij">&times;</button>
+    </div>
+    <div class="form-group">
+      <div class="tasks-label-row">
+        <label class="form-label" for="hus-q-prompt" data-i18n="husariada.pole_pytanie">Treść pytania</label>
+        <span class="tasks-counter" id="hus-q-prompt-counter">0/300</span>
+      </div>
+      <textarea id="hus-q-prompt" class="form-textarea" rows="3" maxlength="300" required></textarea>
+    </div>
+    <div class="form-group">
+      <span class="form-label" data-i18n="husariada.pole_odpowiedzi">Odpowiedzi — zaznacz poprawną</span>
+      <div class="hus-answer-grid">
+        <label class="hus-answer is-red"><input type="radio" name="hus-q-correct" value="0" checked><span class="hus-answer-tag">🟥 A</span><input type="text" class="form-input" data-hus-answer="0" maxlength="80" required></label>
+        <label class="hus-answer is-blue"><input type="radio" name="hus-q-correct" value="1"><span class="hus-answer-tag">🟦 B</span><input type="text" class="form-input" data-hus-answer="1" maxlength="80" required></label>
+        <label class="hus-answer is-yellow"><input type="radio" name="hus-q-correct" value="2"><span class="hus-answer-tag">🟨 C</span><input type="text" class="form-input" data-hus-answer="2" maxlength="80" required></label>
+        <label class="hus-answer is-green"><input type="radio" name="hus-q-correct" value="3"><span class="hus-answer-tag">🟩 D</span><input type="text" class="form-input" data-hus-answer="3" maxlength="80" required></label>
+      </div>
+    </div>
+    <div class="form-group">
+      <span class="form-label" data-i18n="husariada.pole_obrazek">Obrazek (opcjonalnie)</span>
+      <div class="hus-image-row">
+        <img id="hus-q-image-preview" class="hus-image-preview" alt="" hidden>
+        <div class="hus-actions">
+          <label class="btn-secondary hus-file-btn"><span data-i18n="husariada.wybierz_obrazek">🖼️ Wybierz obrazek</span><input id="hus-q-image" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden></label>
+          <button id="hus-q-image-remove" class="btn-secondary" type="button" data-i18n="husariada.usun_obrazek" hidden>Usuń obrazek</button>
+        </div>
+      </div>
+      <p class="preview-note" data-i18n="husariada.obrazek_opis">PNG, JPG, GIF lub WebP do 8 MB. Obrazek pojawi się pod pytaniem na Discordzie.</p>
+    </div>
+    <div class="tasks-dialog-actions">
+      <button type="button" class="btn-secondary" data-close-dialog="hus-question-dialog" data-i18n="husariada.anuluj">Anuluj</button>
+      <button type="submit" class="btn-primary" id="hus-q-submit" data-i18n="husariada.zapisz">Zapisz</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog id="task-form-dialog" class="tasks-dialog" aria-labelledby="task-form-heading">
   <form id="task-form" class="tasks-dialog-body" novalidate>
@@ -1592,5 +1769,6 @@
 <script src="/public/js/app.js"></script>
 <script src="/public/js/permissions.js"></script>
 <script src="/public/js/tasks.js"></script>
+<script src="/public/js/husariada.js"></script>
 </body>
 </html>

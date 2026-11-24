@@ -41,6 +41,7 @@ import { imagesRouter, isClientValidationError } from './api.images.js';
 import { statsRouter } from './api.stats.js';
 import { permissionsRouter } from './api.permissions.js';
 import { tasksRouter } from './api.tasks.js';
+import { husariadaRouter } from './api.husariada.js';
 import { publishDashboardPost } from '../publish-flow.js';
 import {
     normalizeTrimmedString,
@@ -1231,3 +1232,4 @@ apiRouter.use(imagesRouter);
 apiRouter.use(economyRouter);
 apiRouter.use(permissionsRouter);
 apiRouter.use(tasksRouter);
+apiRouter.use(husariadaRouter);

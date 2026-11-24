@@ -42,7 +42,7 @@ const REQUIRED_ENV = [
 
 const DASHBOARD_BODY_LIMIT = '32mb';
 const DEFAULT_BODY_LIMIT = '256kb';
-const LARGE_BODY_PATHS = ['/api/images/upload', '/api/embed', '/api/scheduled', '/api/economy/import-csv', '/api/tasks'];
+const LARGE_BODY_PATHS = ['/api/images/upload', '/api/embed', '/api/scheduled', '/api/economy/import-csv', '/api/tasks', '/api/husariada'];
 const DEFAULT_SESSION_TTL_HOURS = 24;
 const dashboardLogger = createLogger('dashboard:server');
 

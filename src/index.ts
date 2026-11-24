@@ -79,12 +79,14 @@ import {
     handleVerificationMemberJoin,
     handleVerificationMemberLeave,
 } from './verification/flow.js';
+import { handleHusariadaButton, startHusariadaRuntime } from './husariada/runtime.js';
 // Załaduj zmienne środowiskowe z .env
 config();
 
 const BOT_HEARTBEAT_INTERVAL_MS = 60_000;
 let stopEconomyVoiceTicker: (() => void) | null = null;
 let stopTimeoutExpiryTicker: (() => void) | null = null;
+let stopHusariadaRuntime: (() => void) | null = null;
 const botLogger = createLogger('bot:runtime');
 
 function isBotDevLogsEnabled(): boolean {
@@ -195,6 +197,9 @@ client.on('clientReady', () => {
     stopTimeoutExpiryTicker?.();
     stopTimeoutExpiryTicker = startTimeoutExpiryTicker(client);
 
+    stopHusariadaRuntime?.();
+    stopHusariadaRuntime = startHusariadaRuntime(client);
+
     const nowTimestamp = Date.now();
     for (const guild of client.guilds.cache.values()) {
         void recordMemberSnapshot(guild.id, guild.memberCount, nowTimestamp).catch((error) => {
@@ -290,6 +295,11 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton()) {
         try {
+            // Pierwsze w kolejce: przy quizie licza sie milisekundy.
+            if (await handleHusariadaButton(interaction)) {
+                return;
+            }
+
             if (await handleEconomyResetButton(interaction)) {
                 return;
             }

@@ -3068,3 +3068,164 @@ input[name="colorName"] { display: none }
 .char-counter.is-warning .char-counter-value { color: #fee75c }
 .char-counter.is-over .char-counter-value,
 .char-counter.is-over .char-counter-hint { color: #ff7a7d; font-weight: 600 }
+
+/* ─── Husariada ──────────────────────────────────────────────────────── */
+.hus-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.hus-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+}
+.hus-status-label { color: var(--text-muted); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase }
+.hus-status-value { font-size: 20px; font-weight: 700 }
+.hus-status-value.is-ok { color: var(--green) }
+.hus-status-value.is-bad { color: #ff7a7d }
+
+.hus-panel { padding-top: 16px }
+.hus-panel[hidden] { display: none !important }
+.hus-heading { font-size: 18px; margin: 4px 0 8px }
+.hus-subheading { margin: 18px 0 8px; color: var(--text-secondary); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase }
+.hus-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+.hus-empty { color: var(--text-muted); padding: 12px 0 }
+.hus-block-btn { width: 100% }
+
+.hus-warning {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-left: 3px solid #fee75c;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: rgba(254, 231, 92, 0.08);
+  color: #fee75c;
+}
+.hus-checkbox { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 16px; cursor: pointer }
+
+.hus-live-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; margin-bottom: 14px }
+.hus-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.hus-badge.is-running { background: rgba(220, 20, 60, 0.18); color: #ff8fa5 }
+.hus-badge.is-paused { background: rgba(254, 231, 92, 0.14); color: #fee75c }
+.hus-badge.is-finished { background: rgba(87, 242, 135, 0.14); color: var(--green) }
+.hus-badge.is-pending { background: rgba(88, 101, 242, 0.18); color: #a5b0ff }
+
+.hus-progress { height: 8px; border-radius: 999px; background: var(--bg-card); overflow: hidden; margin-bottom: 8px }
+.hus-progress-bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--gold)); transition: width 0.4s ease }
+
+.hus-standings { list-style: none; display: flex; flex-direction: column; gap: 6px }
+.hus-standing {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.hus-standing-place { font-weight: 700; text-align: center }
+.hus-standing-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.hus-standing-meta { color: var(--text-muted); font-size: 12px }
+.hus-standing-points { color: var(--gold) }
+
+.hus-commands { margin-top: 12px }
+.hus-command-error { color: #ff7a7d; font-size: 13px }
+
+.hus-quiz-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px }
+.hus-quiz-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px }
+.hus-quiz-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition);
+}
+.hus-quiz-item span { color: var(--text-muted); font-size: 12px }
+.hus-quiz-item:hover { border-color: var(--border-hover) }
+.hus-quiz-item.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow) }
+.hus-quiz-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px }
+
+.hus-question-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 16px;
+  margin-bottom: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
+}
+.hus-question-body { display: flex; flex-direction: column; gap: 6px; min-width: 0 }
+.hus-question-prompt { font-size: 15px; overflow-wrap: anywhere }
+.hus-question-answers { list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; color: var(--text-secondary) }
+.hus-question-answers li { overflow-wrap: anywhere }
+.hus-question-answers .is-correct { color: var(--green); font-weight: 600 }
+.hus-question-thumb { width: 120px; height: 80px; object-fit: cover; border-radius: var(--radius-sm) }
+.hus-question-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end }
+
+.hus-answer-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px }
+.hus-answer {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.hus-answer.is-red { border-left-color: #e21b3c }
+.hus-answer.is-blue { border-left-color: #1368ce }
+.hus-answer.is-yellow { border-left-color: #d89e00 }
+.hus-answer.is-green { border-left-color: #26890c }
+.hus-answer:has(input[type="radio"]:checked) { background: rgba(87, 242, 135, 0.08); border-color: var(--green) }
+.hus-answer-tag { font-weight: 700; white-space: nowrap }
+.hus-image-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px }
+.hus-image-preview { max-width: 220px; max-height: 140px; border-radius: var(--radius-sm); object-fit: contain; background: var(--bg-secondary) }
+.hus-file-btn { cursor: pointer }
+
+.hus-history { display: flex; flex-direction: column; gap: 8px }
+.hus-history-entry .hus-standings { margin: 8px 0 4px 12px }
+.hus-history-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.hus-history-item:hover { border-color: var(--border-hover) }
+
+@media (max-width: 800px) {
+  .hus-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) }
+  .hus-quiz-layout { grid-template-columns: 1fr }
+  .hus-answer-grid, .hus-question-answers { grid-template-columns: 1fr }
+  .hus-question-card { grid-template-columns: 1fr }
+}

@@ -636,6 +636,10 @@ function switchSection(section) {
     void window.loadTasksSection()
   }
 
+  if (section === 'husariada' && typeof window.loadHusariadaSection === 'function') {
+    void window.loadHusariadaSection()
+  }
+
   if (section === 'server-stats') {
     initStatsSectionIfNeeded()
     void loadActiveStatsTab()

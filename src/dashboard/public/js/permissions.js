@@ -19,6 +19,7 @@
     { titleKey: 'permissions.grupa_ekonomia', sections: ['economy-leaderboard', 'shop'] },
     { titleKey: 'permissions.grupa_moderacja', sections: ['timeouts-system', 'ticket-history'] },
     { titleKey: 'permissions.grupa_statystyki', sections: ['server-stats'] },
+    { titleKey: 'permissions.grupa_wydarzenia', sections: ['husariada'] },
   ]
 
   var AUDIT_ICONS = { grant: '➕', update: '✏️', revoke: '⛔', setting: '⚙️' }

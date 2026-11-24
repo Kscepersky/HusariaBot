@@ -21,6 +21,7 @@ export const DASHBOARD_SECTIONS = [
     'ticket-history',
     'image-library',
     'server-stats',
+    'husariada',
     'system-logs',
     'session-activity',
     'permissions',
