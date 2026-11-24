@@ -73,6 +73,7 @@ import { handleShopButton } from './shop/shop-buttons.js';
 import { createLogger } from './utils/logger.js';
 import { setBotClient } from './bot-client.js';
 import { getOwnerId } from './permissions/access.js';
+import { handleHoneypotMessage } from './moderation/honeypot.js';
 // Załaduj zmienne środowiskowe z .env
 config();
 
@@ -368,6 +369,18 @@ client.on('guildMemberRemove', async (member) => {
 });
 
 client.on('messageCreate', async (message) => {
+    try {
+        if (await handleHoneypotMessage(message)) {
+            return;
+        }
+    } catch (error) {
+        botLogger.error('BOT_HONEYPOT_HANDLER_FAILED', 'Blad obslugi kanalu-pulapki.', {
+            guildId: message.guildId ?? undefined,
+            actorUserId: message.author.id,
+        }, error);
+        return;
+    }
+
     try {
         await handleEconomyMessageCreate(message);
     } catch (error) {

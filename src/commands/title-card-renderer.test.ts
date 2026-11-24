@@ -37,4 +37,17 @@ describe('renderTitleCard', () => {
             expect(pngSize(output)).toEqual({ width: TITLE_CARD_WIDTH, height: TITLE_CARD_HEIGHT });
         }
     });
+    it('wariant ostrzegawczy z nadtytulem i podtytulem rozni sie od samego tytulu', async () => {
+        const plain = await renderTitleCard({ title: 'KANAŁ ANTY-BOT' });
+        const warning = await renderTitleCard({
+            kicker: 'UWAGA!',
+            title: 'KANAŁ ANTY-BOT',
+            subtitle: 'Nie pisz tutaj — każda wiadomość = automatyczny ban',
+            variant: 'warning',
+        });
+
+        expect(warning.subarray(0, 8)).toEqual(PNG_SIGNATURE);
+        expect(pngSize(warning)).toEqual({ width: TITLE_CARD_WIDTH, height: TITLE_CARD_HEIGHT });
+        expect(warning.equals(plain)).toBe(false);
+    });
 });

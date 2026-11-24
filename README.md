@@ -86,6 +86,12 @@ Light-hearted commands, many of them rendering a Canvas image card in the same s
 - Monotonic ticket counter with persisted state across restarts.
 - Full ticket history stored in a JSON file.
 
+### Honeypot channel
+
+- A trap channel (`HONEYPOT_CHANNEL_ID`) that no real member should write in. Anyone who posts there is banned immediately and their messages from the last 24 hours are deleted server-wide — catches spam bots and hijacked accounts.
+- The owner, the 4 admin roles and anyone with the Administrator permission are never banned (their messages stay).
+- If the bot can't ban (permissions / role hierarchy), it deletes the message and logs an error.
+
 ### Timeouts (Mute)
 
 - `/mute` command with configurable duration (minutes / hours / days) and a mandatory reason.
@@ -213,6 +219,13 @@ DASHBOARD_TASK_WRITE_RATE_LIMIT_MAX=60           # Per-user cap on task create/e
 
 # ── Tasks ─────────────────────────────────────────────────────────────────────
 TASKS_CHANNEL_ID=          # Channel for the live task board (optional — board is off when empty). Keep it staff-only!
+
+# ── Moderation & Verification ─────────────────────────────────────────────────
+HONEYPOT_CHANNEL_ID=       # Trap channel — any non-staff message = ban + last 24h of messages deleted (optional)
+ADMIN_ROLE_1_ID=           # Up to 4 admin roles: pinged in verification tickets, allowed to approve/reject,
+ADMIN_ROLE_2_ID=           # and never banned by the honeypot
+ADMIN_ROLE_3_ID=
+ADMIN_ROLE_4_ID=
 
 # ── External Integrations ─────────────────────────────────────────────────────
 PANDASCORE_API_KEY=        # PandaScore key (optional — powers the G2 match browser)
