@@ -214,6 +214,7 @@ LEVEL_UP_ANNOUNCE_CHANNEL_ID=  # Text channel for level-up announcements (option
 DISCORD_CLIENT_SECRET=
 DISCORD_REDIRECT_URI=http://localhost:3000/auth/discord/callback
 DASHBOARD_PORT=3000
+DASHBOARD_HOST=127.0.0.1       # Bind address — keep loopback and expose the dashboard only via a TLS reverse proxy
 DASHBOARD_BASE_URL=http://localhost:3000
 DASHBOARD_SESSION_SECRET=      # Min 32 random chars — generate: openssl rand -hex 32
 DASHBOARD_SESSION_TTL_HOURS=24
@@ -248,6 +249,7 @@ ADMIN_ROLE_4_ID=
 HUSARIADA_CHANNEL_ID=      # #husariada channel (optional — the quiz is off when empty)
 HUSARIADA_DB_PATH=         # Default: data/husariada.sqlite (shared by bot and dashboard)
 HUSARIADA_IMAGES_DIR=      # Default: data/husariada-images (question images)
+HUSARIADA_IMAGES_MAX_MB=   # Total storage cap for question images (default 1024)
 
 # ── External Integrations ─────────────────────────────────────────────────────
 PANDASCORE_API_KEY=        # PandaScore key (optional — powers the G2 match browser)

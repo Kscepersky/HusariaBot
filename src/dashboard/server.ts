@@ -42,6 +42,7 @@ const REQUIRED_ENV = [
 
 const DASHBOARD_BODY_LIMIT = '32mb';
 const DEFAULT_BODY_LIMIT = '256kb';
+const DEFAULT_DASHBOARD_HOST = '127.0.0.1';
 const LARGE_BODY_PATHS = ['/api/images/upload', '/api/embed', '/api/scheduled', '/api/economy/import-csv', '/api/tasks', '/api/husariada'];
 const DEFAULT_SESSION_TTL_HOURS = 24;
 const dashboardLogger = createLogger('dashboard:server');
@@ -145,6 +146,7 @@ export function createDashboardApp() {
 
     const app = express();
     app.set('trust proxy', 1);
+    app.disable('x-powered-by');
 
     // Security headers
     app.use((_req, res, next) => {
@@ -288,10 +290,13 @@ export function startDashboard(): void {
 
     startTaskBoard();
 
-    const server = app.listen(port, () => {
+    // Domyslnie tylko loopback: z zewnatrz dashboard ma byc osiagalny wylacznie przez reverse proxy (TLS).
+    const host = process.env.DASHBOARD_HOST?.trim() || DEFAULT_DASHBOARD_HOST;
+    const server = app.listen(port, host, () => {
         dashboardLogger.info('DASHBOARD_STARTED', 'Dashboard uruchomiony.', {
             port,
-            url: `http://localhost:${port}`,
+            host,
+            url: `http://${host}:${port}`,
         });
         if (isDevLogsEnabled()) {
             dashboardLogger.debug('DASHBOARD_DEV_FLAGS', 'Tryb developerski dashboardu.', {
