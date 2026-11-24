@@ -74,6 +74,11 @@ import { createLogger } from './utils/logger.js';
 import { setBotClient } from './bot-client.js';
 import { getOwnerId } from './permissions/access.js';
 import { handleHoneypotMessage } from './moderation/honeypot.js';
+import {
+    handleVerificationButton,
+    handleVerificationMemberJoin,
+    handleVerificationMemberLeave,
+} from './verification/flow.js';
 // Załaduj zmienne środowiskowe z .env
 config();
 
@@ -309,6 +314,10 @@ client.on('interactionCreate', async (interaction) => {
                 return;
             }
 
+            if (await handleVerificationButton(interaction)) {
+                return;
+            }
+
             if (interaction.customId === TICKETS_OPEN_BUTTON_ID) {
                 await handleOpenTicketButton(interaction);
             } else if (interaction.customId.startsWith(`${TICKET_CLOSE_USER_DM_BUTTON_PREFIX}:`)) {
@@ -358,6 +367,12 @@ client.on('guildMemberAdd', async (member) => {
     } catch (error) {
         botLogger.error('BOT_MEMBER_JOIN_FAILED', 'Nie udalo sie zapisac dolaczenia czlonka.', { guildId: member.guild.id, userId: member.id }, error);
     }
+
+    try {
+        await handleVerificationMemberJoin(member);
+    } catch (error) {
+        botLogger.error('BOT_VERIFICATION_JOIN_FAILED', 'Nie udalo sie uruchomic weryfikacji nowego konta.', { guildId: member.guild.id, userId: member.id }, error);
+    }
 });
 
 client.on('guildMemberRemove', async (member) => {
@@ -365,6 +380,12 @@ client.on('guildMemberRemove', async (member) => {
         await recordMemberLeave(member.guild.id, member.guild.memberCount, Date.now());
     } catch (error) {
         botLogger.error('BOT_MEMBER_LEAVE_FAILED', 'Nie udalo sie zapisac odejscia czlonka.', { guildId: member.guild.id, userId: member.id }, error);
+    }
+
+    try {
+        await handleVerificationMemberLeave(member);
+    } catch (error) {
+        botLogger.error('BOT_VERIFICATION_LEAVE_FAILED', 'Nie udalo sie posprzatac ticketu weryfikacji.', { guildId: member.guild.id, userId: member.id }, error);
     }
 });
 

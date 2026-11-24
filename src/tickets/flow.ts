@@ -180,7 +180,7 @@ async function collectTicketTranscriptMessages(channel: TextChannel): Promise<Ti
     });
 }
 
-async function archiveTicketClosure(params: {
+export async function archiveTicketClosure(params: {
     channel: TextChannel;
     ownerId: string | null;
     closeType: 'user' | 'admin';

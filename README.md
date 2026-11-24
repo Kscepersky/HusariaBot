@@ -92,6 +92,13 @@ Light-hearted commands, many of them rendering a Canvas image card in the same s
 - The owner, the 4 admin roles and anyone with the Administrator permission are never banned (their messages stay).
 - If the bot can't ban (permissions / role hierarchy), it deletes the message and logs an error.
 
+### New account verification
+
+- When an account younger than `VERIFICATION_MIN_ACCOUNT_AGE_DAYS` (default 14) joins, the bot gives it `VERIFICATION_ROLE_ID` and opens a private `weryfikacja-<name>` channel in the support category.
+- The channel shows an embed with the avatar and account stats (creation date, age, join date, badges, avatar, risk level) and pings the 4 admin roles.
+- **Verify** removes the role; **Reject and ban** (with confirmation) bans the user. Both archive the transcript to ticket history and close the channel. Only the admin roles, the owner or Administrators can decide — never the person being verified.
+- If the person leaves before a decision, the channel is archived and removed.
+
 ### Timeouts (Mute)
 
 - `/mute` command with configurable duration (minutes / hours / days) and a mandatory reason.
@@ -222,6 +229,8 @@ TASKS_CHANNEL_ID=          # Channel for the live task board (optional — board
 
 # ── Moderation & Verification ─────────────────────────────────────────────────
 HONEYPOT_CHANNEL_ID=       # Trap channel — any non-staff message = ban + last 24h of messages deleted (optional)
+VERIFICATION_ROLE_ID=      # Role given to accounts younger than the threshold; restrict channels for it in Discord (optional — off when empty)
+VERIFICATION_MIN_ACCOUNT_AGE_DAYS=14  # Accounts younger than this go through verification
 ADMIN_ROLE_1_ID=           # Up to 4 admin roles: pinged in verification tickets, allowed to approve/reject,
 ADMIN_ROLE_2_ID=           # and never banned by the honeypot
 ADMIN_ROLE_3_ID=
